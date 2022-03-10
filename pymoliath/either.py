@@ -365,6 +365,19 @@ class Try(Generic[TypeSource], abc.ABC):
         else:
             return success_function(self._success_value)
 
+    def to_either(self: Try[TypeSource]) -> Either[Exception, TypeSource]:
+        """Try Monad specific function to return an Either Monad.
+
+        Returns
+        -------
+        either: Either[Exception, TypeSource]
+            Returns the Try Monad as Either Monad
+        """
+        if self._is_failure:
+          return Left(self._failure_value)
+        else:
+          return Right(self._success_value)
+
     def is_success(self: Try[TypeSource]) -> bool:
         """Try monad is success function
 

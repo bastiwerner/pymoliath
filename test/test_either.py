@@ -251,6 +251,14 @@ class TestEitherMonad(unittest.TestCase):
          .bind(lambda x: Left('other'))
          .either(lambda x: self.assertEqual('left', x), lambda x: x))
 
+    def test_try_monad_to_either_monad(self):
+        success = Success(10)
+        failure = Failure(Exception("error"))
+
+        self.assertEqual(Right(10), success.to_either())
+        self.assertEqual(Left(Exception("error")), failure.to_either())
+
+
     def test_try_either_monad(self):
         def divide(dividen: int, divisor: int):
             return dividen / divisor
