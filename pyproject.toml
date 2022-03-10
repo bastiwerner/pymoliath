@@ -1,11 +1,11 @@
 [tool.poetry]
 name = "pymoliath"
-version = "0.1.0"
+version = "1.0.0"
 description = ""
-authors = ["Bastian Werner <bastian.werner@aptone.io>"]
+authors = ["Bastian Werner <bastian-werner@outlook.com>"]
 
 [tool.poetry.dependencies]
-python = "~3.7.1"
+python = "^3.7"
 
 [tool.poetry.dev-dependencies]
 
