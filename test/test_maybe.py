@@ -146,8 +146,8 @@ class TestMaybe(unittest.TestCase):
         just = Just('a')
         nothing = Nothing()
 
-        self.assertEqual(str(just), 'Just a')
-        self.assertEqual(str(nothing), 'Nothing')
+        self.assertEqual(str(just), 'Just(a)')
+        self.assertEqual(str(nothing), 'Nothing()')
 
     def test_maybe_optional_instances(self):
         self.assertTrue(isinstance(Just('a'), Maybe))

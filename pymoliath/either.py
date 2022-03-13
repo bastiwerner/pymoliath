@@ -188,6 +188,29 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         """
         return not self._is_left
 
+    @classmethod
+    def try_except(cls, function: Callable[[], TypeResult], msg: str = '') -> Either[Exception, TypeResult]:
+        """Either Monad method (try_except) which wraps a function that may raise an exception.
+
+        Parameters
+        ----------
+        function: Callable[[], TypeResult]
+            Callable function which may raise an exception
+        msg: str (Optional)
+            Message to be added in case of an exception
+
+        Exception-Output: Exception(f'msg: {exception}')
+
+        Returns
+        -------
+        either: Either[Exception, TypeResult]
+            Returns an Either Monad which contains either the function result or an Exception with a message added.
+        """
+        try:
+            return Right(function())
+        except Exception as e:
+            return Left(f'{msg}: {e}')
+
     @abc.abstractmethod
     def __str__(self: Either[TypeLeft, TypeRight]) -> str:
         pass
@@ -207,7 +230,7 @@ class Right(Either[Any, TypeRight]):
         self._is_left = False
 
     def __str__(self: Right[TypeRight]) -> str:
-        return f'Right {self._right_value}'
+        return f'Right({self._right_value})'
 
 
 class Left(Either[TypeLeft, Any]):
@@ -218,7 +241,7 @@ class Left(Either[TypeLeft, Any]):
         self._is_left = True
 
     def __str__(self: Left[TypeLeft]) -> str:
-        return f'Left {self._left_value}'
+        return f'Left({self._left_value})'
 
 
 TypeSource = TypeVar("TypeSource")
@@ -374,9 +397,9 @@ class Try(Generic[TypeSource], abc.ABC):
             Returns the Try Monad as Either Monad
         """
         if self._is_failure:
-          return Left(self._failure_value)
+            return Left(self._failure_value)
         else:
-          return Right(self._success_value)
+            return Right(self._success_value)
 
     def is_success(self: Try[TypeSource]) -> bool:
         """Try monad is success function
@@ -417,7 +440,7 @@ class Success(Try[TypeSource]):
         self._is_failure = False
 
     def __str__(self: Success[TypeSource]) -> str:
-        return f'Success {self._success_value}'
+        return f'Success({self._success_value})'
 
 
 class Failure(Try[Any]):
@@ -429,4 +452,4 @@ class Failure(Try[Any]):
         self._is_failure = True
 
     def __str__(self: Failure) -> str:
-        return f'Failure {self._failure_value}'
+        return f'Failure({self._failure_value})'

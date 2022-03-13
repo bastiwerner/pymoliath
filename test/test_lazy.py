@@ -4,7 +4,7 @@ from pymoliath.lazy import LazyMonad
 from pymoliath.util import compose
 
 
-class TestIOMonads(unittest.TestCase):
+class TestLazyMonad(unittest.TestCase):
     """
     Monad operations:
     ≡       Identical to
@@ -123,7 +123,7 @@ class TestIOMonads(unittest.TestCase):
 
         lazy = LazyMonad(test)
 
-        self.assertEqual(str(lazy), f'LazyMonad {str(test)}')
+        self.assertEqual(str(lazy), f'LazyMonad({str(test)})')
 
     def test_io_result_function(self):
         lazy = LazyMonad(42)

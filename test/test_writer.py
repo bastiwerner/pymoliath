@@ -119,7 +119,7 @@ class TestWriterMonad(unittest.TestCase):
     def test_writer_monad_representation(self):
         writer = Writer(10, 'hi')
 
-        self.assertEqual(str(writer), f"Writer (10, 'hi')")
+        self.assertEqual(str(writer), f"Writer((10, 'hi'))")
 
     def test_writer_examples(self):
         map_example = Writer(1, "map Example").map(lambda v: v + 1)

@@ -126,7 +126,7 @@ class TestReader(unittest.TestCase):
 
         reader = Reader(test)
 
-        self.assertEqual(str(reader), f'Reader {str(test)}')
+        self.assertEqual(str(reader), f'Reader({str(test)})')
 
         calculate_length = Reader.ask().map(lambda v: len(v))
         calculate_modified_length = calculate_length.local(lambda env: f'Prefix {env}')

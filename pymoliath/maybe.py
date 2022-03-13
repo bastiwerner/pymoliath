@@ -194,7 +194,7 @@ class Just(Maybe[TypeSource]):
         self._is_nothing = False
 
     def __str__(self: Just[TypeSource]) -> str:
-        return f"Just {self._value}"
+        return f"Just({self._value})"
 
 
 class Nothing(Maybe[Any]):
@@ -206,4 +206,4 @@ class Nothing(Maybe[Any]):
         self._is_nothing = True
 
     def __str__(self: Nothing) -> str:
-        return "Nothing"
+        return "Nothing()"

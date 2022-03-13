@@ -152,4 +152,4 @@ class TestState(unittest.TestCase):
 
         state_value = State(test_function)
 
-        self.assertEqual(str(state_value), f'State {str(test_function)}')
+        self.assertEqual(str(state_value), f'State({str(test_function)})')
