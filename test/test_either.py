@@ -224,7 +224,7 @@ class TestEitherMonad(unittest.TestCase):
         unsafe_result: Either[Exception, int] = Either.try_except(unsafe_function, 'Failed during operation: ')
         safe_result: Either[Exception, int] = Either.try_except(safe_function)
 
-        self.assertEqual(Left(f'Failed during operation: {"error"}'), unsafe_result)
+        self.assertEqual(Left(Exception(f'Failed during operation: error')), unsafe_result)
         self.assertEqual(Right(10), safe_result)
 
     def test_either_monad_or_else(self):

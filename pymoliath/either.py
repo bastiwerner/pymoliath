@@ -209,7 +209,7 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         try:
             return Right(function())
         except Exception as e:
-            return Left(f'{msg}{e}')
+            return Left(Exception(f'{msg}{e}'))
 
     @abc.abstractmethod
     def __str__(self: Either[TypeLeft, TypeRight]) -> str:
