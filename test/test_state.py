@@ -147,6 +147,8 @@ class TestState(unittest.TestCase):
              )
         self.assertEqual(('tintin', 'hello, adit!'), x.run('adit'))
 
+        self.assertEqual(State(lambda state: ('new state', ())).run(Any), State.put('new state').run(Any))
+
         def test_function(state: Any):
             return state, 'a'
 

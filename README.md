@@ -1,10 +1,11 @@
 # Pymoliath
+
 Python Monads library for Functional Programming
 
 # About
 
-Pymoliath is a python library containing Monads for monadic functional programming.
-This library is inspired by Haskell as well as existing Monad implementations in python.
+Pymoliath is a python library containing Monads for monadic functional programming. This library is inspired by Haskell
+as well as existing Monad implementations in python.
 
 * [Pymonad](https://github.com/jasondelaat/pymonad) by jasondelaat
 * [OSlash](https://github.com/dbrattli/OSlash) by dbrattli
@@ -12,17 +13,19 @@ This library is inspired by Haskell as well as existing Monad implementations in
 
 # Getting started
 
-The pymoliath repository uses [poetry](https://python-poetry.org/) as dependency management tool.
-The project can be installed using the following command.
+The pymoliath repository uses [poetry](https://python-poetry.org/) as dependency management tool. The project can be
+installed using the following command.
+
 ```
 poetry install
 ```
+
 > Poetry will create a virtual environment and install all dependencies.
 > Configuration: `poetry config virtualenvs.create false --local`
 
 # Test
 
-Run pymoliath tests using poetry run scripts. This command will execute all unittest in the virtual environment. 
+Run pymoliath tests using poetry run scripts. This command will execute all unittest in the virtual environment.
 
 ```
 poetry run test
@@ -34,33 +37,60 @@ Every Monad implementation of Pymoliath has the typical haskell Monad interface.
 
 * `map` (>>): Monad(a).map(f a -> b) => Monad(b)
 * `bind` (>>=): Monad(a).bind(f a -> Monad(b)) => Monad(b)
-* `apply` (<*>): Monad(a).apply(Monad(f a -> b)) => Monad(b) 
-* `apply2` (<*>): Monad(f a -> b).apply2(Monad(a)) => Monad(b) 
-* `run`: (IO, Reader, Writer, State, Lazy) 
+* `apply` (<*>): Monad(a).apply(Monad(f a -> b)) => Monad(b)
+* `apply2` (<*>): Monad(f a -> b).apply2(Monad(a)) => Monad(b)
+* `run`: (IO, Reader, Writer, State, Lazy)
 
 ## Maybe
+
 Haskell : [Data.Maybe](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data-Maybe.html)
+
 ```python
 just: Maybe[int] = Just(10)
 nothing: Maybe[int] = Nothing()
+
+just.is_just()
+just.is_nothing()
+just.or_else(default_value)
+just.maybe(just_function, default_value)
+just.from_optional(value_or_none)
 ```
 
 ## Either
+
 Haskell : [Data.Either](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data-Either.html)
+
 ```python
 right: Either[str, int] = Right(10)
 left: Either[str, int] = Left("error")
+
+right.is_right()
+right.is_left()
+right.left_or_else(value_type_left)
+right.right_or_else(value_type_right)
+right.either(left_function, right_function)
+
+Either.try_except(unsafe_function, message)
 ```
 
 ## Try
+
 Scala : [scala.util.Try](https://www.scala-lang.org/api/2.12.4/scala/util/Try.html)
+
 ```python
 success: Try[int] = Success(10)
 failure: Try[int] = Failure(TypeError("error"))
+
+success.is_success()
+success.is_failure()
+success.either(failure_function, success_function)
+success.to_either()
 ```
 
 ## IO
+
 Haskell [System.IO](https://hackage.haskell.org/package/base-4.16.0.0/docs/System-IO.html#t:IO)
+
 ```python
 # IO[TypeSource]
 print_io: IO[None] = lambda x: IO(lambda: print(x))
@@ -68,39 +98,61 @@ print_io(10).run()
 ```
 
 ## ListMonad
+
 Haskell: [Data.List](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data-List.html)
+
 ```python
 list_monad = ListMonad([10, 20])
+
+list_monad.to_list()
 ```
 
 ## Reader
+
 Haskell: [Control.Monad.Reader](https://hackage.haskell.org/package/mtl-2.2.2/docs/Control-Monad-Reader.html)
+
 ```python
 # Reader[TypeEnvironment, TypeSource]
 reader: Reader[int, str] = Reader(lambda env: str(env))
-reader.run(12) # '12'
+reader.run(12)  # '12'
+reader.local(change_environment_function)
+
+Reader.ask()
 ```
 
 ## Writer
+
 Haskell: [Control.Monad.Writer.Lazy](https://hackage.haskell.org/package/mtl-2.2.2/docs/Control-Monad-Writer-Lazy.html)
+
 ```python
 # Writer[TypeSource, TypeMonoid]
-writer: Writer[int, str] = Writer(10, 'hi')
-writer.run(12) # (12, 'hi')
+writer: Writer[int, str] = Writer(10, 'hello')
+writer.run(12)  # (12, 'hi')
+
+writer.tell(' world')  # Writer(10, 'hi world')
+writer.listen()  # Writer((10, 'hi'), 'hi')
+Writer((10, lambda w: w + " world"), "hello").pass_()  # Writer((10, "hello world")
 ```
 
 ## State
+
 Haskell: [Control.Monad.State.Lazy](https://hackage.haskell.org/package/mtl-2.2.2/docs/Control-Monad-State-Lazy.html)
+
 ```python
 # State[TypeState, TypeSource]
 state: State[str, int] = State(lambda state: (state, 10))
-state.run('hi') # (hi, 10)
+state.run('hi')  # (hi, 10)
+
+State.get()  # State(lambda state: (state, state))
+State.put(new_state)  # State(lambda state: (new_state, ()))
 ```
 
 ## LazyMonad
+
 * [LazyMonad](https://www.philliams.com/monads-in-python/)
+
 ```python
 # State[TypeState, TypeSource]
 lazy: LazyMonad[int] = LazyMonad(lambda: 10)
-state.run() # 10
+lazy.run()  # 10
 ```

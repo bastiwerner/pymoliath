@@ -96,5 +96,8 @@ class ListMonad(List[TypeSource]):
 
         return self.bind(binder)
 
+    def to_list(self: ListMonad[TypeSource]) -> List[TypeSource]:
+        return list(self)
+
     def __str__(self: ListMonad[TypeSource]) -> str:
         return f'ListMonad({super().__str__()})'

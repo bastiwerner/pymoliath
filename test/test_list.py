@@ -1,4 +1,5 @@
 import unittest
+from typing import Tuple
 
 from pymoliath.list import ListMonad
 from pymoliath.util import compose
@@ -114,12 +115,21 @@ class TestMonadList(unittest.TestCase):
     def test_list_monad_representation(self):
         list = ListMonad(['a'])
 
+        self.assertTrue(isinstance(ListMonad(['a']), ListMonad))
         self.assertEqual("ListMonad(['a'])", str(list))
 
-    def test_list_monad_instances(self):
-        self.assertTrue(isinstance(ListMonad(['a']), ListMonad))
+    def test_list_monad_with_nested_list_and_enumeration_returns_correct_result(self):
+        result: ListMonad[Tuple[int, str]] = (ListMonad([['hello', 'world']])
+                                              .bind(lambda d: enumerate(d))
+                                              .map(lambda tuple_result: (tuple_result[0], tuple_result[1])))
 
-        print(ListMonad([['kick', 'snare']]).bind(lambda d: enumerate(d)).map(lambda result: (result[0], result[1])))
+        self.assertEqual([(0, 'hello'), (1, 'world')], result)
+
+    def test_list_monad_to_list_returns_correct_python_list(self):
+        result = ListMonad([1, 2, 3, 4])
+
+        self.assertEqual([1, 2, 3, 4], result.to_list())
+        self.assertEqual('[1, 2, 3, 4]', str(result.to_list()))
 
     def test_monad_list_examples(self):
         list = ListMonad(range(2))

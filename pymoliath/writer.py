@@ -141,7 +141,7 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         value, monoid = self.run()
         return self.__class__(value, monoid + monoid_value)  # type: ignore
 
-    def listen(self: Writer[TypeSource, TypeMonoid]) -> Writer[TypeSource, Tuple[TypeSource, TypeMonoid]]:
+    def listen(self: Writer[TypeSource, TypeMonoid]) -> Writer[Tuple[TypeSource, TypeMonoid], TypeMonoid]:
         """Writer monad specific function listen.
 
         Definition: listen :: Monad(a, m) -> Monad(a, (a, m))
@@ -150,7 +150,7 @@ class Writer(Generic[TypeSource, TypeMonoid]):
 
         Returns
         -------
-        writer: Writer[TypeSource, Tuple[TypeSource, TypeMonoid]]
+        writer: Writer[Tuple[TypeSource, TypeMonoid], TypeMonoid]
         """
         return self.map(lambda _: self.run())  # type: ignore
 
