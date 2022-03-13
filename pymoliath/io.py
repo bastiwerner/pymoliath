@@ -123,7 +123,7 @@ class IO(Generic[TypeSource]):
         return self._value()
 
     def __str__(self) -> str:
-        return f'IO {self._value}'
+        return f'IO({self._value})'
 
     def __repr__(self) -> str:
         return str(self)

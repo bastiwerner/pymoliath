@@ -175,7 +175,7 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         return self._value
 
     def __str__(self) -> str:
-        return f'Writer {self._value}'
+        return f'Writer({self._value})'
 
     def __repr__(self) -> str:
         return str(self)

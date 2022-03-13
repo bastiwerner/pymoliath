@@ -114,10 +114,12 @@ class TestMonadList(unittest.TestCase):
     def test_list_monad_representation(self):
         list = ListMonad(['a'])
 
-        self.assertEqual("ListMonad ['a']", str(list))
+        self.assertEqual("ListMonad(['a'])", str(list))
 
     def test_list_monad_instances(self):
         self.assertTrue(isinstance(ListMonad(['a']), ListMonad))
+
+        print(ListMonad([['kick', 'snare']]).bind(lambda d: enumerate(d)).map(lambda result: (result[0], result[1])))
 
     def test_monad_list_examples(self):
         list = ListMonad(range(2))
@@ -137,7 +139,7 @@ class TestMonadList(unittest.TestCase):
         self.assertEqual([1, 2, 3, 4, 5], list_monad)
 
         # test list to str
-        self.assertEqual("ListMonad [1, 2, 3, 4, 5]", str(list_monad))
+        self.assertEqual("ListMonad([1, 2, 3, 4, 5])", str(list_monad))
 
         self.assertEqual(['$2.00', '$100.00', '$5.00'], (ListMonad([1, 99, 4])
                                                          .bind(lambda val: ListMonad([val + 1]))

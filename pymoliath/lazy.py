@@ -121,7 +121,7 @@ class LazyMonad(Generic[TypeSource]):
         return self._computation()
 
     def __str__(self) -> str:
-        return f'LazyMonad {self._computation}'
+        return f'LazyMonad({self._computation})'
 
     def __repr__(self) -> str:
         return str(self)

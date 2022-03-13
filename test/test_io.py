@@ -122,7 +122,7 @@ class TestIOMonads(unittest.TestCase):
 
         io = IO(test)
 
-        self.assertEqual(str(io), f'IO {str(test)}')
+        self.assertEqual(str(io), f'IO({str(test)})')
 
     @patch('builtins.print')
     def test_io_result_function(self, mock_print: Mock):

@@ -165,7 +165,7 @@ class State(Generic[TypeState, TypeSource]):
         return new_state, value
 
     def __str__(self: State[TypeState, TypeSource]) -> str:
-        return f'State {self._value}'
+        return f'State({self._value})'
 
     def __repr__(self: State[TypeState, TypeSource]) -> str:
         return str(self)

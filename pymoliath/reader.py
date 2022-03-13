@@ -159,7 +159,7 @@ class Reader(Generic[TypeEnv, TypeSource]):
         return self._value(env)
 
     def __str__(self: Reader[TypeEnv, TypeSource]) -> str:
-        return f'Reader {self._value}'
+        return f'Reader({self._value})'
 
     def __repr__(self: Reader[TypeEnv, TypeSource]) -> str:
         return str(self)

@@ -191,10 +191,10 @@ class TestEitherMonad(unittest.TestCase):
         success_value = Success('a')
         failure_value = Failure(TypeError('b'))
 
-        self.assertEqual(str(right_value), 'Right a')
-        self.assertEqual(str(left_value), 'Left b')
-        self.assertEqual(str(success_value), 'Success a')
-        self.assertEqual(str(failure_value), f'Failure {TypeError("b")}')
+        self.assertEqual(str(right_value), 'Right(a)')
+        self.assertEqual(str(left_value), 'Left(b)')
+        self.assertEqual(str(success_value), 'Success(a)')
+        self.assertEqual(str(failure_value), f'Failure({TypeError("b")})')
 
     def test_either_try_abstract_class_raise_error(self):
         with self.assertRaises(TypeError):
@@ -213,6 +213,19 @@ class TestEitherMonad(unittest.TestCase):
         self.assertTrue(left.is_left() and not left.is_right())
         self.assertTrue(success.is_success() and not success.is_failure())
         self.assertTrue(failure.is_failure() and not failure.is_success())
+
+    def test_try_except_function_for_error_handling_with_either_monad_returns_correct_either_monad(self):
+        def unsafe_function():
+            raise Exception("error")
+
+        def safe_function():
+            return 10
+
+        unsafe_result: Either[Exception, int] = Either.try_except(unsafe_function, 'Failed during operation')
+        safe_result: Either[Exception, int] = Either.try_except(safe_function)
+
+        self.assertEqual(Left(f'Failed during operation: {"error"}'), unsafe_result)
+        self.assertEqual(Right(10), safe_result)
 
     def test_either_monad_or_else(self):
         right_value = Right('right')
@@ -257,7 +270,6 @@ class TestEitherMonad(unittest.TestCase):
 
         self.assertEqual(Right(10), success.to_either())
         self.assertEqual(Left(Exception("error")), failure.to_either())
-
 
     def test_try_either_monad(self):
         def divide(dividen: int, divisor: int):
