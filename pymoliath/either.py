@@ -189,7 +189,7 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         return not self._is_left
 
     @classmethod
-    def try_except(cls, function: Callable[[], TypeResult], msg: str = '') -> Either[Exception, TypeResult]:
+    def safe(cls, function: Callable[[], TypeResult], msg: str = '') -> Either[Exception, TypeResult]:
         """Either Monad method (try_except) which wraps a function that may raise an exception.
 
         Parameters
@@ -198,8 +198,6 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
             Callable function which may raise an exception
         msg: str (Optional)
             Message to be added in case of an exception
-
-        Exception-Output: Exception(f'msg: {exception}')
 
         Returns
         -------
@@ -420,6 +418,27 @@ class Try(Generic[TypeSource], abc.ABC):
             True: if try monad is of type failure, False: if try monad is of type success
         """
         return self._is_failure
+
+    @classmethod
+    def safe(cls, function: Callable[[], TypeResult], msg: str = '') -> Try[TypeResult]:
+        """Either Monad method (try_except) which wraps a function that may raise an exception.
+
+        Parameters
+        ----------
+        function: Callable[[], TypeResult]
+            Callable function which may raise an exception
+        msg: str (Optional)
+            Message to be added in case of an exception
+
+        Returns
+        -------
+        either: Either[Exception, TypeResult]
+            Returns an Either Monad which contains either the function result or an Exception with a message added.
+        """
+        try:
+            return Success(function())
+        except Exception as e:
+            return Failure(Exception(f'{msg}{e}'))
 
     @abc.abstractmethod
     def __str__(self: Try[TypeSource]) -> str:

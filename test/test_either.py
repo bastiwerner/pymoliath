@@ -221,11 +221,15 @@ class TestEitherMonad(unittest.TestCase):
         def safe_function():
             return 10
 
-        unsafe_result: Either[Exception, int] = Either.try_except(unsafe_function, 'Failed during operation: ')
-        safe_result: Either[Exception, int] = Either.try_except(safe_function)
+        unsafe_either_result: Either[Exception, int] = Either.safe(unsafe_function, 'Failed during operation: ')
+        safe_either_result: Either[Exception, int] = Either.safe(safe_function)
+        unsafe_try_result: Try[int] = Try.safe(unsafe_function, 'Failed during operation: ')
+        safe_try_result: Try[int] = Try.safe(safe_function)
 
-        self.assertEqual(Left(Exception(f'Failed during operation: error')), unsafe_result)
-        self.assertEqual(Right(10), safe_result)
+        self.assertEqual(Left(Exception(f'Failed during operation: error')), unsafe_either_result)
+        self.assertEqual(Right(10), safe_either_result)
+        self.assertEqual(Failure(Exception(f'Failed during operation: error')), unsafe_try_result)
+        self.assertEqual(Success(10), safe_try_result)
 
     def test_either_monad_or_else(self):
         right_value = Right('right')
