@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import itertools
 from functools import partial
 from itertools import chain
 from typing import Any, TypeVar, List, Callable
@@ -42,6 +43,36 @@ class ListMonad(List[TypeSource]):
         """
         return self.__class__(chain.from_iterable(map(function, self)))
 
+    def filter(self: ListMonad[TypeSource], filter_function: Callable[[TypeSource], bool]) -> ListMonad[TypeSource]:
+        """ListMonad filter function
+
+        Parameters
+        ----------
+        filter_function: Callable[[TypeSource], bool]
+            Filter function for the list
+
+        Returns
+        -------
+        filtered: ListMonad[TypeSource]
+            Returns a new filtered ListMonad
+        """
+        return self.__class__(filter(filter_function, self))
+
+    def take(self: ListMonad[TypeSource], amount: int) -> ListMonad[TypeSource]:
+        """ListMonad take function
+
+        Parameters
+        ----------
+        amount: int
+            Amount of values to be taken from the list for the next operation.
+
+        Returns
+        -------
+        list: ListMonad[TypeSource]
+            Takes our only an specific amount of values from the list for further execution.
+        """
+        return self.__class__(itertools.islice(self, amount))
+
     def apply(self: ListMonad[TypeSource], applicative: ListMonad[Callable[[TypeSource], TypeResult]]) -> ListMonad[
         TypeResult]:
         """ListMonad monad applicative interface for list monads containing a function returning a value (<*>).
@@ -76,7 +107,7 @@ class ListMonad(List[TypeSource]):
         Parameters
         ----------
         applicative_value: ListMonad[TypePure]
-            ListMonad monad value which will be applied to the io monad containing a function
+            ListMonad monad value which will be applied to the list monad containing a function
 
         Returns
         -------

@@ -1,6 +1,7 @@
 import unittest
+from typing import Tuple
 
-from pymoliath.lazy import LazyMonad
+from pymoliath.lazy import LazyMonad, Sequence
 from pymoliath.util import compose
 
 
@@ -135,3 +136,134 @@ class TestLazyMonad(unittest.TestCase):
                                   .map(lambda x: x + 5)
                                   .bind(lambda x: LazyMonad(str(x))))
         self.assertEqual("1769", result.run())
+
+
+class TestSequence(unittest.TestCase):
+    """
+    Monad operations:
+    ≡       Identical to
+    >>=     bind, flatMap
+    (.)     Function composition
+    <*>     Applicative functor: (<$>) :: (Functor f) => (a -> b) -> f a -> f b
+    <$>     Applicative functor: (<*>) :: f (a -> b) -> f a -> f b
+    """
+
+    def test_monad_left_identity_law(self):
+        """Left identity law: return a >>= f ≡ f a
+        https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
+
+        Left identity: The first monad law states that if we take a value,
+        put it in a default context with return and then feed it to a function by using >>=,
+        it’s the same as list taking the value and applying the function to it.
+        """
+        list_function = lambda x: Sequence([x + 1, x + 2])
+
+        self.assertEqual(list_function(10).run(), Sequence([10]).bind(list_function).run())
+
+    def test_monad_right_identity_law(self):
+        """Right identity law: m >>= return ≡ m
+        https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
+
+        Right identity: The second law states that if we have a monadic value
+        and we use >>= to feed it to return, the result is our original monadic value.
+        """
+        list_value = Sequence(['Hello', 'world'])
+
+        self.assertEqual(list_value.run(), list_value.bind(lambda x: Sequence([x])).run())
+
+    def test_monad_functor_identity_law(self):
+        """Functors identity law: (m a >= f x -> x) ≡ m a
+        https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
+
+        Map the identity function over a monad container, the result should be the same monad container object.
+        """
+        self.assertEqual(Sequence([10]).map(lambda x: x).run(), Sequence([10]).run())
+
+    def test_monad_functor_composition_law(self):
+        """Functors composition law: map (f . g) x ≡ map f (map g x)
+        https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
+
+        The functor implementation should not break the composition of functions.
+        """
+        list_value = Sequence([42])
+
+        f = lambda x: x + 1000
+        g = lambda y: y * 42
+
+        self.assertEqual(list_value.map(compose(f, g)).run(), list_value.map(g).map(f).run())
+
+    def test_monad_applicative_identity_law(self):
+        """Applicative identity law: m (f x -> x) <*> m a ≡ m a
+        https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
+
+        Wrap the identity function with a monad container. Apply a monad container over the result.
+        The applicative identity law states this should result in an identical object.
+        """
+        list_value = Sequence([42, 10])
+
+        self.assertEqual(list_value.apply(Sequence([lambda x: x])).run(), list_value.run())
+        self.assertEqual(Sequence([lambda x: x]).apply2(list_value).run(), list_value.run())
+
+    def test_monad_applicative_homomorphism_law(self):
+        """Applicative homomorphism law: pure f <*> pure x = pure (f x)
+        https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
+
+        The second law is the homomorphism law. If we wrap a function and an object in pure.
+        We can then apply the wrapped function over the wrapped object.
+        """
+        x = 42
+        f = lambda x: x * 42
+
+        self.assertEqual(Sequence([x]).apply(Sequence([f])).run(), Sequence([f(x)]).run())
+        self.assertEqual(Sequence([f]).apply2(Sequence([x])).run(), Sequence([f(x)]).run())
+
+    def test_monad_applicative_composition_law(self):
+        """Applicative composition law: pure (.) <*> u <*> v <*> w = u <*> (v <*> w)
+        https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
+
+        The second law is the homomorphism law. If we wrap a function and an object in pure.
+        We can then apply the wrapped function over the wrapped object.
+        """
+        w = Sequence([42])
+        u = Sequence([lambda x: x + 42])
+        v = Sequence([lambda x: x * 42])
+        composition = lambda f, g: compose(f, g)
+
+        self.assertEqual(w.apply(v.apply(u.apply(Sequence([composition])))).run(), w.apply(v).apply(u).run())
+        self.assertEqual(Sequence([composition]).apply2(u).apply2(v).apply2(w).run(),
+                         u.apply2(v.apply2(w)).run())
+
+    def test_list_monad_with_nested_list_and_enumeration_returns_correct_result(self):
+        result: Sequence[Tuple[int, str]] = (Sequence([['hello', 'world']])
+                                             .bind(lambda d: Sequence(enumerate(d)))
+                                             .map(lambda tuple_result: (tuple_result[0], tuple_result[1])))
+
+        self.assertEqual([(0, 'hello'), (1, 'world')], result.run())
+
+    def test_list_monad_to_list_returns_correct_python_list(self):
+        result = Sequence([1, 2, 3, 4])
+
+        self.assertEqual([1, 2, 3, 4], result.run())
+        self.assertEqual('[1, 2, 3, 4]', str(result.run()))
+
+    def test_lazy_sequence_monad_with_filter_and_take_returns_corrected_filtered_list(self):
+        result = Sequence([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+
+        self.assertEqual([3, 4], result.take(4).filter(lambda x: x > 2).run())
+
+    def test_monad_list_examples(self):
+        # test list monad from generator
+        def list_generator():
+            for x in range(5):
+                yield x
+
+        list_monad = Sequence(list_generator()).map(lambda x: x + 1)
+        self.assertEqual([1, 2, 3, 4, 5], list_monad.run())
+
+        self.assertEqual(['$2.00', '$100.00', '$5.00'], (Sequence([1, 99, 4])
+                                                         .bind(lambda val: Sequence([val + 1]))
+                                                         .bind(lambda val: Sequence([f"${val}.00"]))).run())
+
+        self.assertEqual(['$2.00', '$100.00', '$5.00'], (Sequence([1, 99, 4])
+                                                         .map(lambda val: val + 1)
+                                                         .bind(lambda val: Sequence([f"${val}.00"]))).run())

@@ -70,7 +70,7 @@ right.left_or_else(value_type_left)
 right.right_or_else(value_type_right)
 right.either(left_function, right_function)
 
-Either.try_except(unsafe_function, message)
+Either.safe(unsafe_function, message)
 ```
 
 ## Try
