@@ -219,6 +219,10 @@ class Result(Generic[TypeOk], abc.ABC):
     def __str__(self: Result[TypeOk]) -> str:
         pass
 
+    @abc.abstractmethod
+    def __eq__(self, other: object) -> bool:
+      pass
+
     def __repr__(self: Result[TypeOk]) -> str:
         return str(self)
 
@@ -233,8 +237,8 @@ class Ok(Result[TypeOk]):
     def __str__(self: Ok[TypeOk]) -> str:
         return f'Ok({self._ok_value})'
 
-    def __eq__(self, other: object):
-        return isinstance(other, Ok) and self._ok_value == other._ok_value
+    def __eq__(self: Ok[TypeOk], other: object) -> bool:
+        return isinstance(other, Ok) and str(self) == str(other) and type(self._ok_value) == type(other._ok_value)  # type: ignore
 
 
 class Err(Result[Any]):
@@ -248,5 +252,5 @@ class Err(Result[Any]):
     def __str__(self: Err) -> str:
         return f'Err({self._err_value})'
 
-    def __eq__(self, other: object):
+    def __eq__(self, other: object) -> bool:
         return isinstance(other, Err) and str(self) == str(other) and type(self._err_value) == type(other._err_value)
