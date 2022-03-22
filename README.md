@@ -110,9 +110,21 @@ print_io(10).run()
 Haskell: [Data.List](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data-List.html)
 
 ```python
-list_monad = ListMonad([10, 20])
-
+list_monad: ListMonad[int] = ListMonad([1, 2, 3, 4, 5, 6])
+list_monad.take(4)  # ListMonad([1, 2, 3, 4])
+list_monad.filter(lambda v: v > 4)  # ListMonad([5, 6])
 list_monad.to_list()
+```
+
+## Sequence (lazy list)
+
+Evaluates a given list in a lazy way.
+
+```python
+sequence: Sequence[int] = Sequence([1, 2, 3, 4, 5, 6])
+sequence.take(4)  # ListMonad([1, 2, 3, 4])
+sequence.filter(lambda v: v > 4)  # ListMonad([5, 6])
+sequence.run()  # Lazy list evaluation result
 ```
 
 ## Reader
