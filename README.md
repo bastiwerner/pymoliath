@@ -10,6 +10,7 @@ as well as existing Monad implementations in python.
 * [Pymonad](https://github.com/jasondelaat/pymonad) by jasondelaat
 * [OSlash](https://github.com/dbrattli/OSlash) by dbrattli
 * [typesafe-monads](https://github.com/correl/typesafe-monads) by correl
+* [std::result::Result](https://doc.rust-lang.org/std/result/enum.Result.html#) of rustlang
 
 # Getting started
 
@@ -73,18 +74,25 @@ right.either(left_function, right_function)
 Either.safe(unsafe_function, message)
 ```
 
-## Try
+## Result
 
-Scala : [scala.util.Try](https://www.scala-lang.org/api/2.12.4/scala/util/Try.html)
+The result monad is a combination of the rust result and scala try monads. It represents and handles computations which
+can be fail. The return value is either the specified result type or a python exception type.
+
+* Rust: [std::result::Result](https://doc.rust-lang.org/std/result/enum.Result.html#)
+* Scala: [scala.util.Try](https://www.scala-lang.org/api/2.12.4/scala/util/Try.html)
 
 ```python
-success: Try[int] = Success(10)
-failure: Try[int] = Failure(TypeError("error"))
+result: Result[int] = Ok(10)
+error: Result[int] = Err(TypeError("error"))
 
-success.is_success()
-success.is_failure()
-success.either(failure_function, success_function)
-success.to_either()
+result.is_ok()
+result.is_err()
+result.match(err_function, ok_function)
+result.to_either()
+result.expect(extend_error_message)
+
+Result.safe(unsafe_function, message)
 ```
 
 ## IO
