@@ -172,7 +172,6 @@ State.put(new_state)  # State(lambda state: (new_state, ()))
 * [LazyMonad](https://www.philliams.com/monads-in-python/)
 
 ```python
-# State[TypeState, TypeSource]
 lazy: LazyMonad[int] = LazyMonad(lambda: 10)
 lazy.run()  # 10
 ```
