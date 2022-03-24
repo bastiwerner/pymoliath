@@ -154,7 +154,7 @@ class Maybe(Generic[TypeSource], abc.ABC):
 
     def match(self: Maybe[TypeSource],
               just_function: Callable[[TypeSource], TypeResult],
-              nothing_function: Callable[[None], TypeResult]) -> TypeResult:
+              nothing_function: Callable[[], TypeResult]) -> TypeResult:
         """The maybe function takes a function and a default value. If the Maybe value is Nothing, the function returns
         the default value. Otherwise, it applies the function to the value inside a Just monad and returns the result.
 
