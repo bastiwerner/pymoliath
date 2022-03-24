@@ -47,6 +47,7 @@ Every Monad implementation of Pymoliath has the typical haskell Monad interface.
 Haskell : [Data.Maybe](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data-Maybe.html)
 
 ```python
+# Maybe[TypeSource]
 just: Maybe[int] = Just(10)
 nothing: Maybe[int] = Nothing()
 
@@ -85,8 +86,7 @@ right.unwrap_left_or(default_value_of_type_left)
 right.match(left_function, right_function)
 right.to_result()  # Result[TypeRight, TypeLeft]
 
-# Either[Exception, TypeRight]
-Either.safe(unsafe_function, message)
+Either.safe(unsafe_function, message)  # Either[Exception, TypeRight]
 ```
 
 ## Result
@@ -113,8 +113,7 @@ result.unwrap_err_or(default_exception_value)
 result.match(err_function, ok_function)
 result.to_either()  # Either[TypeErr, TypeOk]
 
-# Result[TypeOk, Exception]
-Result.safe(unsafe_function)
+Result.safe(unsafe_function)  # Result[TypeOk, Exception]
 ```
 
 ## Try
@@ -125,6 +124,7 @@ python exception type.
 * Scala: [scala.util.Try](https://www.scala-lang.org/api/2.12.4/scala/util/Try.html)
 
 ```python
+# Try[TypeSource]
 success: Try[int] = Success(10)
 failure: Try[int] = Failure(Exception("error"))
 
@@ -141,11 +141,10 @@ success.unwrap_or(default_value_of_type_ok)
 success.unwrap_failure_or(default_exception_value)
 
 success.match(err_function, ok_function)
-success.to_either()  # Either[Exception, TypeOk]
-success.to_result()  # Result[TypeOk, Exception]
+success.to_either()  # Either[Exception, TypeSource]
+success.to_result()  # Result[TypeSource, Exception]
 
-# Result[TypeOk, Exception]
-Result.safe(unsafe_function)
+Try.safe(unsafe_function)  # Try[TypeSource]
 ```
 
 ## IO
@@ -163,10 +162,11 @@ print_io(10).run()
 Haskell: [Data.List](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data-List.html)
 
 ```python
+# ListMonad[TypeSource]
 list_monad: ListMonad[int] = ListMonad([1, 2, 3, 4, 5, 6])
 list_monad.take(4)  # ListMonad([1, 2, 3, 4])
 list_monad.filter(lambda v: v > 4)  # ListMonad([5, 6])
-list_monad.to_list()
+list_monad.to_list()  # List[TypeSource]
 ```
 
 ## Sequence (lazy list)
@@ -174,10 +174,11 @@ list_monad.to_list()
 Evaluates a given list in a lazy way.
 
 ```python
+# Sequence[TypeSource]
 sequence: Sequence[int] = Sequence([1, 2, 3, 4, 5, 6])
-sequence.take(4)  # ListMonad([1, 2, 3, 4])
-sequence.filter(lambda v: v > 4)  # ListMonad([5, 6])
-sequence.run()  # Lazy list evaluation result
+sequence.take(4)  # Sequence([1, 2, 3, 4])
+sequence.filter(lambda v: v > 4)  # Sequence([5, 6])
+sequence.run()  # List[TypeSource]
 ```
 
 ## Reader
@@ -217,7 +218,7 @@ Haskell: [Control.Monad.State.Lazy](https://hackage.haskell.org/package/mtl-2.2.
 state: State[str, int] = State(lambda state: (state, 10))
 state.run('hi')  # (hi, 10)
 
-State.unwrap_or()  # State(lambda state: (state, state))
+State.get()  # State(lambda state: (state, state))
 State.put(new_state)  # State(lambda state: (new_state, ()))
 ```
 
@@ -226,6 +227,7 @@ State.put(new_state)  # State(lambda state: (new_state, ()))
 * [LazyMonad](https://www.philliams.com/monads-in-python/)
 
 ```python
+# LazyMonad[TypeSource]
 lazy: LazyMonad[int] = LazyMonad(lambda: 10)
-lazy.run()  # 10
+lazy.run()  # TypeSource: 10
 ```
