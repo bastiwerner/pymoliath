@@ -164,13 +164,28 @@ class TestMaybe(unittest.TestCase):
         self.assertTrue(maybe_value.is_just() and not maybe_value.is_nothing())
         self.assertTrue(maybe_none.is_nothing() and not maybe_none.is_just())
 
-    def test_maybe_result_function(self):
+    def test_maybe_monad_unwrap(self):
+        just_value = Just(10)
+        nothing = Nothing()
+
+        self.assertEqual(10, just_value.unwrap_or(20))
+        self.assertEqual(20, nothing.unwrap_or(20))
+
+    def test_maybe_monad_filter(self):
+        just_value = Just(10)
+        nothing = Nothing()
+
+        self.assertEqual(Just(10), just_value.filter(lambda v: v > 10))
+        self.assertEqual(Nothing(), just_value.filter(lambda v: v <= 10))
+        self.assertEqual(Nothing(), nothing.filter(lambda v: v < 10))
+
+    def test_maybe_functions(self):
         just = Just('a')
         nothing = Nothing()
 
-        self.assertEqual('a', just.or_else('b'))
-        self.assertEqual(10, nothing.or_else(10))
-        self.assertEqual('a', just.maybe(lambda x: x, 'default'))
-        self.assertEqual('default', just.bind(lambda x: Nothing()).maybe(lambda x: x, 'default'))
-        self.assertEqual('default', nothing.maybe(lambda x: x, 'default'))
-        self.assertEqual('default', nothing.bind(lambda x: Just(x)).maybe(lambda x: x, 'default'))
+        self.assertEqual('a', just.unwrap_or('b'))
+        self.assertEqual(10, nothing.unwrap_or(10))
+        self.assertEqual('a', just.match(lambda x: x, lambda: 'default'))
+        self.assertEqual('default', just.bind(lambda x: Nothing()).match(lambda x: x, lambda: 'default'))
+        self.assertEqual('default', nothing.match(lambda x: x, lambda: 'default'))
+        self.assertEqual('default', nothing.bind(lambda x: Just(x)).match(lambda x: x, lambda: 'default'))

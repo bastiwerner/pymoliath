@@ -11,14 +11,7 @@ TypePure = TypeVar("TypePure")
 
 
 class Either(Generic[TypeLeft, TypeRight], abc.ABC):
-    """Either monad abstract class
-
-    The Either type represents values with two possibilities: value of Either[A, B] is either Left[A] or Right[B].
-    The Either type is sometimes used to represent a value which is either correct or an error.
-
-    Instances:
-    * Left
-    * Right
+    """The Either Monad represents values with two possibilities: either Left[A] or Right[B].
     """
     _left_value: TypeLeft  # Private either monad left value which should not be modified
     _right_value: TypeRight  # Private maybe monad right value which should not be modified
@@ -26,57 +19,93 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
 
     def map(self: Either[TypeLeft, TypeRight],
             function: Callable[[TypeRight], TypeResult]) -> Either[TypeLeft, TypeResult]:
-        """Either Monad functor interface (>=, map).
+        """Calls function to the a wrapped Right value if not Left, otherwise leaving the Left value untouched.
 
         Parameters
         ----------
         function: Callable[[TypeRight], TypeResult]
-            Function which takes a value of TypeRight and returns a value of type TypeResult
+            Function which takes a value of TypeRight and returns a value of type TypeResult.
 
         Returns
         -------
         either: Either[TypeLeft, TypeRight]
-            Returns either an Either Monad of type Right with the function result as value
-            or an Either Monad of type Left path containing the left value.
+            Returns Right with the function result or otherwise Left.
         """
         if self._is_left:
             return Left(self._left_value)
         else:
             return Right(function(self._right_value))
 
+    def map_left(self: Either[TypeLeft, TypeRight],
+                 function: Callable[[TypeLeft], TypeResult]) -> Either[TypeResult, TypeRight]:
+        """Calls function to the a wrapped Left value if not Right, otherwise leaving the Right value untouched.
+
+        Parameters
+        ----------
+        function: Callable[[TypeRight], TypeResult]
+            Function which takes a value of TypeLeft and returns a value of type TypeResult.
+
+        Returns
+        -------
+        either: Either[TypeResult, TypeRight]
+            Returns Left with the function result or otherwise Right.
+        """
+        if self._is_left:
+            return Left(function(self._left_value))
+        else:
+            return Right(self._right_value)
+
     def bind(self: Either[TypeLeft, TypeRight],
              function: Callable[[TypeRight], Either[TypeLeft, TypeResult]]) -> Either[TypeLeft, TypeResult]:
-        """Either Monad bind interface (>>=, bind, flatMap).
+        """Calls function if Either Monad is Right, otherwise returns Left.
 
         Parameters
         ----------
         function: Callable[[TypeRight], Either[TypeLeft, TypeResult]]
-            Function which takes a value of type TypeRight and returns an Either Monad with a new value type.
+            Function which takes a value of TypeRight and returns a Result Monad of TypeResult.
 
         Returns
         -------
         either: Either[TypeLeft, TypeResult]
-            Returns either an Either Monad of type Right from the function result
-            or an Either Monad of type Left path containing the left value.
+            Returns an Either Monad from the function result if Right, otherwise Left.
         """
         if self._is_left:
             return Left(self._left_value)
         else:
             return function(self._right_value)
 
+    def bind_left(self: Either[TypeLeft, TypeRight],
+                  function: Callable[[TypeLeft], Either[TypeResult, TypeRight]]) -> Either[TypeResult, TypeRight]:
+        """Calls function if Either Monad is Left, otherwise returns Right.
+
+        Parameters
+        ----------
+        function: Callable[[TypeLeft], Either[TypeResult, TypeRight]]
+            Function which takes a value of TypeLeft and returns a Result Monad of TypeResult.
+
+        Returns
+        -------
+        either: Either[TypeResult, TypeRight]
+            Returns a Either Monad from the function result if Left, otherwise Right.
+        """
+        if self._is_left:
+            return function(self._left_value)
+        else:
+            return Right(self._right_value)
+
     def apply(self: Either[TypeLeft, TypeRight],
               applicative: Either[TypeLeft, Callable[[TypeRight], TypeResult]]) -> Either[TypeLeft, TypeResult]:
-        """Either Monad applicative interface for Either Monads containing a value (<*>).
+        """Applies the passed applicative wrapping a function if Either Monad is Right, otherwise returns Left.
 
         Parameters
         ----------
         applicative: Either[TypeLeft, Callable[Callable[[TypeSource], TypeResult]]
-            Applicative Result Monad which contains a function.
+            Applicative Either Monad which contains a function.
 
         Returns
         -------
         result: Either[TypeLeft, TypeResult]
-            Returns the applicative result
+            Returns an Either Monad from the applied function if Right, otherwise Left.
         """
 
         def binder(applicative_function: Callable[[TypeRight], TypeResult]) -> Either[TypeLeft, TypeResult]:
@@ -92,17 +121,18 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
 
     def apply2(self: Either[TypeLeft, Callable[[TypePure], TypeResult]],
                applicative_value: Either[TypeLeft, TypePure]) -> Either[TypeLeft, TypeResult]:
-        """Either Monad applicative interface for Either Monads containing a function (<*>).
+        """Applies the passed Either Monad wrapping a value to the Either Monad containing a function if Right,
+        otherwise returns Left.
 
         Parameters
         ----------
         applicative_value: Either[TypeLeft, TypePure]
-            Result Monad value which will be applied to the function within the Result Monad of self.
+            Result Monad which contains a value.
 
         Returns
         -------
-        try: Result[TypeResult]:
-            Returns a new Result Monad (Ok/Err) with the value applied to the internal applicative function.
+        result: Either[TypeLeft, TypeResult]
+            Returns an Either Monad from the applied function if Right, otherwise Left.
         """
 
         def binder(applicative_function: Callable[[TypePure], TypeResult]) -> Either[TypeLeft, TypeResult]:
@@ -116,45 +146,45 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
 
         return self.bind(binder)
 
-    def left_or_else(self: Either[TypeLeft, TypeRight], default_value: TypeLeft) -> TypeLeft:
-        """Either Monad extraction function (left_or_else)
-
-        Parameters
-        ----------
-        default_value: TypeLeft
-            Default value to be returned if the Either Monad is not of type Left
-
-        Returns
-        -------
-        result: TypeLeft
-            Returns either the left value or a default value.
-        """
-        if self._is_left:
-            return self._left_value
-        else:
-            return default_value
-
-    def right_or_else(self: Either[TypeLeft, TypeRight], default_value: TypeRight) -> TypeRight:
-        """Either Monad extraction function (right_or_else)
+    def unwrap_or(self: Either[TypeLeft, TypeRight], default_value: TypeRight) -> TypeRight:
+        """Returns the Right value if not Left, or otherwise a provided default value of the same type.
 
         Parameters
         ----------
         default_value: TypeRight
-            Default value to be returned if the Either Monad is not of type Right
+            Default value of TypeRight
 
         Returns
         -------
         result: TypeRight
-            Returns either the right value or a default value.
+            Returns the Right value or a default value.
         """
         if self._is_left:
             return default_value
         else:
             return self._right_value
 
-    def either(self: Either[TypeLeft, TypeRight], left_function: Callable[[TypeLeft], TypeResult],
-               right_function: Callable[[TypeRight], TypeResult]) -> TypeResult:
-        """Right monad specific function to handle railroad orientated types.
+    def unwrap_left_or(self: Either[TypeLeft, TypeRight], default_value: TypeLeft) -> TypeLeft:
+        """Returns the Left value if not Right, or otherwise a provided default value of the same type.
+
+        Parameters
+        ----------
+        default_value: TypeLeft
+            Default value of TypeLeft
+
+        Returns
+        -------
+        result: TypeLeft
+            Returns the Left value or a default value.
+        """
+        if self._is_left:
+            return self._left_value
+        else:
+            return default_value
+
+    def match(self: Either[TypeLeft, TypeRight], left_function: Callable[[TypeLeft], TypeResult],
+              right_function: Callable[[TypeRight], TypeResult]) -> TypeResult:
+        """Right monad specific function to handle railroad orientated programming.
 
         Parameters
         ----------
@@ -188,9 +218,14 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         """
         return not self._is_left
 
+    def to_result(self: Either[TypeLeft, TypeRight]) -> Result[TypeRight, TypeLeft]:
+        return self.match(lambda l: Err(l),
+                          lambda r: Ok(r))
+
     @classmethod
-    def safe(cls, function: Callable[[], TypeResult], msg: str = '') -> Either[Exception, TypeResult]:
-        """Either Monad method (try_except) which wraps a function that may raise an exception.
+    def safe(cls, function: Callable[[], TypeResult]) -> Either[Exception, TypeResult]:
+        """Calls an unsafe function which might raise an Exception and returns Right with the result, otherwise Left
+        containing the Exception.
 
         Parameters
         ----------
@@ -207,7 +242,7 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         try:
             return Right(function())
         except Exception as e:
-            return Left(Exception(f'{msg}{e}'))
+            return Left(e)
 
     @abc.abstractmethod
     def __str__(self: Either[TypeLeft, TypeRight]) -> str:
@@ -240,3 +275,286 @@ class Left(Either[TypeLeft, Any]):
 
     def __str__(self: Left[TypeLeft]) -> str:
         return f'Left({self._left_value})'
+
+
+TypeReturn = TypeVar("TypeReturn")
+TypeOk = TypeVar("TypeOk")
+TypeErr = TypeVar("TypeErr")
+
+
+class Result(Generic[TypeOk, TypeErr], abc.ABC):
+    """Result is a Monad that represents either success (Ok) or failure (Err).
+    """
+    _ok_value: TypeOk  # Private Result Monad Success value which should not be modified
+    _err_value: TypeErr  # Private Result Monad Err value which should not be modified
+    _is_err: bool  # Private Result Monad is Err flag which should not be modified
+
+    def map(self: Result[TypeOk, TypeErr], function: Callable[[TypeOk], TypeReturn]) -> Result[TypeReturn, TypeErr]:
+        """Calls function to the a wrapped Ok value if not an Err, otherwise leaving the Err value untouched.
+        The map function will execute the function by checking for any exception.
+
+        Parameters
+        ----------
+        function: Callable[[TypeOk], TypeReturn]
+            Function which takes a value of TypeOk and returns a value of type TypeReturn.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]:
+            Returns an Ok with the function result or otherwise Err.
+        """
+        if self._is_err:
+            return Err(self._err_value)
+        else:
+            return Ok(function(self._ok_value))
+
+    def map_err(self: Result[TypeOk, TypeErr], function: Callable[[TypeErr], TypeReturn]) -> Result[TypeOk, TypeReturn]:
+        """Calls function to the a wrapped Err value if not Ok, otherwise leaving the Ok value untouched.
+        The map function will execute the function by checking for any exception.
+
+        Parameters
+        ----------
+        function: Callable[[TypeErr], TypeReturn]
+            Function which takes a value of TypeErr and return a value of TypeErr.
+
+        Returns
+        -------
+        result: Result[TypeOk, TypeReturn]
+            Returns an Err with the function result or otherwise Ok.
+        """
+        if self._is_err:
+            return Err(function(self._err_value))
+        else:
+            return Ok(self._ok_value)
+
+    def bind(self: Result[TypeOk, TypeErr], function: Callable[[TypeOk], Result[TypeReturn, TypeErr]]) -> Result[
+        TypeReturn, TypeErr]:
+        """Calls function if Result Monad is Ok, otherwise returns Err.
+        The bind function will execute the passed function and is also checking for any exception.
+
+        Parameters
+        ----------
+        function: Callable[[TypeOk], Result[TypeReturn, TypeErr]]
+            Function which takes a value of TypeOk and returns a new Result Monad.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]
+            Returns a Result Monad from the function result if Ok, otherwise an Err.
+        """
+        if self._is_err:
+            return Err(self._err_value)
+        else:
+            return function(self._ok_value)
+
+    def bind_err(self: Result[TypeOk, TypeErr], function: Callable[[TypeErr], Result[TypeOk, TypeReturn]]) -> Result[
+        TypeOk, TypeReturn]:
+        """Calls function if Result Monad is an Err, otherwise returns Ok.
+        The bind function will execute the passed function and is also checking for any exception.
+
+        Parameters
+        ----------
+        function: Callable[[TypeErr], Result[TypeOk, TypeReturn]]
+            Function which takes a value of TypeErr and returns a new Result Monad.
+
+        Returns
+        -------
+        result: Result[TypeOk, TypeReturn]
+            Returns a Result Monad from the function result if Err, otherwise an Ok.
+        """
+        if self._is_err:
+            return function(self._err_value)
+        else:
+            return Ok(self._ok_value)
+
+    def apply(self: Result[TypeOk, TypeErr], applicative: Result[Callable[[TypeOk], TypeReturn], TypeErr]) -> Result[
+        TypeReturn, TypeErr]:
+        """Applies the passed applicative wrapping a function if Result Monad is Ok, otherwise returns Err.
+
+        Parameters
+        ----------
+        applicative: Result[Callable[[TypeOk], TypeReturn], TypeErr]
+            Applicative Result Monad which contains a function.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]
+            Returns a Result Monad from the applied function if Ok, otherwise an Err.
+        """
+
+        def binder(applicative_function: Callable[[TypeOk], TypeReturn]) -> Result[TypeReturn, TypeErr]:
+            def inner(x: TypeOk) -> Any:
+                try:
+                    return applicative_function(x)
+                except TypeError:
+                    return partial(applicative_function, x)
+
+            return self.map(inner)
+
+        return applicative.bind(binder)
+
+    def apply2(self: Result[Callable[[TypePure], TypeReturn], TypeErr], applicative_value: Result[TypePure, TypeErr]) \
+            -> Result[TypeReturn, TypeErr]:
+        """Applies the passed Result Monad wrapping a value to the Result Monad containing a function if Ok,
+        otherwise returns Err.
+
+        Parameters
+        ----------
+        applicative_value: Result[TypePure, TypeErr]
+            Result monad which contains a value.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]
+            Returns a Result Monad from the applied function if Ok, otherwise an Err.
+        """
+
+        def binder(applicative_function: Callable[[TypePure], TypeReturn]) -> Result[TypeReturn, TypeErr]:
+            def inner(x: TypePure) -> Any:
+                try:
+                    return applicative_function(x)
+                except TypeError:
+                    return partial(applicative_function, x)
+
+            return applicative_value.map(inner)
+
+        return self.bind(binder)
+
+    def unwrap_or(self, default_value: TypeOk) -> TypeOk:
+        """Returns the Ok value if not Err, or otherwise a provided default value of the same type.
+
+        Parameters
+        ----------
+        default_value: TypeOk
+            Default value of TypeOk
+
+        Returns
+        -------
+        result: TypeOk
+            Returns the Ok value or a default value.
+        """
+        if self._is_err:
+            return default_value
+        else:
+            return self._ok_value
+
+    def unwrap_err_or(self, default_value: TypeErr) -> TypeErr:
+        """Returns the Err value if not Ok, or otherwise a provided default of TypeErr.
+
+        Parameters
+        ----------
+        default_value: TypeErr
+            Default value of TypeErr
+
+        Returns
+        -------
+        result: TypeErr
+            Returns the Err value or a default value.
+        """
+        if self._is_err:
+            return self._err_value
+        else:
+            return default_value
+
+    def match(self: Result[TypeOk, TypeErr], err_function: Callable[[TypeErr], TypeReturn],
+              ok_function: Callable[[TypeOk], TypeReturn]) -> TypeReturn:
+        """Matches the Result Monad to either an Err function or an Ok function with the same return type.
+
+        Parameters
+        ----------
+        err_function: Callable[[Exception], TypeReturn]
+            Callback function for either monads of type Err
+        ok_function: Callable[[TypeOk], TypeReturn]
+            Callback function for either monads of type Ok
+        """
+        if self._is_err:
+            return err_function(self._err_value)
+        else:
+            return ok_function(self._ok_value)
+
+    def to_either(self: Result[TypeOk, TypeErr]) -> Either[TypeErr, TypeOk]:
+        """Converts the Result Monad to an either monad.
+
+        Returns
+        -------
+        either: Either[Exception, TypeOk]
+            Returns the Result Monad as Either Monad.
+        """
+        return self.match(lambda l: Left(l),
+                          lambda r: Right(r))
+
+    def is_ok(self: Result[TypeOk, TypeErr]) -> bool:
+        """Returns True if the Result Monad is Ok, otherwise False if Err.
+
+        Returns
+        -------
+        result: bool
+            True: if Result Monad is Ok, False: if Result Monad is Err.
+        """
+        return not self._is_err
+
+    def is_err(self: Result[TypeOk, TypeErr]) -> bool:
+        """Try monad is Err function
+
+        Returns
+        -------
+        result: bool
+            True: if Result Monad is Err, False: if Result Monad is Ok.
+        """
+        return self._is_err
+
+    @classmethod
+    def safe(cls, function: Callable[[], TypeReturn]) -> Result[TypeReturn, Exception]:
+        """Calls an unsafe function which might raise an Exception and returns Ok with the result, otherwise Err.
+
+        Parameters
+        ----------
+        function: Callable[[], TypeReturn]
+            Callable function which may raise an exception.
+
+        Returns
+        -------
+        result: Result[TypeReturn]
+            Returns Ok containing the function result or otherwise Err containing the Excpetion.
+        """
+        try:
+            return Ok(function())
+        except Exception as e:
+            return Err(e)
+
+    @abc.abstractmethod
+    def __str__(self: Result[TypeOk, TypeErr]) -> str:
+        pass
+
+    def __eq__(self: Result[TypeOk, TypeErr], other: object) -> bool:
+        if isinstance(other, Err):
+            return str(self) == str(other) and type(self._err_value) == type(other._err_value)  # type: ignore
+        elif isinstance(other, Ok):
+            return str(self) == str(other) and type(self._ok_value) == type(other._ok_value)  # type: ignore
+        else:
+            return False
+
+    def __repr__(self: Result[TypeOk, TypeErr]) -> str:
+        return str(self)
+
+
+class Ok(Result[TypeOk, Any]):
+
+    def __init__(self, value: TypeOk):
+        self._ok_value = value
+        self._err_value = Any
+        self._is_err = False
+
+    def __str__(self: Ok[TypeOk]) -> str:
+        return f'Ok({self._ok_value})'
+
+
+class Err(Result[Any, TypeErr]):
+
+    def __init__(self, value: TypeErr):
+        self._ok_value = Any
+        self._err_value = value
+        self._is_err = True
+
+    def __str__(self: Err[TypeErr]) -> str:
+        return f'Err({self._err_value})'

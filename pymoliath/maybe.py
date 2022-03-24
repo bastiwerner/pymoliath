@@ -116,9 +116,26 @@ class Maybe(Generic[TypeSource], abc.ABC):
 
         return self.bind(binder)
 
-    def or_else(self, default_value: TypeSource) -> TypeSource:
-        """Maybe value extraction method (or_else).
-        Returns the internal value of the Just or default value if the Monad is a Nothing.
+    def filter(self: Maybe[TypeSource], filter_function: Callable[[TypeSource], bool]) -> Maybe[TypeSource]:
+        """Returns a Just if filter function is True and Maybe Monad is of type Just, otherwise Nothing.
+
+        Parameters
+        ----------
+        filter_function: Callable[[TypeSource], bool]
+            Filter function which will be applied to Just if not Nothing.
+
+        Returns
+        -------
+        result: Maybe[TypeSource]
+            Returns Just if the Maybe Monad is of type Just and filter function returns True otherwise Nothing.
+        """
+        if self._is_nothing or filter_function(self._value):
+            return Nothing()
+        else:
+            return Just(self._value)
+
+    def unwrap_or(self: Maybe[TypeSource], default_value: TypeSource) -> TypeSource:
+        """Returns the internal value of the Just or default value if the Monad is a Nothing.
 
         Parameters
         ----------
@@ -135,8 +152,9 @@ class Maybe(Generic[TypeSource], abc.ABC):
         else:
             return self._value
 
-    def maybe(self: Maybe[TypeSource], callback: Callable[[TypeSource], TypeSource],
-              default_value: TypeSource) -> TypeSource:
+    def match(self: Maybe[TypeSource],
+              just_function: Callable[[TypeSource], TypeResult],
+              nothing_function: Callable[[None], TypeResult]) -> TypeResult:
         """The maybe function takes a function and a default value. If the Maybe value is Nothing, the function returns
         the default value. Otherwise, it applies the function to the value inside a Just monad and returns the result.
 
@@ -152,9 +170,9 @@ class Maybe(Generic[TypeSource], abc.ABC):
         result: TypeSource
         """
         if self._is_nothing:
-            return default_value
+            return nothing_function()
         else:
-            return callback(self._value)
+            return just_function(self._value)
 
     def is_nothing(self):
         return self._is_nothing

@@ -52,8 +52,12 @@ nothing: Maybe[int] = Nothing()
 
 just.is_just()
 just.is_nothing()
-just.or_else(default_value)
-just.maybe(just_function, default_value)
+
+just.unwrap_or(default_value)
+
+just.filter(filter_function)
+just.match(just_function, default_function)
+
 just.from_optional(value_or_none)
 ```
 
@@ -62,37 +66,86 @@ just.from_optional(value_or_none)
 Haskell : [Data.Either](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data-Either.html)
 
 ```python
+# Either[TypeLeft, TypeRight]
 right: Either[str, int] = Right(10)
 left: Either[str, int] = Left("error")
 
 right.is_right()
 right.is_left()
-right.left_or_else(value_type_left)
-right.right_or_else(value_type_right)
-right.either(left_function, right_function)
 
+right.map(right_map_function)
+right.map_left(left_map_function)
+
+right.bind(right_bind_function)
+right.bind_left(left_bind_function)
+
+right.unwrap_or(default_value_of_type_right)
+right.unwrap_left_or(default_value_of_type_left)
+
+right.match(left_function, right_function)
+right.to_result()  # Result[TypeRight, TypeLeft]
+
+# Either[Exception, TypeRight]
 Either.safe(unsafe_function, message)
 ```
 
 ## Result
 
-The result monad is a combination of the rust result and scala try monads. It represents and handles computations which
-can be fail. The return value is either the specified result type or a python exception type.
-
 * Rust: [std::result::Result](https://doc.rust-lang.org/std/result/enum.Result.html#)
-* Scala: [scala.util.Try](https://www.scala-lang.org/api/2.12.4/scala/util/Try.html)
 
 ```python
-result: Result[int] = Ok(10)
-error: Result[int] = Err(TypeError("error"))
+# Result[TypeOk, TypeErr]
+result: Result[int, str] = Ok(10)
+error: Result[int, str] = Err("error")
 
 result.is_ok()
 result.is_err()
-result.match(err_function, ok_function)
-result.to_either()
-result.expect(extend_error_message)
 
-Result.safe(unsafe_function, message)
+result.map(ok_map_function)
+result.map_err(err_map_function)
+
+result.bind(ok_bind_function)
+result.bind_err(err_bind_function)
+
+result.unwrap_or(default_value_of_type_ok)
+result.unwrap_err_or(default_exception_value)
+
+result.match(err_function, ok_function)
+result.to_either()  # Either[TypeErr, TypeOk]
+
+# Result[TypeOk, Exception]
+Result.safe(unsafe_function)
+```
+
+## Try
+
+It represents and handles computations which might be fail. The return value is either the specified result type or a
+python exception type.
+
+* Scala: [scala.util.Try](https://www.scala-lang.org/api/2.12.4/scala/util/Try.html)
+
+```python
+success: Try[int] = Success(10)
+failure: Try[int] = Failure(Exception("error"))
+
+success.is_ok()
+success.is_err()
+
+success.map(ok_map_function)
+success.map_failure(err_map_function)
+
+success.bind(ok_bind_function)
+success.bind_failure(err_bind_function)
+
+success.unwrap_or(default_value_of_type_ok)
+success.unwrap_failure_or(default_exception_value)
+
+success.match(err_function, ok_function)
+success.to_either()  # Either[Exception, TypeOk]
+success.to_result()  # Result[TypeOk, Exception]
+
+# Result[TypeOk, Exception]
+Result.safe(unsafe_function)
 ```
 
 ## IO
@@ -137,7 +190,8 @@ reader: Reader[int, str] = Reader(lambda env: str(env))
 reader.run(12)  # '12'
 reader.local(change_environment_function)
 
-Reader.ask()
+# Reader[TypeEnvironment, TypeEnvironment]
+Reader.ask()  # Reader(lambda env: env)
 ```
 
 ## Writer
@@ -163,7 +217,7 @@ Haskell: [Control.Monad.State.Lazy](https://hackage.haskell.org/package/mtl-2.2.
 state: State[str, int] = State(lambda state: (state, 10))
 state.run('hi')  # (hi, 10)
 
-State.get()  # State(lambda state: (state, state))
+State.unwrap_or()  # State(lambda state: (state, state))
 State.put(new_state)  # State(lambda state: (new_state, ()))
 ```
 

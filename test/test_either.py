@@ -160,39 +160,35 @@ class TestEitherResultMonad(unittest.TestCase):
         def safe_function():
             return 10
 
-        unsafe_either_result: Either[Exception, int] = Either.safe(unsafe_function, 'Failed during operation: ')
+        unsafe_either_result: Either[Exception, int] = Either.safe(unsafe_function)
         safe_either_result: Either[Exception, int] = Either.safe(safe_function)
 
-        self.assertEqual(Left(Exception(f'Failed during operation: error')), unsafe_either_result)
+        self.assertEqual(Left(Exception('error')), unsafe_either_result)
         self.assertEqual(Right(10), safe_either_result)
 
-    def test_either_monad_or_else(self):
+    def test_either_monad_unwrap(self):
         right_value = Right('right')
         left_value = Left('left')
 
-        self.assertEqual('right', right_value.right_or_else('default'))
-        self.assertEqual('left', left_value.left_or_else('default'))
-        self.assertEqual('default', right_value.left_or_else('default'))
-        self.assertEqual('default', left_value.right_or_else('default'))
+        self.assertEqual('right', right_value.unwrap_or('default'))
+        self.assertEqual('left', left_value.unwrap_left_or('default'))
+        self.assertEqual('default', right_value.unwrap_left_or('default'))
+        self.assertEqual('default', left_value.unwrap_or('default'))
 
-    def test_either_monad_result_function(self):
+    def test_either_monad_map_and_bind(self):
+        right = Right('hello')
+
+        self.assertEqual(Left('hello world sucks'), (right
+                                                     .bind(lambda s: Left(s))
+                                                     .map_left(lambda s: f'{s} world')
+                                                     .bind_left(lambda s: Left(f'{s} sucks'))))
+
+    def test_either_monad_match_function(self):
         right_value = Right('right')
         left_value = Left('left')
 
-        (right_value
-         .either(lambda _: 'error', lambda x: self.assertEqual(x, 'right')))
+        self.assertTrue(right_value.match(lambda e: e == 'left',
+                                          lambda v: v == 'right'))
+        self.assertTrue(left_value.match(lambda e: e == 'left',
+                                         lambda v: v == 'right'))
 
-        (right_value
-         .bind(lambda x: left_value)
-         .either(lambda x: self.assertEqual(x, 'left'), lambda x: x))
-
-        (left_value
-         .either(lambda x: self.assertEqual(x, 'left'), lambda x: x))
-
-        (left_value
-         .bind(lambda x: Left('other'))
-         .either(lambda x: self.assertEqual('left', x), lambda x: x))
-
-        (left_value
-         .bind(lambda x: Left('other'))
-         .either(lambda x: self.assertEqual('left', x), lambda x: x))
