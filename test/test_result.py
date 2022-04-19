@@ -152,10 +152,16 @@ class TestResultMonad(unittest.TestCase):
         ok_value = Ok(10)
         failure = Err("error")
 
+        with self.assertRaises(Exception):
+            failure.unwrap()
+
+        self.assertEqual(10, ok_value.unwrap())
         self.assertEqual(10, ok_value.unwrap_or(10))
         self.assertEqual("error", failure.unwrap_err_or("other error"))
         self.assertEqual(10, failure.unwrap_or(10))
         self.assertEqual("other error", ok_value.unwrap_err_or("other error"))
+        self.assertEqual(10, Ok(10).unwrap_or_else(lambda x: len(x)))
+        self.assertEqual(3, Err("foo").unwrap_or_else(lambda x: len(x)))
 
     def test_safe_function_returns_correct_result(self):
         def unsafe_function():

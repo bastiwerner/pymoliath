@@ -170,10 +170,16 @@ class TestTryMonad(unittest.TestCase):
         success_value = Success(10)
         failure = Failure(TypeError("error"))
 
+        with self.assertRaises(Exception):
+            failure.unwrap()
+
+        self.assertEqual(10, success_value.unwrap())
         self.assertEqual(10, success_value.unwrap_or(20))
         self.assertEqual(10, failure.unwrap_or(10))
         self.assertEqual(str(TypeError("error")), str(failure.unwrap_failure_or(TypeError('other error'))))
         self.assertEqual(str(TypeError('other error')), str(success_value.unwrap_failure_or(TypeError('other error'))))
+        self.assertEqual(2, Success(2).unwrap_or_else(lambda x: len(x)))
+        self.assertEqual(3, Failure(Exception("foo")).unwrap_or_else(lambda x: len(str(x))))
 
     def test_try_monad_match_function(self):
         right_value = Success('success')

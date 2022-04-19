@@ -4,7 +4,7 @@ import abc
 from functools import partial
 from typing import TypeVar, Generic, Callable, Any
 
-from pymoliath import Either, Left, Right, Result, Err, Ok
+from pymoliath.either import Either, Left, Right, Result, Err, Ok
 
 TypeSource = TypeVar("TypeSource")
 TypeResult = TypeVar("TypeResult")
@@ -41,8 +41,7 @@ class Try(Generic[TypeSource], abc.ABC):
         try:
             if self._is_failure:
                 return Failure(self._failure_value)
-            else:
-                return Success(function(self._success_value))
+            return Success(function(self._success_value))
         except Exception as e:
             return Failure(e)
 
@@ -63,8 +62,7 @@ class Try(Generic[TypeSource], abc.ABC):
         try:
             if self._is_failure:
                 return Failure(function(self._failure_value))
-            else:
-                return Success(self._success_value)
+            return Success(self._success_value)
         except Exception as e:
             return Failure(e)
 
@@ -85,8 +83,7 @@ class Try(Generic[TypeSource], abc.ABC):
         try:
             if self._is_failure:
                 return Failure(self._failure_value)
-            else:
-                return function(self._success_value)
+            return function(self._success_value)
         except Exception as e:
             return Failure(e)
 
@@ -107,8 +104,7 @@ class Try(Generic[TypeSource], abc.ABC):
         try:
             if self._is_failure:
                 return function(self._failure_value)
-            else:
-                return Success(self._success_value)
+            return Success(self._success_value)
         except Exception as e:
             return Failure(e)
 
@@ -163,7 +159,19 @@ class Try(Generic[TypeSource], abc.ABC):
 
         return self.bind(binder)
 
-    def unwrap_or(self, default_value: TypeSource) -> TypeSource:
+    def unwrap(self: Failure[TypeSource]) -> TypeSource:
+        """Returns the Success value if not Failure, or otherwise raises the Failure Exception.
+
+        Returns
+        -------
+        result: TypeRight
+            Returns the Success value or raises the Failure Exception.
+        """
+        if self._is_failure:
+            raise self._failure_value
+        return self._success_value
+
+    def unwrap_or(self: Failure[TypeSource], default_value: TypeSource) -> TypeSource:
         """Returns the Ok value if not Err, or otherwise a provided default value of the same type.
 
         Parameters
@@ -178,8 +186,24 @@ class Try(Generic[TypeSource], abc.ABC):
         """
         if self._is_failure:
             return default_value
-        else:
-            return self._success_value
+        return self._success_value
+
+    def unwrap_or_else(self: Failure[TypeSource], failure_function: Callable[[Exception], TypeSource]) -> TypeSource:
+        """Returns the Success value if not Failure, or otherwise calls the provided function with the failure value.
+
+        Parameters
+        ----------
+        failure_function: Callable[[Exception], TypeRight]
+            Called with the failure value and must return a value of type TypeSource
+
+        Returns
+        -------
+        result: TypeRight
+            Returns the Success value or value from the function call.
+        """
+        if self._is_failure:
+            return failure_function(self._failure_value)
+        return self._success_value
 
     def unwrap_failure_or(self, default_value: Exception) -> Exception:
         """Returns the Err value if not Ok, or otherwise a provided default Exception.
@@ -196,8 +220,7 @@ class Try(Generic[TypeSource], abc.ABC):
         """
         if self._is_failure:
             return self._failure_value
-        else:
-            return default_value
+        return default_value
 
     def match(self: Try[TypeSource], failure_function: Callable[[Exception], TypeResult],
               success_function: Callable[[TypeSource], TypeResult]) -> TypeResult:
@@ -212,8 +235,7 @@ class Try(Generic[TypeSource], abc.ABC):
         """
         if self._is_failure:
             return failure_function(self._failure_value)
-        else:
-            return success_function(self._success_value)
+        return success_function(self._success_value)
 
     def to_either(self: Try[TypeSource]) -> Either[Exception, TypeSource]:
         """Try Monad specific function to return an Either Monad.
@@ -225,8 +247,7 @@ class Try(Generic[TypeSource], abc.ABC):
         """
         if self._is_failure:
             return Left(self._failure_value)
-        else:
-            return Right(self._success_value)
+        return Right(self._success_value)
 
     def to_result(self: Try[TypeSource]) -> Result[TypeSource, Exception]:
         """Try Monad specific function to return an Result Monad.
@@ -238,8 +259,7 @@ class Try(Generic[TypeSource], abc.ABC):
         """
         if self._is_failure:
             return Err(self._failure_value)
-        else:
-            return Ok(self._success_value)
+        return Ok(self._success_value)
 
     def is_success(self: Try[TypeSource]) -> bool:
         """Try monad is success function

@@ -170,10 +170,16 @@ class TestEitherResultMonad(unittest.TestCase):
         right_value = Right('right')
         left_value = Left('left')
 
+        with self.assertRaises(Exception):
+          left_value.unwrap()
+
+        self.assertEqual('right', right_value.unwrap())
         self.assertEqual('right', right_value.unwrap_or('default'))
         self.assertEqual('left', left_value.unwrap_left_or('default'))
         self.assertEqual('default', right_value.unwrap_left_or('default'))
         self.assertEqual('default', left_value.unwrap_or('default'))
+        self.assertEqual(2, Right(2).unwrap_or_else(lambda x: len(x)))
+        self.assertEqual(3, Left("foo").unwrap_or_else(lambda x: len(x)))
 
     def test_either_monad_map_and_bind(self):
         right = Right('hello')

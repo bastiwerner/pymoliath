@@ -33,8 +33,7 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         """
         if self._is_left:
             return Left(self._left_value)
-        else:
-            return Right(function(self._right_value))
+        return Right(function(self._right_value))
 
     def map_left(self: Either[TypeLeft, TypeRight],
                  function: Callable[[TypeLeft], TypeResult]) -> Either[TypeResult, TypeRight]:
@@ -52,8 +51,7 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         """
         if self._is_left:
             return Left(function(self._left_value))
-        else:
-            return Right(self._right_value)
+        return Right(self._right_value)
 
     def bind(self: Either[TypeLeft, TypeRight],
              function: Callable[[TypeRight], Either[TypeLeft, TypeResult]]) -> Either[TypeLeft, TypeResult]:
@@ -71,8 +69,7 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         """
         if self._is_left:
             return Left(self._left_value)
-        else:
-            return function(self._right_value)
+        return function(self._right_value)
 
     def bind_left(self: Either[TypeLeft, TypeRight],
                   function: Callable[[TypeLeft], Either[TypeResult, TypeRight]]) -> Either[TypeResult, TypeRight]:
@@ -90,8 +87,7 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         """
         if self._is_left:
             return function(self._left_value)
-        else:
-            return Right(self._right_value)
+        return Right(self._right_value)
 
     def apply(self: Either[TypeLeft, TypeRight],
               applicative: Either[TypeLeft, Callable[[TypeRight], TypeResult]]) -> Either[TypeLeft, TypeResult]:
@@ -146,6 +142,18 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
 
         return self.bind(binder)
 
+    def unwrap(self: Either[TypeLeft, TypeRight]) -> TypeRight:
+        """Returns the Right value if not Left, or otherwise raises an Exception containing the left value.
+
+        Returns
+        -------
+        result: TypeRight
+            Returns the Right value or raises an Exception.
+        """
+        if self._is_left:
+            raise Exception(self._left_value)
+        return self._right_value
+
     def unwrap_or(self: Either[TypeLeft, TypeRight], default_value: TypeRight) -> TypeRight:
         """Returns the Right value if not Left, or otherwise a provided default value of the same type.
 
@@ -161,8 +169,24 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         """
         if self._is_left:
             return default_value
-        else:
-            return self._right_value
+        return self._right_value
+
+    def unwrap_or_else(self: Either[TypeLeft, TypeRight], left_function: Callable[[TypeLeft], TypeRight]) -> TypeRight:
+        """Returns the Right value if not Left, or otherwise a provided function which will be called with the left.
+
+        Parameters
+        ----------
+        left_function: Callable[[TypeLeft], TypeRight]
+            Called with the left value and must return a value of type TypeRight
+
+        Returns
+        -------
+        result: TypeRight
+            Returns the Right value or value from the function call.
+        """
+        if self._is_left:
+            return left_function(self._left_value)
+        return self._right_value
 
     def unwrap_left_or(self: Either[TypeLeft, TypeRight], default_value: TypeLeft) -> TypeLeft:
         """Returns the Left value if not Right, or otherwise a provided default value of the same type.
@@ -179,8 +203,7 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         """
         if self._is_left:
             return self._left_value
-        else:
-            return default_value
+        return default_value
 
     def match(self: Either[TypeLeft, TypeRight], left_function: Callable[[TypeLeft], TypeResult],
               right_function: Callable[[TypeRight], TypeResult]) -> TypeResult:
@@ -195,8 +218,7 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
         """
         if self._is_left:
             return left_function(self._left_value)
-        else:
-            return right_function(self._right_value)
+        return right_function(self._right_value)
 
     def is_left(self: Either[TypeLeft, TypeRight]) -> bool:
         """Either monad is left function
@@ -305,8 +327,7 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
         """
         if self._is_err:
             return Err(self._err_value)
-        else:
-            return Ok(function(self._ok_value))
+        return Ok(function(self._ok_value))
 
     def map_err(self: Result[TypeOk, TypeErr], function: Callable[[TypeErr], TypeReturn]) -> Result[TypeOk, TypeReturn]:
         """Calls function to the a wrapped Err value if not Ok, otherwise leaving the Ok value untouched.
@@ -324,8 +345,7 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
         """
         if self._is_err:
             return Err(function(self._err_value))
-        else:
-            return Ok(self._ok_value)
+        return Ok(self._ok_value)
 
     def bind(self: Result[TypeOk, TypeErr], function: Callable[[TypeOk], Result[TypeReturn, TypeErr]]) -> Result[
         TypeReturn, TypeErr]:
@@ -344,8 +364,7 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
         """
         if self._is_err:
             return Err(self._err_value)
-        else:
-            return function(self._ok_value)
+        return function(self._ok_value)
 
     def bind_err(self: Result[TypeOk, TypeErr], function: Callable[[TypeErr], Result[TypeOk, TypeReturn]]) -> Result[
         TypeOk, TypeReturn]:
@@ -364,8 +383,7 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
         """
         if self._is_err:
             return function(self._err_value)
-        else:
-            return Ok(self._ok_value)
+        return Ok(self._ok_value)
 
     def apply(self: Result[TypeOk, TypeErr], applicative: Result[Callable[[TypeOk], TypeReturn], TypeErr]) -> Result[
         TypeReturn, TypeErr]:
@@ -420,6 +438,18 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
 
         return self.bind(binder)
 
+    def unwrap(self) -> TypeOk:
+        """Returns the Ok value if not Err, or otherwise raises an Exception with the Err value.
+
+        Returns
+        -------
+        result: TypeOk
+            Returns the Ok value or a default value.
+        """
+        if self._is_err:
+            raise Exception(self._err_value)
+        return self._ok_value
+
     def unwrap_or(self, default_value: TypeOk) -> TypeOk:
         """Returns the Ok value if not Err, or otherwise a provided default value of the same type.
 
@@ -435,8 +465,24 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
         """
         if self._is_err:
             return default_value
-        else:
-            return self._ok_value
+        return self._ok_value
+
+    def unwrap_or_else(self, err_function: Callable[[TypeErr], TypeOk]) -> TypeOk:
+        """Returns the Ok value if not Err, or otherwise calls the err_function.
+
+        Parameters
+        ----------
+        err_function: Callable[[TypeErr], TypeOk]
+            Error function which will be called if the result is of type Err.
+
+        Returns
+        -------
+        result: TypeOk
+            Returns the Ok value or a default value.
+        """
+        if self._is_err:
+            return err_function(self._err_value)
+        return self._ok_value
 
     def unwrap_err_or(self, default_value: TypeErr) -> TypeErr:
         """Returns the Err value if not Ok, or otherwise a provided default of TypeErr.
@@ -453,8 +499,7 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
         """
         if self._is_err:
             return self._err_value
-        else:
-            return default_value
+        return default_value
 
     def match(self: Result[TypeOk, TypeErr], err_function: Callable[[TypeErr], TypeReturn],
               ok_function: Callable[[TypeOk], TypeReturn]) -> TypeReturn:
@@ -469,8 +514,7 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
         """
         if self._is_err:
             return err_function(self._err_value)
-        else:
-            return ok_function(self._ok_value)
+        return ok_function(self._ok_value)
 
     def to_either(self: Result[TypeOk, TypeErr]) -> Either[TypeErr, TypeOk]:
         """Converts the Result Monad to an either monad.

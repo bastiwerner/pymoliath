@@ -36,10 +36,14 @@ poetry run test
 
 Every Monad implementation of Pymoliath has the typical haskell Monad interface.
 
-* `map` (>>): Monad(a).map(f a -> b) => Monad(b)
-* `bind` (>>=): Monad(a).bind(f a -> Monad(b)) => Monad(b)
-* `apply` (<*>): Monad(a).apply(Monad(f a -> b)) => Monad(b)
-* `apply2` (<*>): Monad(f a -> b).apply2(Monad(a)) => Monad(b)
+* `map` (`>>`): 
+  * Monad(a).map(f a -> b) => Monad(b)
+* `bind` (`>>=`): 
+  * Monad(a).bind(f a -> Monad(b)) => Monad(b)
+* `apply` (`<*>`): 
+  * Monad(a).apply(Monad(f a -> b)) => Monad(b)
+* `apply2` (`<*>`): 
+  * Monad(f a -> b).apply2(Monad(a)) => Monad(b)
 * `run`: (IO, Reader, Writer, State, Lazy)
 
 ## Maybe
@@ -54,7 +58,9 @@ nothing: Maybe[int] = Nothing()
 just.is_just()
 just.is_nothing()
 
+just.unwrap()  # Returns the just value or raises an Exception
 just.unwrap_or(default_value)
+just.unwrap_or_else(default_function)
 
 just.filter(filter_function)
 just.match(just_function, default_function)
@@ -80,8 +86,10 @@ right.map_left(left_map_function)
 right.bind(right_bind_function)
 right.bind_left(left_bind_function)
 
+right.unwrap()  # Returns the right value or raises an Exception.
 right.unwrap_or(default_value_of_type_right)
 right.unwrap_left_or(default_value_of_type_left)
+right.unwrap_or_else(left_function)
 
 right.match(left_function, right_function)
 right.to_result()  # Result[TypeRight, TypeLeft]
@@ -107,7 +115,9 @@ result.map_err(err_map_function)
 result.bind(ok_bind_function)
 result.bind_err(err_bind_function)
 
+result.unwrap()  # Returns the result Ok value or raises an Exception containing the Err value.
 result.unwrap_or(default_value_of_type_ok)
+result.unwrap_or_else(err_function)
 result.unwrap_err_or(default_exception_value)
 
 result.match(err_function, ok_function)
@@ -137,7 +147,9 @@ success.map_failure(err_map_function)
 success.bind(ok_bind_function)
 success.bind_failure(err_bind_function)
 
+success.unwrap()  # Returns the success value or raises the Exception contained in the Failure.
 success.unwrap_or(default_value_of_type_ok)
+success.unwrap_or_else(err_function)
 success.unwrap_failure_or(default_exception_value)
 
 success.match(err_function, ok_function)
@@ -202,10 +214,10 @@ Haskell: [Control.Monad.Writer.Lazy](https://hackage.haskell.org/package/mtl-2.2
 ```python
 # Writer[TypeSource, TypeMonoid]
 writer: Writer[int, str] = Writer(10, 'hello')
-writer.run(12)  # (12, 'hi')
+writer.run()  # (10, 'hello')
 
-writer.tell(' world')  # Writer(10, 'hi world')
-writer.listen()  # Writer((10, 'hi'), 'hi')
+writer.tell(' world')  # Writer(10, 'hello world')
+writer.listen()  # Writer((10, 'hello world'), 'hello world')
 Writer((10, lambda w: w + " world"), "hello").pass_()  # Writer((10, "hello world")
 ```
 

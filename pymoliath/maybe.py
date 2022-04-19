@@ -44,8 +44,7 @@ class Maybe(Generic[TypeSource], abc.ABC):
         """
         if self._is_nothing:
             return Nothing()
-        else:
-            return Just(function(self._value))
+        return Just(function(self._value))
 
     def bind(self: Maybe[TypeSource], function: Callable[[TypeSource], Maybe[TypeResult]]) -> Maybe[TypeResult]:
         """Maybe Monad bind interface (>>=, bind, flatMap).
@@ -62,8 +61,7 @@ class Maybe(Generic[TypeSource], abc.ABC):
         """
         if self._is_nothing:
             return Nothing()
-        else:
-            return function(self._value)
+        return function(self._value)
 
     def apply(self: Maybe[TypeSource], applicative: Maybe[Callable[[TypeSource], TypeResult]]) -> Maybe[TypeResult]:
         """Maybe Monad applicative interface for Maybe Monads containing a value (<*>).
@@ -131,8 +129,19 @@ class Maybe(Generic[TypeSource], abc.ABC):
         """
         if self._is_nothing or filter_function(self._value):
             return Nothing()
-        else:
-            return Just(self._value)
+        return Just(self._value)
+
+    def unwrap(self: Maybe[TypeSource]) -> TypeSource:
+        """Returns the internal value of the Just or raises an exception if Nothing.
+
+        Returns
+        -------
+        value: TypeSource
+            Returns the Maybe value or a default value.
+        """
+        if self._is_nothing:
+            raise Exception("Unwrap error on Maybe monad")
+        return self._value
 
     def unwrap_or(self: Maybe[TypeSource], default_value: TypeSource) -> TypeSource:
         """Returns the internal value of the Just or default value if the Monad is a Nothing.
@@ -149,8 +158,24 @@ class Maybe(Generic[TypeSource], abc.ABC):
         """
         if self._is_nothing:
             return default_value
-        else:
-            return self._value
+        return self._value
+
+    def unwrap_or_else(self: Maybe[TypeSource], nothing_function: Callable[[], TypeSource]) -> TypeSource:
+        """Returns the internal value of the Just or default value if the Monad is a Nothing.
+
+        Parameters
+        ----------
+        nothing_function: Callable[[], TypeSource]
+            Function to be called when the Maybe value is of type Nothing
+
+        Returns
+        -------
+        value: TypeSource
+            Returns the Maybe value or calls the nothing function.
+        """
+        if self._is_nothing:
+            return nothing_function()
+        return self._value
 
     def match(self: Maybe[TypeSource],
               just_function: Callable[[TypeSource], TypeResult],
@@ -171,8 +196,7 @@ class Maybe(Generic[TypeSource], abc.ABC):
         """
         if self._is_nothing:
             return nothing_function()
-        else:
-            return just_function(self._value)
+        return just_function(self._value)
 
     def is_nothing(self):
         return self._is_nothing
@@ -184,8 +208,7 @@ class Maybe(Generic[TypeSource], abc.ABC):
     def from_optional(cls: Type[Maybe[TypeSource]], value: Optional[TypeSource]) -> Maybe[TypeSource]:
         if value:
             return Just(value)
-        else:
-            return Nothing()
+        return Nothing()
 
     @abc.abstractmethod
     def __str__(self: Maybe[TypeSource]) -> str:

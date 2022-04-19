@@ -179,12 +179,23 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(Nothing(), just_value.filter(lambda v: v <= 10))
         self.assertEqual(Nothing(), nothing.filter(lambda v: v < 10))
 
+    def test_maybe_unwrap(self):
+        just = Just('a')
+        nothing = Nothing()
+
+        with self.assertRaises(Exception):
+            nothing.unwrap()
+
+        self.assertEqual('a', just.unwrap())
+        self.assertEqual('a', just.unwrap_or('b'))
+        self.assertEqual(10, nothing.unwrap_or(10))
+        self.assertEqual('a', just.unwrap_or_else(lambda: 10))
+        self.assertEqual(10, nothing.unwrap_or_else(lambda: 10))
+
     def test_maybe_functions(self):
         just = Just('a')
         nothing = Nothing()
 
-        self.assertEqual('a', just.unwrap_or('b'))
-        self.assertEqual(10, nothing.unwrap_or(10))
         self.assertEqual('a', just.match(lambda x: x, lambda: 'default'))
         self.assertEqual('default', just.bind(lambda x: Nothing()).match(lambda x: x, lambda: 'default'))
         self.assertEqual('default', nothing.match(lambda x: x, lambda: 'default'))
