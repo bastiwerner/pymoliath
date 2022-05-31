@@ -1,6 +1,5 @@
 from . import util
-from .either import Either, Left, Right, Result, Err, Ok
-from .exception import Try, Success, Failure
+from .either import Either, Left, Right, Result, Err, Ok, Try, Success, Failure
 from .io import IO
 from .lazy import LazyMonad, Sequence
 from .list import ListMonad

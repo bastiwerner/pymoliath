@@ -1,7 +1,7 @@
 import unittest
 
 from pymoliath import Right, Left, Ok, Err
-from pymoliath.exception import Try, Success, Failure
+from pymoliath.either import Try, Success, Failure
 from pymoliath.util import compose
 
 
