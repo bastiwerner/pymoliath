@@ -132,8 +132,12 @@ class TestMonadList(unittest.TestCase):
         self.assertEqual('[1, 2, 3, 4]', str(result.to_list()))
 
     def test_list_monad_with_filter_and_take_returns_corrected_filtered_list(self):
-        result = ListMonad([1, 2, 3, 4, 5, 6, 7, 8, 10])
+        result = ListMonad([1, 2, 3, 4, 5, 6, 7, 8, 9])
 
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9], result.take(20))
+        self.assertEqual([], result.skip(10))
+        self.assertEqual([1, 2, 3, 4], result.take(4))
+        self.assertEqual([6, 7, 8, 9], result.skip(5))
         self.assertEqual([3, 4], result.take(4).filter(lambda x: x > 2))
 
     def test_monad_list_examples(self):

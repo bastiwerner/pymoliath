@@ -207,6 +207,21 @@ class Sequence(Generic[TypeSource]):
         """
         return self.__class__(lambda: self._callable().take(amount))
 
+    def skip(self: Sequence[TypeSource], amount: int) -> Sequence[TypeSource]:
+        """Sequence monad skip function
+
+        Parameters
+        ----------
+        amount: int
+            Amount of values to be skipped from the list for the next operation.
+
+        Returns
+        -------
+        sequence: Sequence[TypeSource]
+            Skips an amount of values from the list for further execution.
+        """
+        return self.__class__(lambda: self._callable().skip(amount))
+
     def apply(self: Sequence[TypeSource], applicative: Sequence[Callable[[TypeSource], TypeResult]]) -> Sequence[
         TypeResult]:
         """Sequence monad applicative interface for sequence monads containing a function returning a value (<*>).
