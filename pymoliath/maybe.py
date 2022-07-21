@@ -206,9 +206,21 @@ class Maybe(Generic[TypeSource], abc.ABC):
 
     @classmethod
     def from_optional(cls: Type[Maybe[TypeSource]], value: Optional[TypeSource]) -> Maybe[TypeSource]:
-        if value:
-            return Just(value)
-        return Nothing()
+        if value is None:
+            return Nothing()
+        return Just(value)
+
+    def to_optional(self: Maybe[TypeSource]) -> Optional[TypeSource]:
+        if self.is_nothing():
+            return None
+        return self._value
+
+    @classmethod
+    def safe(cls, function: Callable[[], TypeResult]) -> Maybe[TypeResult]:
+        try:
+            return Just(function())
+        except Exception as e:
+            return Nothing()
 
     @abc.abstractmethod
     def __str__(self: Maybe[TypeSource]) -> str:
