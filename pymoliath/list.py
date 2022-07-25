@@ -84,6 +84,7 @@ class ListMonad(List[TypeSource]):
         Returns
         -------
         list: ListMonad[TypeSource]
+            Skips an amount of values from the list for further execution.
         """
         return self.__class__(itertools.islice(self, amount, None))
 

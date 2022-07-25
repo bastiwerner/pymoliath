@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import Mock
+from unittest.mock import MagicMock
 
 from pymoliath.maybe import Just, Nothing, Maybe
 from pymoliath.util import compose
@@ -23,8 +24,12 @@ class TestMaybe(unittest.TestCase):
         put it in a default context with return and then feed it to a function by using >>=,
         it’s the same as just taking the value and applying the function to it.
         """
-        just_function = lambda x: Just(10)
-        nothing_function = lambda x: Nothing()
+
+        def just_function(_):
+            return Just(10)
+
+        def nothing_function(_):
+            return Nothing()
 
         self.assertEqual(just_function(10), Just(10).bind(just_function))
         self.assertEqual(nothing_function(10), Nothing().bind(nothing_function))
@@ -50,16 +55,24 @@ class TestMaybe(unittest.TestCase):
         it shouldn’t matter how they’re nested.
         """
         just_value = Just(42)
-        f = lambda x: Just(x + 1000)
-        g = lambda y: Just(y * 42)
+
+        def f(x):
+            return Just(x + 1000)
+
+        def g(y):
+            return Just(y * 42)
 
         self.assertEqual(just_value.bind(f).bind(g), just_value.bind(lambda x: f(x).bind(g)))
 
         nothing_value = Nothing()
-        f = lambda x: Nothing()
-        g = lambda y: Nothing()
 
-        self.assertEqual(nothing_value.bind(f).bind(g), nothing_value.bind(lambda x: f(x).bind(g)))
+        def h(_):
+            return Nothing()
+
+        def i(_):
+            return Nothing()
+
+        self.assertEqual(nothing_value.bind(h).bind(i), nothing_value.bind(lambda x: h(x).bind(i)))
 
     def test_monad_functor_identity_law(self):
         """Functors identity law: (m a >= f x -> x) ≡ m a
@@ -79,8 +92,11 @@ class TestMaybe(unittest.TestCase):
         just_value = Just(42)
         nothing_value = Nothing()
 
-        f = lambda x: x + 1000
-        g = lambda y: y * 42
+        def f(x):
+            return x + 1000
+
+        def g(y):
+            return y * 42
 
         self.assertEqual(just_value.map(compose(f, g)), just_value.map(g).map(f))
         self.assertEqual(nothing_value.map(compose(f, g)), nothing_value.map(g).map(f))
@@ -109,7 +125,9 @@ class TestMaybe(unittest.TestCase):
         We can then apply the wrapped function over the wrapped object.
         """
         x = 42
-        f = lambda x: x * 42
+
+        def f(x):
+            return x * 42
 
         self.assertEqual(Just(x).apply(Just(f)), Just(f(x)))
         self.assertEqual(Nothing().apply(Just(f)), Nothing())
@@ -127,7 +145,9 @@ class TestMaybe(unittest.TestCase):
         w = Just(42)
         u = Just(lambda x: x + 42)
         v = Just(lambda x: x * 42)
-        composition = lambda f, g: compose(f, g)
+
+        def composition(f, g):
+            return compose(f, g)
 
         self.assertEqual(w.apply(v.apply(u.apply(Just(composition)))), w.apply(v).apply(u))
         self.assertEqual(Just(composition).apply2(u).apply2(v).apply2(w), u.apply2(v.apply2(w)))
@@ -154,6 +174,15 @@ class TestMaybe(unittest.TestCase):
         self.assertTrue(isinstance(Just('a'), Maybe))
         self.assertTrue(isinstance(Nothing(), Maybe))
 
+    def test_maybe_from_and_to_optional(self):
+        maybe_dict: Maybe[dict] = Maybe.from_optional({})
+        maybe_string: Maybe[str] = Maybe.from_optional('')
+        maybe_none: Maybe[str] = Maybe.from_optional(None)
+
+        self.assertEqual({}, maybe_dict.to_optional())
+        self.assertEqual('', maybe_string.to_optional())
+        self.assertEqual(None, maybe_none.to_optional())
+
     def test_maybe_is_nothing_is_just(self):
         just = Just(10)
         nothing = Nothing()
@@ -179,6 +208,14 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(Just(10), just_value.filter(lambda v: v > 10))
         self.assertEqual(Nothing(), just_value.filter(lambda v: v <= 10))
         self.assertEqual(Nothing(), nothing.filter(lambda v: v < 10))
+
+    def maybe_safe_function(self):
+        exception_function = MagicMock(side_effect=Exception("error"))
+        maybe_unsafe = Maybe.safe(lambda: exception_function())
+        maybe_safe = Maybe.safe(lambda: 10)
+
+        self.assertEqual(Nothing(), maybe_unsafe)
+        self.assertEqual(Just(10), maybe_safe)
 
     def test_maybe_unwrap(self):
         just = Just('a')

@@ -221,6 +221,7 @@ class Sequence(Generic[TypeSource]):
         Returns
         -------
         sequence: Sequence[TypeSource]
+            Skips an amount of values from the list for further execution.
         """
         return self.__class__(lambda: self._callable().skip(amount))
 
