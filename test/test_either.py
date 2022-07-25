@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import Mock
 
 from pymoliath.either import Left, Right, Either
 from pymoliath.util import compose
@@ -171,7 +172,7 @@ class TestEitherResultMonad(unittest.TestCase):
         left_value = Left('left')
 
         with self.assertRaises(Exception):
-          left_value.unwrap()
+            left_value.unwrap()
 
         self.assertEqual('right', right_value.unwrap())
         self.assertEqual('right', right_value.unwrap_or('default'))
@@ -180,6 +181,16 @@ class TestEitherResultMonad(unittest.TestCase):
         self.assertEqual('default', left_value.unwrap_or('default'))
         self.assertEqual(2, Right(2).unwrap_or_else(lambda x: len(x)))
         self.assertEqual(3, Left("foo").unwrap_or_else(lambda x: len(x)))
+
+    def test_either_inspect(self):
+        right_value = Right('right')
+        left_value = Left('left')
+        print_mock = Mock()
+
+        self.assertEqual(right_value, right_value.inspect(print_mock).inspect_left(print_mock))
+        print_mock.assert_called_with('right')
+        self.assertEqual(left_value, left_value.inspect(print_mock).inspect_left(print_mock))
+        print_mock.assert_called_with('left')
 
     def test_either_monad_map_and_bind(self):
         right = Right('hello')
@@ -197,4 +208,3 @@ class TestEitherResultMonad(unittest.TestCase):
                                           lambda v: v == 'right'))
         self.assertTrue(left_value.match(lambda e: e == 'left',
                                          lambda v: v == 'right'))
-

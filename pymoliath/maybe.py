@@ -177,6 +177,22 @@ class Maybe(Generic[TypeSource], abc.ABC):
             return nothing_function()
         return self._value
 
+    def inspect(self: Maybe[TypeSource], function: Callable[[TypeSource], None]) -> Maybe[TypeSource]:
+        """Inspect the Maybe monad value of TypeSource
+
+        Parameters
+        ----------
+        function: Callable[[TypeSource], None]
+            Inspection function which takes the maybe value if not nothing
+
+        Returns
+        -------
+        maybe: Maybe[TypeSource]
+        """
+        if not self.is_nothing():
+            function(self._value)
+        return self
+
     def match(self: Maybe[TypeSource],
               just_function: Callable[[TypeSource], TypeResult],
               nothing_function: Callable[[], TypeResult]) -> TypeResult:
