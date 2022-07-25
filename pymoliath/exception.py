@@ -159,7 +159,7 @@ class Try(Generic[TypeSource], abc.ABC):
 
         return self.bind(binder)
 
-    def unwrap(self: Failure[TypeSource]) -> TypeSource:
+    def unwrap(self: Try[TypeSource]) -> TypeSource:
         """Returns the Success value if not Failure, or otherwise raises the Failure Exception.
 
         Returns
@@ -171,7 +171,7 @@ class Try(Generic[TypeSource], abc.ABC):
             raise self._failure_value
         return self._success_value
 
-    def unwrap_or(self: Failure[TypeSource], default_value: TypeSource) -> TypeSource:
+    def unwrap_or(self: Try[TypeSource], default_value: TypeSource) -> TypeSource:
         """Returns the Ok value if not Err, or otherwise a provided default value of the same type.
 
         Parameters
@@ -188,7 +188,7 @@ class Try(Generic[TypeSource], abc.ABC):
             return default_value
         return self._success_value
 
-    def unwrap_or_else(self: Failure[TypeSource], failure_function: Callable[[Exception], TypeSource]) -> TypeSource:
+    def unwrap_or_else(self: Try[TypeSource], failure_function: Callable[[Exception], TypeSource]) -> TypeSource:
         """Returns the Success value if not Failure, or otherwise calls the provided function with the failure value.
 
         Parameters
@@ -205,7 +205,7 @@ class Try(Generic[TypeSource], abc.ABC):
             return failure_function(self._failure_value)
         return self._success_value
 
-    def unwrap_failure_or(self, default_value: Exception) -> Exception:
+    def unwrap_failure_or(self: Try[TypeSource], default_value: Exception) -> Exception:
         """Returns the Err value if not Ok, or otherwise a provided default Exception.
 
         Parameters
@@ -221,6 +221,38 @@ class Try(Generic[TypeSource], abc.ABC):
         if self._is_failure:
             return self._failure_value
         return default_value
+
+    def inspect(self: Try[TypeSource], function: Callable[[TypeSource], None]) -> Try[TypeSource]:
+        """Inspect the Try monad value of TypeSource
+
+        Parameters
+        ----------
+        function: Callable[[TypeSource], None]
+            Inspection function which takes the success value of the Try monad
+
+        Returns
+        -------
+        try: Try[TypeSource]
+        """
+        if self.is_success():
+            function(self._success_value)
+        return self
+
+    def inspect_failure(self: Try[TypeSource], function: Callable[[Exception], None]) -> Try[TypeSource]:
+        """Inspect the Try monad Exception value
+
+        Parameters
+        ----------
+        function: Callable[[Exception], None]
+            Inspection function which takes the exception value of the Try monad
+
+        Returns
+        -------
+        try: Try[TypeSource]
+        """
+        if self.is_failure():
+            function(self._failure_value)
+        return self
 
     def match(self: Try[TypeSource], failure_function: Callable[[Exception], TypeResult],
               success_function: Callable[[TypeSource], TypeResult]) -> TypeResult:

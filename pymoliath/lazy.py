@@ -175,7 +175,10 @@ class Sequence(Generic[TypeSource]):
         sequence: Sequence[TypeResult]
             Returns the new sequence monad from the bind function
         """
-        return self.__class__(lambda: self._callable().bind(lambda value: ListMonad(function(value).run())))
+        def bind_function(value: TypeSource) -> ListMonad[TypeResult]:
+            return ListMonad(function(value).run())
+
+        return self.__class__(lambda: self._callable().bind(bind_function))
 
     def filter(self: Sequence[TypeSource], filter_function: Callable[[TypeSource], bool]) -> Sequence[TypeSource]:
         """Sequence filter function
@@ -206,6 +209,20 @@ class Sequence(Generic[TypeSource]):
             Takes our only an specific amount of values from the list for further execution.
         """
         return self.__class__(lambda: self._callable().take(amount))
+
+    def skip(self: Sequence[TypeSource], amount: int) -> Sequence[TypeSource]:
+        """Sequence monad skip function
+
+        Parameters
+        ----------
+        amount: int
+            Amount of values to be skipped from the list for the next operation.
+
+        Returns
+        -------
+        sequence: Sequence[TypeSource]
+        """
+        return self.__class__(lambda: self._callable().skip(amount))
 
     def apply(self: Sequence[TypeSource], applicative: Sequence[Callable[[TypeSource], TypeResult]]) -> Sequence[
         TypeResult]:

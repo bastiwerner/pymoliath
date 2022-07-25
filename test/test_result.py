@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import Mock
 
 from pymoliath.either import Right, Left, Ok, Err, Result
 from pymoliath.util import compose
@@ -162,6 +163,16 @@ class TestResultMonad(unittest.TestCase):
         self.assertEqual("other error", ok_value.unwrap_err_or("other error"))
         self.assertEqual(10, Ok(10).unwrap_or_else(lambda x: len(x)))
         self.assertEqual(3, Err("foo").unwrap_or_else(lambda x: len(x)))
+
+    def test_result_inspect(self):
+        ok_value = Ok(10)
+        error_value = Err("error")
+        print_mock = Mock()
+
+        self.assertEqual(ok_value, ok_value.inspect(print_mock).inspect_err(print_mock))
+        print_mock.assert_called_with(10)
+        self.assertEqual(error_value, error_value.inspect(print_mock).inspect_err(print_mock))
+        print_mock.assert_called_with("error")
 
     def test_safe_function_returns_correct_result(self):
         def unsafe_function():

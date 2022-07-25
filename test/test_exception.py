@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import Mock
 
 from pymoliath import Right, Left, Ok, Err
 from pymoliath.exception import Try, Success, Failure
@@ -180,6 +181,17 @@ class TestTryMonad(unittest.TestCase):
         self.assertEqual(str(TypeError('other error')), str(success_value.unwrap_failure_or(TypeError('other error'))))
         self.assertEqual(2, Success(2).unwrap_or_else(lambda x: len(x)))
         self.assertEqual(3, Failure(Exception("foo")).unwrap_or_else(lambda x: len(str(x))))
+
+    def test_exception_inspect(self):
+        success = Success(10)
+        exception = TypeError("error")
+        failure = Failure(exception)
+        print_mock = Mock()
+
+        self.assertEqual(success, success.inspect(print_mock).inspect_failure(print_mock))
+        print_mock.assert_called_with(10)
+        self.assertEqual(failure, failure.inspect(print_mock).inspect_failure(print_mock))
+        print_mock.assert_called_with(exception)
 
     def test_try_monad_match_function(self):
         right_value = Success('success')

@@ -10,7 +10,9 @@ TypeResult = TypeVar("TypeResult")
 
 
 class Continuation(Generic[TypeSource, TypeReturn]):
-    """The Either Monad represents values with two possibilities: either Left[A] or Right[B].
+    """The Continuation monad represents computations in continuation-passing style (CPS).
+    In continuation-passing style function result is not returned, but instead is passed to another function,
+    received as a parameter (continuation).
     """
     _computation: Callable[[Callable[[TypeSource], TypeReturn]], TypeReturn]
 
@@ -38,8 +40,8 @@ class Continuation(Generic[TypeSource, TypeReturn]):
         return Continuation(mapping)  # type: ignore 
 
     def bind(self: Continuation[TypeSource, TypeReturn],
-             function: Callable[[TypeSource], Continuation[TypeResult, TypeReturn]]) -> Continuation[
-        TypeResult, TypeReturn]:
+             function: Callable[[TypeSource], Continuation[TypeResult, TypeReturn]]) \
+            -> Continuation[TypeResult, TypeReturn]:
         """Binds the given function by applying the continuation computation to the resulting continuation
         from passed function.
 

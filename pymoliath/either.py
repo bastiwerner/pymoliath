@@ -205,6 +205,40 @@ class Either(Generic[TypeLeft, TypeRight], abc.ABC):
             return self._left_value
         return default_value
 
+    def inspect(self: Either[TypeLeft, TypeRight], function: Callable[[TypeRight], None]) -> Either[
+        TypeLeft, TypeRight]:
+        """Inspect the Either value of TypeRight
+
+        Parameters
+        ----------
+        function: Callable[[TypeRight], None]
+            Inspection function which takes the right value of the Either monad
+
+        Returns
+        -------
+        either: Either[TypeLeft, TypeRight]
+        """
+        if self.is_right():
+            function(self._right_value)
+        return self
+
+    def inspect_left(self: Either[TypeLeft, TypeRight], function: Callable[[TypeLeft], None]) -> Either[
+        TypeLeft, TypeRight]:
+        """Inspect the Either value of TypeLeft
+
+        Parameters
+        ----------
+        function: Callable[[TypeLeft], None]
+            Inspection function which takes the left value of the Either monad
+
+        Returns
+        -------
+        either: Either[TypeLeft, TypeRight]
+        """
+        if self.is_left():
+            function(self._left_value)
+        return self
+
     def match(self: Either[TypeLeft, TypeRight], left_function: Callable[[TypeLeft], TypeResult],
               right_function: Callable[[TypeRight], TypeResult]) -> TypeResult:
         """Right monad specific function to handle railroad orientated programming.
@@ -438,7 +472,7 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
 
         return self.bind(binder)
 
-    def unwrap(self) -> TypeOk:
+    def unwrap(self: Result[TypeOk, TypeErr]) -> TypeOk:
         """Returns the Ok value if not Err, or otherwise raises an Exception with the Err value.
 
         Returns
@@ -450,7 +484,7 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
             raise Exception(self._err_value)
         return self._ok_value
 
-    def unwrap_or(self, default_value: TypeOk) -> TypeOk:
+    def unwrap_or(self: Result[TypeOk, TypeErr], default_value: TypeOk) -> TypeOk:
         """Returns the Ok value if not Err, or otherwise a provided default value of the same type.
 
         Parameters
@@ -467,7 +501,7 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
             return default_value
         return self._ok_value
 
-    def unwrap_or_else(self, err_function: Callable[[TypeErr], TypeOk]) -> TypeOk:
+    def unwrap_or_else(self: Result[TypeOk, TypeErr], err_function: Callable[[TypeErr], TypeOk]) -> TypeOk:
         """Returns the Ok value if not Err, or otherwise calls the err_function.
 
         Parameters
@@ -484,7 +518,7 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
             return err_function(self._err_value)
         return self._ok_value
 
-    def unwrap_err_or(self, default_value: TypeErr) -> TypeErr:
+    def unwrap_err_or(self: Result[TypeOk, TypeErr], default_value: TypeErr) -> TypeErr:
         """Returns the Err value if not Ok, or otherwise a provided default of TypeErr.
 
         Parameters
@@ -500,6 +534,38 @@ class Result(Generic[TypeOk, TypeErr], abc.ABC):
         if self._is_err:
             return self._err_value
         return default_value
+
+    def inspect(self: Result[TypeOk, TypeErr], function: Callable[[TypeOk], None]) -> Result[TypeOk, TypeErr]:
+        """Inspect the Result monad value of TypeOk
+
+        Parameters
+        ----------
+        function: Callable[[TypeRight], None]
+            Inspection function which takes the ok value of the Result monad
+
+        Returns
+        -------
+        result: Result[TypeOk, TypeErr]
+        """
+        if self.is_ok():
+            function(self._ok_value)
+        return self
+
+    def inspect_err(self: Result[TypeOk, TypeErr], function: Callable[[TypeErr], None]) -> Result[TypeOk, TypeErr]:
+        """Inspect the Result monad value of TypeErr
+
+        Parameters
+        ----------
+        function: Callable[[TypeErr], None]
+            Inspection function which takes the error value of the Result monad
+
+        Returns
+        -------
+        result: Result[TypeOk, TypeErr]
+        """
+        if self.is_err():
+            function(self._err_value)
+        return self
 
     def match(self: Result[TypeOk, TypeErr], err_function: Callable[[TypeErr], TypeReturn],
               ok_function: Callable[[TypeOk], TypeReturn]) -> TypeReturn:

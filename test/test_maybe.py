@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import Mock
 
 from pymoliath.maybe import Just, Nothing, Maybe
 from pymoliath.util import compose
@@ -191,6 +192,15 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(10, nothing.unwrap_or(10))
         self.assertEqual('a', just.unwrap_or_else(lambda: 10))
         self.assertEqual(10, nothing.unwrap_or_else(lambda: 10))
+
+    def test_maybe_inspect(self):
+        just = Just('a')
+        nothing = Nothing()
+        print_mock = Mock()
+
+        self.assertEqual(just, just.inspect(print_mock))
+        self.assertEqual(nothing, nothing.inspect(print_mock))
+        print_mock.assert_called_once_with('a')
 
     def test_maybe_functions(self):
         just = Just('a')

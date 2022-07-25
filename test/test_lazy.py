@@ -233,23 +233,25 @@ class TestSequence(unittest.TestCase):
         self.assertEqual(Sequence([composition]).apply2(u).apply2(v).apply2(w).run(),
                          u.apply2(v.apply2(w)).run())
 
-    def test_list_monad_with_nested_list_and_enumeration_returns_correct_result(self):
+    def test_sequence_monad_with_nested_list_and_enumeration_returns_correct_result(self):
         result: Sequence[Tuple[int, str]] = (Sequence([['hello', 'world']])
                                              .bind(lambda d: Sequence(enumerate(d)))
                                              .map(lambda tuple_result: (tuple_result[0], tuple_result[1])))
 
         self.assertEqual([(0, 'hello'), (1, 'world')], result.run())
 
-    def test_list_monad_to_list_returns_correct_python_list(self):
+    def test_sequence_monad_to_list_returns_correct_python_list(self):
         result = Sequence([1, 2, 3, 4])
 
         self.assertEqual([1, 2, 3, 4], result.run())
         self.assertEqual('[1, 2, 3, 4]', str(result.run()))
 
-    def test_lazy_sequence_monad_with_filter_and_take_returns_corrected_filtered_list(self):
+    def test_sequence_monad_with_take_skip_and_filter_returns_corrected_list(self):
         result = Sequence([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
 
-        self.assertEqual([3, 4], result.take(4).filter(lambda x: x > 2).run())
+        self.assertEqual([1, 2, 3], result.take(3).run())
+        self.assertEqual([8, 9, 10], result.skip(7).run())
+        self.assertEqual([8, 9, 10], result.filter(lambda x: x > 7).run())
 
     def test_monad_list_examples(self):
         # test list monad from generator
@@ -257,8 +259,8 @@ class TestSequence(unittest.TestCase):
             for x in range(5):
                 yield x
 
-        list_monad = Sequence(list_generator()).map(lambda x: x + 1)
-        self.assertEqual([1, 2, 3, 4, 5], list_monad.run())
+        sequence_monad = Sequence(list_generator()).map(lambda x: x + 1)
+        self.assertEqual([1, 2, 3, 4, 5], sequence_monad.run())
 
         self.assertEqual(['$2.00', '$100.00', '$5.00'], (Sequence([1, 99, 4])
                                                          .bind(lambda val: Sequence([val + 1]))

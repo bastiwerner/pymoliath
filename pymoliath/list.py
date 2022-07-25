@@ -73,6 +73,20 @@ class ListMonad(List[TypeSource]):
         """
         return self.__class__(itertools.islice(self, amount))
 
+    def skip(self: ListMonad[TypeSource], amount: int) -> ListMonad[TypeSource]:
+        """ListMonad skip function
+
+        Parameters
+        ----------
+        amount: int
+            Amount of values to be skipped from the list for the next operation.
+
+        Returns
+        -------
+        list: ListMonad[TypeSource]
+        """
+        return self.__class__(itertools.islice(self, amount, None))
+
     def apply(self: ListMonad[TypeSource], applicative: ListMonad[Callable[[TypeSource], TypeResult]]) -> ListMonad[
         TypeResult]:
         """ListMonad monad applicative interface for list monads containing a function returning a value (<*>).
