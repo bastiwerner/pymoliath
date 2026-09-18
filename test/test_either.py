@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from pymoliath.either import Left, Right, Either
+from pymoliath.either import Either, Left, Right, either_safe
 from pymoliath.util import compose
 
 
@@ -24,10 +24,10 @@ class TestEitherResultMonad(unittest.TestCase):
         it’s the same as just taking the value and applying the function to it.
         """
         right_function = lambda x: Right(x + 1)
-        left_function = lambda x: Left(f'{x}')
+        left_function = lambda x: Left(f"{x}")
 
         self.assertEqual(right_function(10), Right(10).bind(right_function))
-        self.assertEqual(left_function(10), Left(10).bind(left_function))
+        self.assertEqual(left_function(10), Left(10).bind_left(left_function))
 
     def test_monad_right_identity_law(self):
         """Right identity law: m >>= return ≡ m
@@ -37,7 +37,7 @@ class TestEitherResultMonad(unittest.TestCase):
         and we use >>= to feed it to return, the result is our original monadic value.
         """
         right_value = Right(10)
-        left_value = Left('err')
+        left_value = Left("err")
 
         self.assertEqual(right_value, right_value.bind(lambda x: Right(x)))
         self.assertEqual(left_value, left_value.bind(lambda x: Left(x)))
@@ -53,13 +53,17 @@ class TestEitherResultMonad(unittest.TestCase):
         f = lambda x: Right(x + 1000)
         g = lambda y: Right(y * 42)
 
-        self.assertEqual(right_value.bind(f).bind(g), right_value.bind(lambda x: f(x).bind(g)))
+        self.assertEqual(
+            right_value.bind(f).bind(g), right_value.bind(lambda x: f(x).bind(g))
+        )
 
         left_value = Left(42)
         f = lambda x: Left(x + 1000)
         g = lambda y: Left(y * 42)
 
-        self.assertEqual(left_value.bind(f).bind(g), left_value.bind(lambda x: f(x).bind(g)))
+        self.assertEqual(
+            left_value.bind(f).bind(g), left_value.bind(lambda x: f(x).bind(g))
+        )
 
     def test_monad_functor_identity_law(self):
         """Functors identity law: (m a >= f x -> x) ≡ m a
@@ -128,24 +132,29 @@ class TestEitherResultMonad(unittest.TestCase):
         v = Right(lambda x: x * 42)
         composition = lambda f, g: compose(f, g)
 
-        self.assertEqual(w.apply(v.apply(u.apply(Right(composition)))), w.apply(v).apply(u))
-        self.assertEqual(Right(composition).apply2(u).apply2(v).apply2(w), u.apply2(v.apply2(w)))
+        self.assertEqual(
+            w.apply(v.apply(u.apply(Right(composition)))), w.apply(v).apply(u)
+        )
+        self.assertEqual(
+            Right(composition).apply2(u).apply2(v).apply2(w), u.apply2(v.apply2(w))
+        )
 
         w = Left(42)
 
-        self.assertEqual(w.apply(v.apply(u.apply(Right(composition)))), w.apply(v).apply(u))
-        self.assertEqual(Right(lambda f, g: compose(f, g)).apply2(u).apply2(v).apply2(w), u.apply2(v.apply2(w)))
+        self.assertEqual(
+            w.apply(v.apply(u.apply(Right(composition)))), w.apply(v).apply(u)
+        )
+        self.assertEqual(
+            Right(lambda f, g: compose(f, g)).apply2(u).apply2(v).apply2(w),
+            u.apply2(v.apply2(w)),
+        )
 
     def test_either_monad_representation(self):
-        right_value = Right('a')
-        left_value = Left('b')
+        right_value = Right("a")
+        left_value = Left("b")
 
-        self.assertEqual(str(right_value), 'Right(a)')
-        self.assertEqual(str(left_value), 'Left(b)')
-
-    def test_either_abstract_class_raise_error(self):
-        with self.assertRaises(TypeError):
-            Either()
+        self.assertEqual(str(right_value), "Right(a)")
+        self.assertEqual(str(left_value), "Left(b)")
 
     def test_either_is_left_is_right(self):
         right = Right(10)
@@ -154,57 +163,67 @@ class TestEitherResultMonad(unittest.TestCase):
         self.assertTrue(right.is_right() and not right.is_left())
         self.assertTrue(left.is_left() and not left.is_right())
 
-    def test_safe_function_for_error_handling_with_either_monad_returns_correct_either_monad(self):
+    def test_safe_function_for_error_handling_with_either_monad_returns_correct_either_monad(
+        self,
+    ):
         def unsafe_function():
             raise Exception("error")
 
         def safe_function():
             return 10
 
-        unsafe_either_result: Either[Exception, int] = Either.safe(unsafe_function)
-        safe_either_result: Either[Exception, int] = Either.safe(safe_function)
+        unsafe_either_result: Either[Exception, int] = either_safe(unsafe_function)
+        safe_either_result: Either[Exception, int] = either_safe(safe_function)
 
-        self.assertEqual(Left(Exception('error')), unsafe_either_result)
+        self.assertEqual(Left(Exception("error")), unsafe_either_result)
         self.assertEqual(Right(10), safe_either_result)
 
     def test_either_monad_unwrap(self):
-        right_value = Right('right')
-        left_value = Left('left')
+        right_value = Right("right")
+        left_value = Left("left")
 
         with self.assertRaises(Exception):
             left_value.unwrap()
 
-        self.assertEqual('right', right_value.unwrap())
-        self.assertEqual('right', right_value.unwrap_or('default'))
-        self.assertEqual('left', left_value.unwrap_left_or('default'))
-        self.assertEqual('default', right_value.unwrap_left_or('default'))
-        self.assertEqual('default', left_value.unwrap_or('default'))
+        self.assertEqual("right", right_value.unwrap())
+        self.assertEqual("right", right_value.unwrap_or("default"))
+        self.assertEqual("left", left_value.unwrap_left_or("default"))
+        self.assertEqual("default", right_value.unwrap_left_or("default"))
+        self.assertEqual("default", left_value.unwrap_or("default"))
         self.assertEqual(2, Right(2).unwrap_or_else(lambda x: len(x)))
         self.assertEqual(3, Left("foo").unwrap_or_else(lambda x: len(x)))
 
     def test_either_inspect(self):
-        right_value = Right('right')
-        left_value = Left('left')
+        right_value = Right("right")
+        left_value = Left("left")
         print_mock = Mock()
 
-        self.assertEqual(right_value, right_value.inspect(print_mock).inspect_left(print_mock))
-        print_mock.assert_called_with('right')
-        self.assertEqual(left_value, left_value.inspect(print_mock).inspect_left(print_mock))
-        print_mock.assert_called_with('left')
+        self.assertEqual(
+            right_value, right_value.inspect(print_mock).inspect_left(print_mock)
+        )
+        print_mock.assert_called_with("right")
+        self.assertEqual(
+            left_value, left_value.inspect(print_mock).inspect_left(print_mock)
+        )
+        print_mock.assert_called_with("left")
 
     def test_either_monad_map_and_bind(self):
-        right = Right('hello')
+        right = Right("hello")
 
-        self.assertEqual(Left('hello world sucks'), (right
-                                                     .bind(lambda s: Left(s))
-                                                     .map_left(lambda s: f'{s} world')
-                                                     .bind_left(lambda s: Left(f'{s} sucks'))))
+        self.assertEqual(
+            Left("hello world sucks"),
+            (
+                right.bind(lambda s: Left(s))
+                .map_left(lambda s: f"{s} world")
+                .bind_left(lambda s: Left(f"{s} sucks"))
+            ),
+        )
 
     def test_either_monad_match_function(self):
-        right_value = Right('right')
-        left_value = Left('left')
+        right_value = Right("right")
+        left_value = Left("left")
 
-        self.assertTrue(right_value.match(lambda e: e == 'left',
-                                          lambda v: v == 'right'))
-        self.assertTrue(left_value.match(lambda e: e == 'left',
-                                         lambda v: v == 'right'))
+        self.assertTrue(
+            right_value.match(lambda e: e == "left", lambda v: v == "right")
+        )
+        self.assertTrue(left_value.match(lambda e: e == "left", lambda v: v == "right"))

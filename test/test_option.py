@@ -1,13 +1,12 @@
 import unittest
 from typing import Any, Callable
-from unittest.mock import Mock
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
 
-from pymoliath.maybe import Just, Nothing, Maybe, from_optional, safe
+from pymoliath.option import Nil, Option, Some, from_optional, safe
 from pymoliath.util import compose
 
 
-class TestMaybe(unittest.TestCase):
+class TestOption(unittest.TestCase):
     """
     Monad operations:
     ≡       Identical to
@@ -23,17 +22,17 @@ class TestMaybe(unittest.TestCase):
 
         Left identity: The first monad law states that if we take a value,
         put it in a default context with return and then feed it to a function by using >>=,
-        it’s the same as just taking the value and applying the function to it.
+        it’s the same as some taking the value and applying the function to it.
         """
 
-        def just_function(_):
-            return Just(10)
+        def some_function(_):
+            return Some(10)
 
         def nothing_function(_):
-            return Nothing()
+            return Nil()
 
-        self.assertEqual(just_function(10), Just(10).bind(just_function))
-        self.assertEqual(nothing_function(10), Nothing().bind(nothing_function))
+        self.assertEqual(some_function(10), Some(10).bind(some_function))
+        self.assertEqual(nothing_function(10), Nil().bind(nothing_function))
 
     def test_monad_right_identity_law(self):
         """Right identity law: m >>= return ≡ m
@@ -42,38 +41,38 @@ class TestMaybe(unittest.TestCase):
         Right identity: The second law states that if we have a monadic value
         and we use >>= to feed it to return, the result is our original monadic value.
         """
-        just_value = Just("Hello")
-        nothing_value = Nothing()
+        some_value = Some("Hello")
+        nothing_value = Nil()
 
-        self.assertEqual(just_value, just_value.bind(lambda x: Just(x)))
-        self.assertEqual(nothing_value, nothing_value.bind(lambda _: Nothing()))
+        self.assertEqual(some_value, some_value.bind(lambda x: Some(x)))
+        self.assertEqual(nothing_value, nothing_value.bind(lambda _: Nil()))
 
-    def test_just_monad_associativity_law(self):
+    def test_some_monad_associativity_law(self):
         """Associativity law: (m >>= f) >>= g ≡ m >>= (x -> f x >>= g)
         https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
 
         The final monad law says that when we have a chain of monadic function applications with >>=,
         it shouldn’t matter how they’re nested.
         """
-        just_value = Just(42)
+        some_value = Some(42)
 
-        def f(x: int) -> Maybe[int]:
-            return Just(x + 1000)
+        def f(x: int) -> Option[int]:
+            return Some(x + 1000)
 
-        def g(y: int) -> Maybe[int]:
-            return Just(y * 42)
+        def g(y: int) -> Option[int]:
+            return Some(y * 42)
 
         self.assertEqual(
-            just_value.bind(f).bind(g), just_value.bind(lambda x: f(x).bind(g))
+            some_value.bind(f).bind(g), some_value.bind(lambda x: f(x).bind(g))
         )
 
-        nothing_value = Nothing()
+        nothing_value = Nil()
 
         def h(_):
-            return Nothing()
+            return Nil()
 
         def i(_):
-            return Nothing()
+            return Nil()
 
         self.assertEqual(
             nothing_value.bind(h).bind(i), nothing_value.bind(lambda x: h(x).bind(i))
@@ -85,8 +84,8 @@ class TestMaybe(unittest.TestCase):
 
         Map the identity function over a monad container, the result should be the same monad container object.
         """
-        self.assertEqual(Just(10).map(lambda x: x), Just(10))
-        self.assertEqual(Nothing().map(lambda x: x), Nothing())
+        self.assertEqual(Some(10).map(lambda x: x), Some(10))
+        self.assertEqual(Nil().map(lambda x: x), Nil())
 
     def test_monad_functor_composition_law(self):
         """Functors composition law: map (f . g) x ≡ map f (map g x)
@@ -94,8 +93,8 @@ class TestMaybe(unittest.TestCase):
 
         The functor implementation should not break the composition of functions.
         """
-        just_value = Just(42)
-        nothing_value = Nothing()
+        some_value = Some(42)
+        nothing_value = Nil()
 
         def f(x: int) -> int:
             return x + 1000
@@ -103,7 +102,7 @@ class TestMaybe(unittest.TestCase):
         def g(y: int) -> int:
             return y * 42
 
-        self.assertEqual(just_value.map(compose(f, g)), just_value.map(g).map(f))
+        self.assertEqual(some_value.map(compose(f, g)), some_value.map(g).map(f))
         self.assertEqual(nothing_value.map(compose(f, g)), nothing_value.map(g).map(f))
 
     def test_monad_applicative_identity_law(self):
@@ -113,14 +112,14 @@ class TestMaybe(unittest.TestCase):
         Wrap the identity function with a monad container. Apply a monad container over the result.
         The applicative identity law states this should result in an identical object.
         """
-        just_value = Just(42)
-        nothing_value = Nothing()
+        some_value = Some(42)
+        nothing_value = Nil()
 
-        self.assertEqual(just_value.apply(Just(lambda x: x)), just_value)
-        self.assertEqual(nothing_value.apply(Just(lambda x: x)), nothing_value)
+        self.assertEqual(some_value.apply(Some(lambda x: x)), some_value)
+        self.assertEqual(nothing_value.apply(Some(lambda x: x)), nothing_value)
 
-        self.assertEqual(Just(lambda x: x).apply2(just_value), just_value)
-        self.assertEqual(Just(lambda x: x).apply2(nothing_value), nothing_value)
+        self.assertEqual(Some(lambda x: x).apply2(some_value), some_value)
+        self.assertEqual(Some(lambda x: x).apply2(nothing_value), nothing_value)
 
     def test_monad_applicative_homomorphism_law(self):
         """Applicative homomorphism law: pure f <*> pure x = pure (f x)
@@ -134,11 +133,11 @@ class TestMaybe(unittest.TestCase):
         def f(x: int) -> int:
             return x * 42
 
-        self.assertEqual(Just(x).apply(Just(f)), Just(f(x)))
-        self.assertEqual(Nothing().apply(Just(f)), Nothing())
+        self.assertEqual(Some(x).apply(Some(f)), Some(f(x)))
+        self.assertEqual(Nil().apply(Some(f)), Nil())
 
-        self.assertEqual(Just(f).apply2(Just(x)), Just(f(x)))
-        self.assertEqual(Just(f).apply2(Nothing()), Nothing())
+        self.assertEqual(Some(f).apply2(Some(x)), Some(f(x)))
+        self.assertEqual(Some(f).apply2(Nil()), Nil())
 
     def test_monad_applicative_composition_law(self):
         """Applicative composition law: pure (.) <*> u <*> v <*> w = u <*> (v <*> w)
@@ -147,9 +146,9 @@ class TestMaybe(unittest.TestCase):
         The second law is the homomorphism law. If we wrap a function and an object in pure.
         We can then apply the wrapped function over the wrapped object.
         """
-        w = Just(42)
-        u = Just(lambda x: x + 42)
-        v = Just(lambda x: x * 42)
+        w = Some(42)
+        u = Some(lambda x: x + 42)
+        v = Some(lambda x: x * 42)
 
         def composition(
             f: Callable[[Any], Any], g: Callable[[Any], Any]
@@ -157,111 +156,111 @@ class TestMaybe(unittest.TestCase):
             return compose(f, g)
 
         self.assertEqual(
-            w.apply(v.apply(u.apply(Just(composition)))), w.apply(v).apply(u)
+            w.apply(v.apply(u.apply(Some(composition)))), w.apply(v).apply(u)
         )
         self.assertEqual(
-            Just(composition).apply2(u).apply2(v).apply2(w), u.apply2(v.apply2(w))
+            Some(composition).apply2(u).apply2(v).apply2(w), u.apply2(v.apply2(w))
         )
 
-        w = Just(42)
-        u = Nothing()
-        v = Nothing()
+        w = Some(42)
+        u = Nil()
+        v = Nil()
 
         self.assertEqual(
-            w.apply(v.apply(u.apply(Just(composition)))), w.apply(v).apply(u)
+            w.apply(v.apply(u.apply(Some(composition)))), w.apply(v).apply(u)
         )
         self.assertEqual(
-            Just(lambda f, g: compose(f, g)).apply2(u).apply2(v).apply2(w),
+            Some(lambda f, g: compose(f, g)).apply2(u).apply2(v).apply2(w),
             u.apply2(v.apply2(w)),
         )
 
     def test_maybe_monad_representation(self):
-        just = Just("a")
-        nothing = Nothing()
+        some = Some("a")
+        nothing = Nil()
 
-        self.assertEqual(str(just), "Just(a)")
+        self.assertEqual(str(some), "Some(a)")
         self.assertEqual(str(nothing), "Nothing()")
 
     def test_maybe_optional_instances(self):
-        self.assertTrue(isinstance(Just("a"), (Just, Nothing)))  # pyright: ignore[reportUnnecessaryIsInstance]
-        self.assertTrue(isinstance(Nothing(), (Just, Nothing)))  # pyright: ignore[reportUnnecessaryIsInstance]
+        self.assertTrue(isinstance(Some("a"), (Some, Nil)))  # pyright: ignore[reportUnnecessaryIsInstance]
+        self.assertTrue(isinstance(Nil(), (Some, Nil)))  # pyright: ignore[reportUnnecessaryIsInstance]
 
     def test_maybe_from_and_to_optional(self):
-        maybe_dict: Maybe[dict[Any, Any]] = from_optional({})
-        maybe_string: Maybe[str] = from_optional("")
-        maybe_none: Maybe[str] = from_optional(None)
+        maybe_dict: Option[dict[Any, Any]] = from_optional({})
+        maybe_string: Option[str] = from_optional("")
+        maybe_none: Option[str] = from_optional(None)
 
         self.assertEqual({}, maybe_dict.to_optional())
         self.assertEqual("", maybe_string.to_optional())
         self.assertEqual(None, maybe_none.to_optional())
 
-    def test_maybe_is_nothing_is_just(self):
-        just = Just(10)
-        nothing = Nothing()
+    def test_maybe_is_nothing_is_some(self):
+        some = Some(10)
+        nothing = Nil()
         maybe_none = from_optional(None)
         maybe_value = from_optional(10)
 
-        self.assertTrue(just.is_just() and not just.is_nothing())
-        self.assertTrue(nothing.is_nothing() and not nothing.is_just())
-        self.assertTrue(maybe_value.is_just() and not maybe_value.is_nothing())
-        self.assertTrue(maybe_none.is_nothing() and not maybe_none.is_just())
+        self.assertTrue(some.is_some() and not some.is_nothing())
+        self.assertTrue(nothing.is_nothing() and not nothing.is_some())
+        self.assertTrue(maybe_value.is_some() and not maybe_value.is_nothing())
+        self.assertTrue(maybe_none.is_nothing() and not maybe_none.is_some())
 
     def test_maybe_monad_unwrap(self):
-        just_value = Just(10)
-        nothing = Nothing()
+        some_value = Some(10)
+        nothing = Nil()
 
-        self.assertEqual(10, just_value.unwrap_or(20))
+        self.assertEqual(10, some_value.unwrap_or(20))
         self.assertEqual(20, nothing.unwrap_or(20))
 
     def test_maybe_monad_filter(self):
-        just_value = Just(10)
-        nothing = Nothing()
+        some_value = Some(10)
+        nothing = Nil()
 
-        self.assertEqual(Just(10), just_value.filter(lambda v: v > 10))
-        self.assertEqual(Nothing(), just_value.filter(lambda v: v <= 10))
-        self.assertEqual(Nothing(), nothing.filter(lambda v: v < 10))
+        self.assertEqual(Some(10), some_value.filter(lambda v: v > 10))
+        self.assertEqual(Nil(), some_value.filter(lambda v: v <= 10))
+        self.assertEqual(Nil(), nothing.filter(lambda v: v < 10))
 
     def maybe_safe_function(self):
         exception_function = MagicMock(side_effect=Exception("error"))
         maybe_unsafe = safe(lambda: exception_function())
         maybe_safe = safe(lambda: 10)
 
-        self.assertEqual(Nothing(), maybe_unsafe)
-        self.assertEqual(Just(10), maybe_safe)
+        self.assertEqual(Nil(), maybe_unsafe)
+        self.assertEqual(Some(10), maybe_safe)
 
     def test_maybe_unwrap(self):
-        just = Just("a")
-        nothing = Nothing()
+        some = Some("a")
+        nothing = Nil()
 
         with self.assertRaises(Exception):
             nothing.unwrap()
 
-        self.assertEqual("a", just.unwrap())
-        self.assertEqual("a", just.unwrap_or("b"))
+        self.assertEqual("a", some.unwrap())
+        self.assertEqual("a", some.unwrap_or("b"))
         self.assertEqual(10, nothing.unwrap_or(10))
-        self.assertEqual("a", just.unwrap_or_else(lambda: "b"))
+        self.assertEqual("a", some.unwrap_or_else(lambda: "b"))
         self.assertEqual(10, nothing.unwrap_or_else(lambda: 10))
 
     def test_maybe_inspect(self):
-        just = Just("a")
-        nothing = Nothing()
+        some = Some("a")
+        nothing = Nil()
         print_mock = Mock()
 
-        self.assertEqual(just, just.inspect(print_mock))
+        self.assertEqual(some, some.inspect(print_mock))
         self.assertEqual(nothing, nothing.inspect(print_mock))
         print_mock.assert_called_once_with("a")
 
     def test_maybe_functions(self):
-        just = Just("a")
-        nothing = Nothing()
+        some = Some("a")
+        nothing = Nil()
 
-        self.assertEqual("a", just.match(lambda x: x, lambda: "default"))
+        self.assertEqual("a", some.match(lambda x: x, lambda: "default"))
         self.assertEqual(
             "default",
-            just.bind(lambda x: Nothing()).match(lambda x: x, lambda: "default"),
+            some.bind(lambda x: Nil()).match(lambda x: x, lambda: "default"),
         )
         self.assertEqual("default", nothing.match(lambda x: x, lambda: "default"))
         self.assertEqual(
             "default",
-            nothing.bind(lambda x: Just(x)).match(lambda x: x, lambda: "default"),
+            nothing.bind(lambda x: Some(x)).match(lambda x: x, lambda: "default"),
         )

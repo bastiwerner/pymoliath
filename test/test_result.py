@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from pymoliath.either import Right, Left, Ok, Err, Result
+from pymoliath.result import Err, Ok, Result, result_safe
 from pymoliath.util import compose
 
 
@@ -53,13 +53,17 @@ class TestResultMonad(unittest.TestCase):
         f = lambda x: Ok(x + 1000)
         g = lambda y: Ok(y * 42)
 
-        self.assertEqual(ok_value.bind(f).bind(g), ok_value.bind(lambda x: f(x).bind(g)))
+        self.assertEqual(
+            ok_value.bind(f).bind(g), ok_value.bind(lambda x: f(x).bind(g))
+        )
 
         err_value = Err("error")
-        f = lambda x: Err(f'error {x}')
-        g = lambda y: Err(f'error {y}')
+        f = lambda x: Err(f"error {x}")
+        g = lambda y: Err(f"error {y}")
 
-        self.assertEqual(err_value.bind(f).bind(g), err_value.bind(lambda x: f(x).bind(g)))
+        self.assertEqual(
+            err_value.bind(f).bind(g), err_value.bind(lambda x: f(x).bind(g))
+        )
 
     def test_monad_functor_identity_law(self):
         """Functors identity law: (m a >= f x -> x) ≡ m a
@@ -128,19 +132,27 @@ class TestResultMonad(unittest.TestCase):
         v = Ok(lambda x: x * 42)
         composition = lambda f, g: compose(f, g)
 
-        self.assertEqual(w.apply(v.apply(u.apply(Ok(composition)))), w.apply(v).apply(u))
-        self.assertEqual(Ok(lambda f, g: compose(f, g)).apply2(u).apply2(v).apply2(w), u.apply2(v.apply2(w)))
+        self.assertEqual(
+            w.apply(v.apply(u.apply(Ok(composition)))), w.apply(v).apply(u)
+        )
+        self.assertEqual(
+            Ok(lambda f, g: compose(f, g)).apply2(u).apply2(v).apply2(w),
+            u.apply2(v.apply2(w)),
+        )
 
         w = Err(42)
         self.assertEqual(w.apply(v.apply(u.apply(Err(42)))), w.apply(v).apply(u))
-        self.assertEqual(Ok(lambda f, g: compose(f, g)).apply2(u).apply2(v).apply2(w), u.apply2(v.apply2(w)))
+        self.assertEqual(
+            Ok(lambda f, g: compose(f, g)).apply2(u).apply2(v).apply2(w),
+            u.apply2(v.apply2(w)),
+        )
 
     def test_either_monad_representation(self):
         ok_value = Ok("a")
         err_value = Err("b")
 
-        self.assertEqual(str(ok_value), 'Ok(a)')
-        self.assertEqual(str(err_value), f'Err({TypeError("b")})')
+        self.assertEqual(str(ok_value), "Ok(a)")
+        self.assertEqual(str(err_value), f"Err({TypeError('b')})")
 
     def test_result_is_ok_is_err(self):
         ok_value = Ok(10)
@@ -171,7 +183,9 @@ class TestResultMonad(unittest.TestCase):
 
         self.assertEqual(ok_value, ok_value.inspect(print_mock).inspect_err(print_mock))
         print_mock.assert_called_with(10)
-        self.assertEqual(error_value, error_value.inspect(print_mock).inspect_err(print_mock))
+        self.assertEqual(
+            error_value, error_value.inspect(print_mock).inspect_err(print_mock)
+        )
         print_mock.assert_called_with("error")
 
     def test_safe_function_returns_correct_result(self):
@@ -181,36 +195,20 @@ class TestResultMonad(unittest.TestCase):
         def safe_function():
             return 10
 
-        unsafe_result: Result[int] = Result.safe(unsafe_function)
-        safe_result: Result[int] = Result.safe(safe_function)
+        unsafe_result: Result[int, Exception] = result_safe(unsafe_function)
+        safe_result: Result[int, Exception] = result_safe(safe_function)
 
-        self.assertEqual(Err(Exception('error')), unsafe_result)
+        self.assertEqual(Err(Exception("error")), unsafe_result)
         self.assertEqual(Ok(10), safe_result)
 
-    def test_result_monad_to_either_monad(self):
-        ok_value = Ok(10)
-        err_value = Err(Exception("error"))
-
-        self.assertEqual(Right(10), ok_value.to_either())
-        self.assertEqual(Left(Exception("error")), err_value.to_either())
-
     def test_result_monad_map_and_bind(self):
-        ok_value = Ok('hello')
+        ok_value = Ok("hello")
 
-        self.assertEqual(Err('hello world sucks'), (ok_value
-                                                    .bind(lambda s: Err(s))
-                                                    .map_err(lambda s: f'{s} world')
-                                                    .bind_err(lambda e: Err(f'{e} sucks'))))
-
-    def test_result_abstract_class_raise_error(self):
-        with self.assertRaises(TypeError):
-            Result()
-
-    def test_result_monad_match_function(self):
-        right_value = Right('right')
-        left_value = Left('left')
-
-        self.assertTrue(right_value.match(lambda e: e == 'left',
-                                          lambda v: v == 'right'))
-        self.assertTrue(left_value.match(lambda e: e == 'left',
-                                         lambda v: v == 'right'))
+        self.assertEqual(
+            Err("hello world sucks"),
+            (
+                ok_value.bind(lambda s: Err(s))
+                .map_err(lambda s: f"{s} world")
+                .bind_err(lambda e: Err(f"{e} sucks"))
+            ),
+        )

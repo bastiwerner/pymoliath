@@ -2,12 +2,14 @@ from functools import partial
 from functools import reduce
 from typing import Callable, Any, TypeVar, Union
 
-TypeSource = TypeVar('TypeSource')
-TypeResult = TypeVar('TypeResult')
-TypePure = TypeVar('TypePure')
+TypeSource = TypeVar("TypeSource")
+TypeResult = TypeVar("TypeResult")
+TypePure = TypeVar("TypePure")
 
 
-def compose(*callables: Callable[[TypeSource], TypeResult]) -> Callable[[TypeSource], TypeResult]:
+def compose(
+    *callables: Callable[[TypeSource], TypeResult],
+) -> Callable[[TypeSource], TypeResult]:
     """Compose multiple functions right to left.
 
     Composes zero or more functions into a functional composition. The
