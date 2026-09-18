@@ -1,8 +1,21 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Generic, TypeAlias, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Generic,
+    Tuple,
+    TypeAlias,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from pymoliath.util import curry
+
+if TYPE_CHECKING:
+    from pymoliath.maybe import Maybe
 
 TypeLeft = TypeVar("TypeLeft")
 TypeRight = TypeVar("TypeRight")
@@ -133,6 +146,142 @@ class Right(Generic[TypeRight]):
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
+
+    def is_right_and(self, function: Callable[[TypeRight], bool]) -> bool:
+        """Returns True if the Either Monad is Right and the predicate returns True for the contained value.
+
+        Parameters
+        ----------
+        function: Callable[[TypeRight], bool]
+            Predicate function applied to the Right value.
+
+        Returns
+        -------
+        result: bool
+            Returns the predicate result.
+        """
+        return function(self._right_value)
+
+    def is_left_and(self, function: Callable[[Any], bool]) -> bool:
+        """Returns False, since this Either Monad is Right.
+
+        Parameters
+        ----------
+        function: Callable[[TypeLeft], bool]
+            Predicate function which would be applied to the Left value.
+
+        Returns
+        -------
+        result: bool
+            Returns False.
+        """
+        return False
+
+    def map_or(
+        self, default_value: TypeResult, function: Callable[[TypeRight], TypeResult]
+    ) -> TypeResult:
+        """Applies the function to the Right value, or returns the default value if Left.
+
+        Parameters
+        ----------
+        default_value: TypeResult
+            Default value to be returned if the Either Monad is Left.
+        function: Callable[[TypeRight], TypeResult]
+            Function applied to the Right value.
+
+        Returns
+        -------
+        result: TypeResult
+            Returns the function result.
+        """
+        return function(self._right_value)
+
+    def and_(self, other: Either[Any, TypeResult]) -> Either[Any, TypeResult]:
+        """Returns `other` if the Either Monad is Right, otherwise Left.
+
+        Parameters
+        ----------
+        other: Either[TypeLeft, TypeResult]
+            Either Monad to be returned if this Either Monad is Right.
+
+        Returns
+        -------
+        result: Either[TypeLeft, TypeResult]
+            Returns `other`.
+        """
+        return other
+
+    def or_(self, other: Either[Any, TypeRight]) -> Either[Any, TypeRight]:
+        """Returns this Either Monad if it is Right, otherwise `other`.
+
+        Parameters
+        ----------
+        other: Either[TypeLeft, TypeRight]
+            Either Monad to be returned if this Either Monad is Left.
+
+        Returns
+        -------
+        result: Either[TypeLeft, TypeRight]
+            Returns this Right.
+        """
+        return self
+
+    def zip(
+        self, other: Either[Any, TypePure]
+    ) -> Either[Any, Tuple[TypeRight, TypePure]]:
+        """Combines this Either Monad with another into an Either Monad of a tuple, or Left if either is Left.
+
+        Parameters
+        ----------
+        other: Either[TypeLeft, TypePure]
+            Either Monad to be zipped with this Either Monad.
+
+        Returns
+        -------
+        result: Either[TypeLeft, Tuple[TypeRight, TypePure]]
+            Returns Right of a tuple of both values, or Left.
+        """
+        return other.map(lambda o: (self._right_value, o))
+
+    @overload
+    def flatten(self: Right[Right[TypeResult]]) -> Either[Any, TypeResult]: ...
+
+    @overload
+    def flatten(self: Right[Left[TypeLeft]]) -> Either[TypeLeft, Any]: ...
+
+    def flatten(self) -> Either[Any, Any]:
+        """Flattens a nested Either Monad by one level.
+
+        Returns
+        -------
+        result: Either[TypeLeft, TypeResult]
+            Returns the nested Either Monad.
+        """
+        return cast(Either[Any, Any], self._right_value)
+
+    def right(self) -> Maybe[TypeRight]:
+        """Either Monad specific function to return the Right value as a Maybe Monad.
+
+        Returns
+        -------
+        maybe: Maybe[TypeRight]
+            Returns Just with the Right value.
+        """
+        from pymoliath.maybe import Just
+
+        return Just(self._right_value)
+
+    def left(self) -> Maybe[Any]:
+        """Either Monad specific function to return the Left value as a Maybe Monad.
+
+        Returns
+        -------
+        maybe: Maybe[TypeLeft]
+            Returns Nothing, since this Either Monad is Right.
+        """
+        from pymoliath.maybe import Nothing
+
+        return Nothing()
 
     def unwrap(self) -> TypeRight:
         """Returns the Right value if not Left, or otherwise raises an Exception containing the left value.
@@ -297,6 +446,39 @@ class Left(Generic[TypeLeft]):
 
     def apply2(self, applicative_value: Either[TypeLeft, Any]) -> Either[TypeLeft, Any]:
         return self
+
+    def is_right_and(self, function: Callable[[Any], bool]) -> bool:
+        return False
+
+    def is_left_and(self, function: Callable[[TypeLeft], bool]) -> bool:
+        return function(self._left_value)
+
+    def map_or(
+        self, default_value: TypeResult, function: Callable[[Any], TypeResult]
+    ) -> TypeResult:
+        return default_value
+
+    def and_(self, other: Either[TypeLeft, Any]) -> Either[TypeLeft, Any]:
+        return self
+
+    def or_(self, other: Either[Any, TypeRight]) -> Either[Any, TypeRight]:
+        return other
+
+    def zip(self, other: Either[Any, Any]) -> Either[TypeLeft, Any]:
+        return self
+
+    def flatten(self) -> Either[TypeLeft, Any]:
+        return self
+
+    def right(self) -> Maybe[Any]:
+        from pymoliath.maybe import Nothing
+
+        return Nothing()
+
+    def left(self) -> Maybe[TypeLeft]:
+        from pymoliath.maybe import Just
+
+        return Just(self._left_value)
 
     def unwrap(self) -> Any:
         raise Exception(self._left_value)

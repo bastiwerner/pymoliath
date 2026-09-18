@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import Mock
 
 from pymoliath.either import Either, Left, Right, either_safe
+from pymoliath.maybe import Just, Nothing
 from pymoliath.util import compose
 
 
@@ -227,6 +228,54 @@ class TestEitherResultMonad(unittest.TestCase):
             right_value.match(lambda e: e == "left", lambda v: v == "right")
         )
         self.assertTrue(left_value.match(lambda e: e == "left", lambda v: v == "right"))
+
+    def test_either_monad_is_right_and_is_left_and(self):
+        right_value = Right(10)
+        left_value = Left("error")
+
+        self.assertTrue(right_value.is_right_and(lambda v: v > 5))
+        self.assertFalse(right_value.is_right_and(lambda v: v > 10))
+        self.assertFalse(right_value.is_left_and(lambda e: e == "error"))
+        self.assertTrue(left_value.is_left_and(lambda e: e == "error"))
+        self.assertFalse(left_value.is_right_and(lambda v: v > 5))
+
+    def test_either_monad_map_or(self):
+        right_value = Right(10)
+        left_value = Left("error")
+
+        self.assertEqual(11, right_value.map_or(0, lambda v: v + 1))
+        self.assertEqual(0, left_value.map_or(0, lambda v: v + 1))
+
+    def test_either_monad_and_or(self):
+        right_value = Right(10)
+        left_value = Left("error")
+
+        self.assertEqual(Right(20), right_value.and_(Right(20)))
+        self.assertEqual(left_value, left_value.and_(Right(20)))
+        self.assertEqual(right_value, right_value.or_(Right(20)))
+        self.assertEqual(Right(20), left_value.or_(Right(20)))
+
+    def test_either_monad_zip(self):
+        right_value = Right(10)
+        left_value = Left("error")
+
+        self.assertEqual(Right((10, "a")), right_value.zip(Right("a")))
+        self.assertEqual(Left("error"), right_value.zip(Left("error")))
+        self.assertEqual(left_value, left_value.zip(Right("a")))
+
+    def test_either_monad_flatten(self):
+        self.assertEqual(Right(10), Right(Right(10)).flatten())
+        self.assertEqual(Left("error"), Right(Left("error")).flatten())
+        self.assertEqual(Left("error"), Left("error").flatten())
+
+    def test_either_monad_right_and_left(self):
+        right_value = Right(10)
+        left_value = Left("error")
+
+        self.assertEqual(Just(10), right_value.right())
+        self.assertEqual(Nothing(), right_value.left())
+        self.assertEqual(Nothing(), left_value.right())
+        self.assertEqual(Just("error"), left_value.left())
 
     def test_either_supports_structural_pattern_matching(self):
         def describe(value: Either[str, int]) -> str:
