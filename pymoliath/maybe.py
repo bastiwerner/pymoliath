@@ -1,12 +1,26 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Generic, TypeAlias, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Generic,
+    Tuple,
+    TypeAlias,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from pymoliath.util import curry
+
+if TYPE_CHECKING:
+    from pymoliath.either import Either
 
 TypeSource = TypeVar("TypeSource")
 TypeResult = TypeVar("TypeResult")
 TypePure = TypeVar("TypePure")
+TypeLeft = TypeVar("TypeLeft")
 
 
 class Just(Generic[TypeSource]):
@@ -118,8 +132,139 @@ class Just(Generic[TypeSource]):
             Returns Just if the Maybe Monad is of type Just and filter function returns True otherwise Nothing.
         """
         if filter_function(self._value):
-            return Nothing()
+            return self
+        return Nothing()
+
+    def is_just_and(self, function: Callable[[TypeSource], bool]) -> bool:
+        """Returns True if the Maybe Monad is a Just and the predicate returns True for the contained value.
+
+        Parameters
+        ----------
+        function: Callable[[TypeSource], bool]
+            Predicate function applied to the Just value.
+
+        Returns
+        -------
+        result: bool
+            Returns the predicate result.
+        """
+        return function(self._value)
+
+    def map_or(
+        self, default_value: TypeResult, function: Callable[[TypeSource], TypeResult]
+    ) -> TypeResult:
+        """Applies the function to the Just value, or returns the default value if Nothing.
+
+        Parameters
+        ----------
+        default_value: TypeResult
+            Default value to be returned if the Maybe Monad is Nothing.
+        function: Callable[[TypeSource], TypeResult]
+            Function applied to the Just value.
+
+        Returns
+        -------
+        result: TypeResult
+            Returns the function result.
+        """
+        return function(self._value)
+
+    def and_(self, other: Maybe[TypeResult]) -> Maybe[TypeResult]:
+        """Returns `other` if the Maybe Monad is a Just, otherwise Nothing.
+
+        Parameters
+        ----------
+        other: Maybe[TypeResult]
+            Maybe Monad to be returned if this Maybe Monad is a Just.
+
+        Returns
+        -------
+        result: Maybe[TypeResult]
+            Returns `other`.
+        """
+        return other
+
+    def or_(self, other: Maybe[TypeSource]) -> Maybe[TypeSource]:
+        """Returns this Maybe Monad if it is a Just, otherwise `other`.
+
+        Parameters
+        ----------
+        other: Maybe[TypeSource]
+            Maybe Monad to be returned if this Maybe Monad is a Nothing.
+
+        Returns
+        -------
+        result: Maybe[TypeSource]
+            Returns this Just.
+        """
         return self
+
+    def zip(self, other: Maybe[TypePure]) -> Maybe[Tuple[TypeSource, TypePure]]:
+        """Combines this Maybe Monad with another into a Maybe Monad of a tuple, or Nothing if either is Nothing.
+
+        Parameters
+        ----------
+        other: Maybe[TypePure]
+            Maybe Monad to be zipped with this Maybe Monad.
+
+        Returns
+        -------
+        result: Maybe[Tuple[TypeSource, TypePure]]
+            Returns Just of a tuple of both values, or Nothing.
+        """
+        return other.map(lambda o: (self._value, o))
+
+    @overload
+    def flatten(self: Just[Just[TypeResult]]) -> Maybe[TypeResult]: ...
+
+    @overload
+    def flatten(self: Just[Nothing[TypeResult]]) -> Maybe[TypeResult]: ...
+
+    def flatten(self) -> Maybe[Any]:
+        """Flattens a nested Maybe Monad by one level.
+
+        Returns
+        -------
+        result: Maybe[TypeResult]
+            Returns the nested Maybe Monad.
+        """
+        return cast(Maybe[Any], self._value)
+
+    def right_or(self, left_value: TypeLeft) -> Either[TypeLeft, TypeSource]:
+        """Converts the Maybe Monad into an Either Monad, using `left_value` as the Left value if Nothing.
+
+        Parameters
+        ----------
+        left_value: TypeLeft
+            Left value to be used if the Maybe Monad is Nothing.
+
+        Returns
+        -------
+        either: Either[TypeLeft, TypeSource]
+            Returns Right with the Just value.
+        """
+        from pymoliath.either import Right
+
+        return Right(self._value)
+
+    def right_or_else(
+        self, left_function: Callable[[], TypeLeft]
+    ) -> Either[TypeLeft, TypeSource]:
+        """Converts the Maybe Monad into an Either Monad, calling `left_function` for the Left value if Nothing.
+
+        Parameters
+        ----------
+        left_function: Callable[[], TypeLeft]
+            Function called to produce the left value if the Maybe Monad is Nothing.
+
+        Returns
+        -------
+        either: Either[TypeLeft, TypeSource]
+            Returns Right with the Just value.
+        """
+        from pymoliath.either import Right
+
+        return Right(self._value)
 
     def unwrap(self) -> TypeSource:
         """Returns the internal value of the Just or raises an exception if Nothing.
@@ -242,6 +387,36 @@ class Nothing(Generic[TypeSource]):
 
     def filter(self, filter_function: Callable[[Any], bool]) -> Maybe[TypeSource]:
         return self
+
+    def is_just_and(self, function: Callable[[Any], bool]) -> bool:
+        return False
+
+    def map_or(
+        self, default_value: TypeResult, function: Callable[[Any], TypeResult]
+    ) -> TypeResult:
+        return default_value
+
+    def and_(self, other: Maybe[Any]) -> Maybe[TypeSource]:
+        return self
+
+    def or_(self, other: Maybe[TypeSource]) -> Maybe[TypeSource]:
+        return other
+
+    def zip(self, other: Maybe[Any]) -> Maybe[Any]:
+        return self
+
+    def flatten(self) -> Maybe[TypeSource]:
+        return self
+
+    def right_or(self, left_value: TypeLeft) -> Either[TypeLeft, Any]:
+        from pymoliath.either import Left
+
+        return Left(left_value)
+
+    def right_or_else(self, left_function: Callable[[], TypeLeft]) -> Either[TypeLeft, Any]:
+        from pymoliath.either import Left
+
+        return Left(left_function())
 
     def unwrap(self) -> TypeSource:
         raise Exception("Unwrap error on Maybe monad")

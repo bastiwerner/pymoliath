@@ -1,9 +1,9 @@
 import unittest
 from typing import Any, Callable
-from unittest.mock import Mock
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
 
-from pymoliath.maybe import Just, Nothing, Maybe, from_optional, safe
+from pymoliath.either import Left, Right
+from pymoliath.maybe import Just, Maybe, Nothing, from_optional, safe
 from pymoliath.util import compose
 
 
@@ -217,9 +217,55 @@ class TestMaybe(unittest.TestCase):
         just_value = Just(10)
         nothing = Nothing()
 
-        self.assertEqual(Just(10), just_value.filter(lambda v: v > 10))
-        self.assertEqual(Nothing(), just_value.filter(lambda v: v <= 10))
+        self.assertEqual(Just(10), just_value.filter(lambda v: v > 5))
+        self.assertEqual(Nothing(), just_value.filter(lambda v: v > 10))
         self.assertEqual(Nothing(), nothing.filter(lambda v: v < 10))
+
+    def test_maybe_monad_is_just_and(self):
+        just_value = Just(10)
+        nothing = Nothing()
+
+        self.assertTrue(just_value.is_just_and(lambda v: v > 5))
+        self.assertFalse(just_value.is_just_and(lambda v: v > 10))
+        self.assertFalse(nothing.is_just_and(lambda v: v > 5))
+
+    def test_maybe_monad_map_or(self):
+        just_value = Just(10)
+        nothing = Nothing()
+
+        self.assertEqual(11, just_value.map_or(0, lambda v: v + 1))
+        self.assertEqual(0, nothing.map_or(0, lambda v: v + 1))
+
+    def test_maybe_monad_and_or(self):
+        just_value = Just(10)
+        nothing = Nothing()
+
+        self.assertEqual(Just(20), just_value.and_(Just(20)))
+        self.assertEqual(Nothing(), nothing.and_(Just(20)))
+        self.assertEqual(just_value, just_value.or_(Just(20)))
+        self.assertEqual(Just(20), nothing.or_(Just(20)))
+
+    def test_maybe_monad_zip(self):
+        just_value = Just(10)
+        nothing = Nothing()
+
+        self.assertEqual(Just((10, "a")), just_value.zip(Just("a")))
+        self.assertEqual(Nothing(), just_value.zip(Nothing()))
+        self.assertEqual(Nothing(), nothing.zip(Just("a")))
+
+    def test_maybe_monad_flatten(self):
+        self.assertEqual(Just(10), Just(Just(10)).flatten())
+        self.assertEqual(Nothing(), Just(Nothing()).flatten())
+        self.assertEqual(Nothing(), Nothing().flatten())
+
+    def test_maybe_monad_right_or(self):
+        just_value = Just(10)
+        nothing_value = Nothing()
+
+        self.assertEqual(Right(10), just_value.right_or("error"))
+        self.assertEqual(Left("error"), nothing_value.right_or("error"))
+        self.assertEqual(Right(10), just_value.right_or_else(lambda: "error"))
+        self.assertEqual(Left("error"), nothing_value.right_or_else(lambda: "error"))
 
     def maybe_safe_function(self):
         exception_function = MagicMock(side_effect=Exception("error"))
