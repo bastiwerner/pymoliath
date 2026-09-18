@@ -3,6 +3,7 @@ from typing import Any, Callable
 from unittest.mock import MagicMock, Mock
 
 from pymoliath.option import Nil, Option, Some, from_optional, safe
+from pymoliath.result import Err, Ok
 from pymoliath.util import compose
 
 
@@ -216,9 +217,55 @@ class TestOption(unittest.TestCase):
         some_value = Some(10)
         nothing = Nil()
 
-        self.assertEqual(Some(10), some_value.filter(lambda v: v > 10))
-        self.assertEqual(Nil(), some_value.filter(lambda v: v <= 10))
+        self.assertEqual(Some(10), some_value.filter(lambda v: v > 5))
+        self.assertEqual(Nil(), some_value.filter(lambda v: v > 10))
         self.assertEqual(Nil(), nothing.filter(lambda v: v < 10))
+
+    def test_option_monad_is_some_and(self):
+        some_value = Some(10)
+        nothing = Nil()
+
+        self.assertTrue(some_value.is_some_and(lambda v: v > 5))
+        self.assertFalse(some_value.is_some_and(lambda v: v > 10))
+        self.assertFalse(nothing.is_some_and(lambda v: v > 5))
+
+    def test_option_monad_map_or(self):
+        some_value = Some(10)
+        nothing = Nil()
+
+        self.assertEqual(11, some_value.map_or(0, lambda v: v + 1))
+        self.assertEqual(0, nothing.map_or(0, lambda v: v + 1))
+
+    def test_option_monad_and_or(self):
+        some_value = Some(10)
+        nothing = Nil()
+
+        self.assertEqual(Some(20), some_value.and_(Some(20)))
+        self.assertEqual(Nil(), nothing.and_(Some(20)))
+        self.assertEqual(some_value, some_value.or_(Some(20)))
+        self.assertEqual(Some(20), nothing.or_(Some(20)))
+
+    def test_option_monad_zip(self):
+        some_value = Some(10)
+        nothing = Nil()
+
+        self.assertEqual(Some((10, "a")), some_value.zip(Some("a")))
+        self.assertEqual(Nil(), some_value.zip(Nil()))
+        self.assertEqual(Nil(), nothing.zip(Some("a")))
+
+    def test_option_monad_flatten(self):
+        self.assertEqual(Some(10), Some(Some(10)).flatten())
+        self.assertEqual(Nil(), Some(Nil()).flatten())
+        self.assertEqual(Nil(), Nil().flatten())
+
+    def test_option_monad_ok_or(self):
+        some_value = Some(10)
+        nothing = Nil()
+
+        self.assertEqual(Ok(10), some_value.ok_or("error"))
+        self.assertEqual(Err("error"), nothing.ok_or("error"))
+        self.assertEqual(Ok(10), some_value.ok_or_else(lambda: "error"))
+        self.assertEqual(Err("error"), nothing.ok_or_else(lambda: "error"))
 
     def maybe_safe_function(self):
         exception_function = MagicMock(side_effect=Exception("error"))

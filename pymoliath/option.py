@@ -1,12 +1,26 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Generic, TypeAlias, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Generic,
+    Tuple,
+    TypeAlias,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from pymoliath.util import curry
+
+if TYPE_CHECKING:
+    from pymoliath.result import Result
 
 TypeSource = TypeVar("TypeSource")
 TypeResult = TypeVar("TypeResult")
 TypePure = TypeVar("TypePure")
+TypeErr = TypeVar("TypeErr")
 
 
 class Some(Generic[TypeSource]):
@@ -121,8 +135,139 @@ class Some(Generic[TypeSource]):
             Returns Some if the Option Monad is of type Some and filter function returns True otherwise Nothing.
         """
         if filter_function(self._value):
-            return Nil()
+            return self
+        return Nil()
+
+    def is_some_and(self, function: Callable[[TypeSource], bool]) -> bool:
+        """Returns True if the Option Monad is a Some and the predicate returns True for the contained value.
+
+        Parameters
+        ----------
+        function: Callable[[TypeSource], bool]
+            Predicate function applied to the Some value.
+
+        Returns
+        -------
+        result: bool
+            Returns the predicate result.
+        """
+        return function(self._value)
+
+    def map_or(
+        self, default_value: TypeResult, function: Callable[[TypeSource], TypeResult]
+    ) -> TypeResult:
+        """Applies the function to the Some value, or returns the default value if Nil.
+
+        Parameters
+        ----------
+        default_value: TypeResult
+            Default value to be returned if the Option Monad is Nil.
+        function: Callable[[TypeSource], TypeResult]
+            Function applied to the Some value.
+
+        Returns
+        -------
+        result: TypeResult
+            Returns the function result.
+        """
+        return function(self._value)
+
+    def and_(self, other: Option[TypeResult]) -> Option[TypeResult]:
+        """Returns `other` if the Option Monad is a Some, otherwise Nil.
+
+        Parameters
+        ----------
+        other: Option[TypeResult]
+            Option Monad to be returned if this Option Monad is a Some.
+
+        Returns
+        -------
+        result: Option[TypeResult]
+            Returns `other`.
+        """
+        return other
+
+    def or_(self, other: Option[TypeSource]) -> Option[TypeSource]:
+        """Returns this Option Monad if it is a Some, otherwise `other`.
+
+        Parameters
+        ----------
+        other: Option[TypeSource]
+            Option Monad to be returned if this Option Monad is a Nil.
+
+        Returns
+        -------
+        result: Option[TypeSource]
+            Returns this Some.
+        """
         return self
+
+    def zip(self, other: Option[TypePure]) -> Option[Tuple[TypeSource, TypePure]]:
+        """Combines this Option Monad with another into an Option Monad of a tuple, or Nil if either is Nil.
+
+        Parameters
+        ----------
+        other: Option[TypePure]
+            Option Monad to be zipped with this Option Monad.
+
+        Returns
+        -------
+        result: Option[Tuple[TypeSource, TypePure]]
+            Returns Some of a tuple of both values, or Nil.
+        """
+        return other.map(lambda o: (self._value, o))
+
+    @overload
+    def flatten(self: Some[Some[TypeResult]]) -> Option[TypeResult]: ...
+
+    @overload
+    def flatten(self: Some[Nil[TypeResult]]) -> Option[TypeResult]: ...
+
+    def flatten(self) -> Option[Any]:
+        """Flattens a nested Option Monad by one level.
+
+        Returns
+        -------
+        result: Option[TypeResult]
+            Returns the nested Option Monad.
+        """
+        return cast(Option[Any], self._value)
+
+    def ok_or(self, err_value: TypeErr) -> Result[TypeSource, TypeErr]:
+        """Converts the Option Monad into a Result Monad, using `err_value` as the Err value if Nil.
+
+        Parameters
+        ----------
+        err_value: TypeErr
+            Error value to be used if the Option Monad is Nil.
+
+        Returns
+        -------
+        result: Result[TypeSource, TypeErr]
+            Returns Ok with the Some value.
+        """
+        from pymoliath.result import Ok
+
+        return Ok(self._value)
+
+    def ok_or_else(
+        self, err_function: Callable[[], TypeErr]
+    ) -> Result[TypeSource, TypeErr]:
+        """Converts the Option Monad into a Result Monad, calling `err_function` for the Err value if Nil.
+
+        Parameters
+        ----------
+        err_function: Callable[[], TypeErr]
+            Function called to produce the error value if the Option Monad is Nil.
+
+        Returns
+        -------
+        result: Result[TypeSource, TypeErr]
+            Returns Ok with the Some value.
+        """
+        from pymoliath.result import Ok
+
+        return Ok(self._value)
 
     def unwrap(self) -> TypeSource:
         """Returns the internal value of the Some or raises an exception if Nothing.
@@ -247,6 +392,36 @@ class Nil(Generic[TypeSource]):
 
     def filter(self, filter_function: Callable[[Any], bool]) -> Option[TypeSource]:
         return self
+
+    def is_some_and(self, function: Callable[[Any], bool]) -> bool:
+        return False
+
+    def map_or(
+        self, default_value: TypeResult, function: Callable[[Any], TypeResult]
+    ) -> TypeResult:
+        return default_value
+
+    def and_(self, other: Option[Any]) -> Option[TypeSource]:
+        return self
+
+    def or_(self, other: Option[TypeSource]) -> Option[TypeSource]:
+        return other
+
+    def zip(self, other: Option[Any]) -> Option[Any]:
+        return self
+
+    def flatten(self) -> Option[TypeSource]:
+        return self
+
+    def ok_or(self, err_value: TypeErr) -> Result[Any, TypeErr]:
+        from pymoliath.result import Err
+
+        return Err(err_value)
+
+    def ok_or_else(self, err_function: Callable[[], TypeErr]) -> Result[Any, TypeErr]:
+        from pymoliath.result import Err
+
+        return Err(err_function())
 
     def unwrap(self) -> TypeSource:
         raise Exception("Unwrap error on Option monad")
