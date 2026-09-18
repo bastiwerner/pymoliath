@@ -227,3 +227,16 @@ class TestEitherResultMonad(unittest.TestCase):
             right_value.match(lambda e: e == "left", lambda v: v == "right")
         )
         self.assertTrue(left_value.match(lambda e: e == "left", lambda v: v == "right"))
+
+    def test_either_supports_structural_pattern_matching(self):
+        def describe(value: Either[str, int]) -> str:
+            # No `case _:` fallback: Either is a closed union (Left[L] | Right[R]),
+            # so this is statically exhaustive without one.
+            match value:
+                case Left(e):
+                    return f"left {e}"
+                case Right(v):
+                    return f"right {v}"
+
+        self.assertEqual("right 10", describe(Right(10)))
+        self.assertEqual("left error", describe(Left("error")))

@@ -65,6 +65,22 @@ Every Monad implementation of Pymoliath has the typical haskell Monad interface.
     * Monad(f a -> b).apply2(Monad(a)) => Monad(b)
 * `run`: (IO, Reader, Writer, State, Lazy, Sequence)
 
+# Structural Pattern Matching
+
+`Maybe`, `Either`, `Result`, `Try` and `Option` are modeled as closed union types (e.g. `Maybe = Just[T] | Nothing`),
+so they work directly with Python's `match` statement — including exhaustiveness checking by static type checkers
+like pyright, without needing a `case _:` fallback.
+
+```python
+match maybe_value:
+    case Just(x):
+        print(f"just {x}")
+    case Nothing():
+        print("nothing")
+```
+
+The same works for `Left`/`Right`, `Ok`/`Err`, `Success`/`Failure` and `Some`/`Nil`.
+
 ## Maybe
 
 Haskell : [Data.Maybe](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data-Maybe.html)
@@ -94,6 +110,38 @@ just.filter(filter_function)
 just.match(just_function, default_function)
 
 from_optional(value_or_none)  # from pymoliath.maybe import from_optional
+```
+
+## Option
+
+An alternative to `Maybe` with Rust-style naming (`Option`/`Some`/`Nil` instead of `Maybe`/`Just`/`Nothing`). Same
+interface otherwise.
+
+```python
+# Option[TypeSource]
+some: Option[int] = Some(10)
+nil: Option[int] = Nil()
+applicative = Some(lambda x: x + 1)
+
+some.is_some()
+some.is_nothing()
+
+# Monad functions
+some.map(mapping_function)  # Option maps the function (if not nil)
+some.bind(bind_function)  # Option binds the function (if not nil)
+some.apply(applicative)  # Apply the some value to the applicative (if not nil)
+applicative.apply2(some)  # Apply the applicative to the some value (if not nil)
+
+some.unwrap()  # Returns the some value or raises an Exception
+some.unwrap_or(20)  # Returns the some value or else a default value
+some.unwrap_or_else(
+    lambda: 20
+)  # Return the some value or the result from the passed function
+
+some.filter(filter_function)
+some.match(some_function, default_function)
+
+from_optional(value_or_none)  # from pymoliath.option import from_optional
 ```
 
 ## Either
@@ -161,7 +209,7 @@ result.to_either()  # Either[TypeErr, TypeOk]
 
 result_safe(
     unsafe_function
-)  # Result[TypeOk, Exception], from pymoliath.either import result_safe
+)  # Result[TypeOk, Exception], from pymoliath.result import result_safe
 ```
 
 ## Try
@@ -177,8 +225,8 @@ success: Try[int] = Success(10)
 failure: Try[int] = Failure(Exception("error"))
 applicative = Success(lambda x: x + 1)
 
-success.is_ok()
-success.is_err()
+success.is_success()
+success.is_failure()
 
 # Monad functions
 success.map(ok_map_function)  # Maps only the success value with the function
@@ -344,4 +392,23 @@ lazy.map(map_function).run()  # Map resulting value with the function
 lazy.bind(bind_function).run()  # Bind resulting value with the function
 lazy.apply(applicative).run()  # Apply resulting value to the applicative
 applicative.apply2(lazy).run()  # Apply resulting applicative to the value
+```
+
+## Continuation
+
+Represents computations in continuation-passing style (CPS). Instead of returning a result, a computation receives a
+callback and passes its result to it.
+
+```python
+# Continuation[TypeSource, TypeReturn]
+continuation: Continuation[int, str] = Continuation(lambda callback: callback(10))
+continuation.run(lambda x: str(x))  # '10'
+
+# Monad functions
+continuation.map(map_function).run(
+    callback
+)  # Maps the resulting value before it reaches the callback
+continuation.bind(bind_function).run(
+    callback
+)  # Binds the resulting value to a new continuation
 ```

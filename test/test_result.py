@@ -212,3 +212,16 @@ class TestResultMonad(unittest.TestCase):
                 .bind_err(lambda e: Err(f"{e} sucks"))
             ),
         )
+
+    def test_result_supports_structural_pattern_matching(self):
+        def describe(value: Result[int, str]) -> str:
+            # No `case _:` fallback: Result is a closed union (Ok[T] | Err[E]),
+            # so this is statically exhaustive without one.
+            match value:
+                case Ok(x):
+                    return f"ok {x}"
+                case Err(e):
+                    return f"err {e}"
+
+        self.assertEqual("ok 10", describe(Ok(10)))
+        self.assertEqual("err error", describe(Err("error")))

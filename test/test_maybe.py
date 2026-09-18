@@ -265,3 +265,16 @@ class TestMaybe(unittest.TestCase):
             "default",
             nothing.bind(lambda x: Just(x)).match(lambda x: x, lambda: "default"),
         )
+
+    def test_maybe_supports_structural_pattern_matching(self):
+        def describe(value: Maybe[int]) -> str:
+            # No `case _:` fallback: Maybe is a closed union (Just[T] | Nothing),
+            # so this is statically exhaustive without one.
+            match value:
+                case Just(x):
+                    return f"just {x}"
+                case Nothing():
+                    return "nothing"
+
+        self.assertEqual("just 10", describe(Just(10)))
+        self.assertEqual("nothing", describe(Nothing()))

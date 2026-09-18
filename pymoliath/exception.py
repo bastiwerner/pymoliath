@@ -21,6 +21,8 @@ class Success(Generic[TypeSource]):
     * Failure: represents the failure way which contains the actual exception
     """
 
+    __match_args__ = ("_success_value",)
+
     def __init__(self, value: TypeSource):
         self._success_value = value
 
@@ -316,6 +318,8 @@ class Success(Generic[TypeSource]):
 
 
 class Failure:
+    __match_args__ = ("_failure_value",)
+
     def __init__(self, value: Exception):
         assert isinstance(value, Exception), "Failure value must be of type Exception"
         self._failure_value = value

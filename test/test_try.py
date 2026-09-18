@@ -238,6 +238,19 @@ class TestTryMonad(unittest.TestCase):
             )
         )
 
+    def test_try_supports_structural_pattern_matching(self):
+        def describe(value: Try[int]) -> str:
+            # No `case _:` fallback: Try is a closed union (Success[T] | Failure),
+            # so this is statically exhaustive without one.
+            match value:
+                case Success(x):
+                    return f"success {x}"
+                case Failure(e):
+                    return f"failure {e}"
+
+        self.assertEqual("success 10", describe(Success(10)))
+        self.assertEqual("failure boom", describe(Failure(Exception("boom"))))
+
     def test_try_monad_to_either_monad(self):
         success = Success(10)
         failure = Failure(Exception("error"))

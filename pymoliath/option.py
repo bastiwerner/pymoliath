@@ -292,7 +292,7 @@ class Nil(Generic[TypeSource]):
         return from_optional(value)
 
     def __str__(self) -> str:
-        return "Nothing()"
+        return "Nil()"
 
     def __eq__(self, __o: object) -> bool:
         return str(self) == str(__o)

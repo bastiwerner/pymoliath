@@ -179,7 +179,7 @@ class TestOption(unittest.TestCase):
         nothing = Nil()
 
         self.assertEqual(str(some), "Some(a)")
-        self.assertEqual(str(nothing), "Nothing()")
+        self.assertEqual(str(nothing), "Nil()")
 
     def test_maybe_optional_instances(self):
         self.assertTrue(isinstance(Some("a"), (Some, Nil)))  # pyright: ignore[reportUnnecessaryIsInstance]
@@ -264,3 +264,16 @@ class TestOption(unittest.TestCase):
             "default",
             nothing.bind(lambda x: Some(x)).match(lambda x: x, lambda: "default"),
         )
+
+    def test_option_supports_structural_pattern_matching(self):
+        def describe(value: Option[int]) -> str:
+            # No `case _:` fallback: Option is a closed union (Some[T] | Nil),
+            # so this is statically exhaustive without one.
+            match value:
+                case Some(x):
+                    return f"some {x}"
+                case Nil():
+                    return "nil"
+
+        self.assertEqual("some 10", describe(Some(10)))
+        self.assertEqual("nil", describe(Nil()))
