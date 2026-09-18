@@ -2,6 +2,7 @@ import unittest
 from typing import Tuple
 
 from pymoliath.list import ListMonad
+from pymoliath.option import Nil, Some
 from pymoliath.util import compose
 
 
@@ -148,6 +149,111 @@ class TestMonadList(unittest.TestCase):
         self.assertEqual([1, 2, 3, 4], result.take(4))
         self.assertEqual([6, 7, 8, 9], result.skip(5))
         self.assertEqual([3, 4], result.take(4).filter(lambda x: x > 2))
+
+    def test_list_monad_fold_and_reduce(self):
+        values = ListMonad([1, 2, 3, 4])
+
+        self.assertEqual(10, values.fold(0, lambda acc, v: acc + v))
+        self.assertEqual(Some(10), values.reduce(lambda acc, v: acc + v))
+        self.assertEqual(Nil(), ListMonad().reduce(lambda acc, v: acc + v))
+
+    def test_list_monad_enumerate(self):
+        self.assertEqual(
+            ListMonad([(0, "a"), (1, "b")]), ListMonad(["a", "b"]).enumerate()
+        )
+
+    def test_list_monad_zip_and_zip_with(self):
+        values = ListMonad([1, 2, 3])
+
+        self.assertEqual(ListMonad([(1, "a"), (2, "b")]), values.zip(["a", "b"]))
+        self.assertEqual(
+            ListMonad(["1a", "2b"]),
+            values.zip_with(["a", "b"], lambda a, b: f"{a}{b}"),
+        )
+
+    def test_list_monad_chain_and_flatten(self):
+        self.assertEqual(ListMonad([1, 2, 3, 4]), ListMonad([1, 2]).chain([3, 4]))
+        self.assertEqual(
+            ListMonad([1, 2, 3, 4]),
+            ListMonad([[1, 2], [3, 4]]).flatten(),
+        )
+
+    def test_list_monad_any_all(self):
+        values = ListMonad([1, 2, 3])
+
+        self.assertTrue(values.any(lambda v: v > 2))
+        self.assertFalse(values.any(lambda v: v > 3))
+        self.assertTrue(values.all(lambda v: v > 0))
+        self.assertFalse(values.all(lambda v: v > 1))
+
+    def test_list_monad_find_and_position(self):
+        values = ListMonad([1, 2, 3])
+
+        self.assertEqual(Some(2), values.find(lambda v: v > 1))
+        self.assertEqual(Nil(), values.find(lambda v: v > 3))
+        self.assertEqual(Some(1), values.position(lambda v: v > 1))
+        self.assertEqual(Nil(), values.position(lambda v: v > 3))
+
+    def test_list_monad_min_and_max(self):
+        values = ListMonad([3, 1, 2])
+
+        self.assertEqual(Some(1), values.min())
+        self.assertEqual(Some(3), values.max())
+        self.assertEqual(Nil(), ListMonad().min())
+        self.assertEqual(Nil(), ListMonad().max())
+
+    def test_list_monad_min_by_key_and_max_by_key(self):
+        values = ListMonad(["aaa", "b", "cc"])
+
+        self.assertEqual(Some("b"), values.min_by_key(lambda v: len(v)))
+        self.assertEqual(Some("aaa"), values.max_by_key(lambda v: len(v)))
+        self.assertEqual(Nil(), ListMonad().min_by_key(lambda v: len(v)))
+        self.assertEqual(Nil(), ListMonad().max_by_key(lambda v: len(v)))
+
+    def test_list_monad_partition(self):
+        values = ListMonad([1, 2, 3, 4, 5])
+
+        self.assertEqual(
+            (ListMonad([2, 4]), ListMonad([1, 3, 5])),
+            values.partition(lambda v: v % 2 == 0),
+        )
+
+    def test_list_monad_take_while_and_skip_while(self):
+        values = ListMonad([1, 2, 3, 1, 2])
+
+        self.assertEqual(ListMonad([1, 2]), values.take_while(lambda v: v < 3))
+        self.assertEqual(ListMonad([3, 1, 2]), values.skip_while(lambda v: v < 3))
+
+    def test_list_monad_step_by(self):
+        values = ListMonad([0, 1, 2, 3, 4, 5])
+
+        self.assertEqual(ListMonad([0, 2, 4]), values.step_by(2))
+
+        with self.assertRaises(ValueError):
+            values.step_by(0)
+
+    def test_list_monad_rev(self):
+        self.assertEqual(ListMonad([3, 2, 1]), ListMonad([1, 2, 3]).rev())
+
+    def test_list_monad_sum(self):
+        self.assertEqual(6, ListMonad([1, 2, 3]).sum(0))
+        self.assertEqual(106, ListMonad([1, 2, 3]).sum(100))
+
+    def test_list_monad_dedup_and_distinct(self):
+        values = ListMonad([1, 1, 2, 2, 1, 3])
+
+        self.assertEqual(ListMonad([1, 2, 1, 3]), values.dedup())
+        self.assertEqual(ListMonad([1, 2, 3]), values.distinct())
+
+    def test_list_monad_sorted_and_sort_by(self):
+        values = ListMonad([3, 1, 2])
+
+        self.assertEqual(ListMonad([1, 2, 3]), values.sorted())
+        self.assertEqual(ListMonad([3, 2, 1]), values.sorted(reverse=True))
+        self.assertEqual(
+            ListMonad(["a", "bb", "ccc"]),
+            ListMonad(["ccc", "a", "bb"]).sort_by(lambda v: len(v)),
+        )
 
     def test_monad_list_examples(self):
         list = ListMonad(range(2))
