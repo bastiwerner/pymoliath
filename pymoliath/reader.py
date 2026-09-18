@@ -3,9 +3,9 @@ from __future__ import annotations
 from functools import partial
 from typing import Any, Callable, Generic, Type, TypeVar
 
-TypeSource = TypeVar('TypeSource')
-TypeEnv = TypeVar('TypeEnv')
-TypeResult = TypeVar('TypeResult')
+TypeSource = TypeVar("TypeSource")
+TypeEnv = TypeVar("TypeEnv")
+TypeResult = TypeVar("TypeResult")
 
 
 class Reader(Generic[TypeEnv, TypeSource]):
@@ -14,15 +14,19 @@ class Reader(Generic[TypeEnv, TypeSource]):
     The Reader monad (also called the Environment monad). Represents a computation, which can read values from a shared
     environment, pass values from function to function, and execute sub-computations in a modified environment.
     """
-    _value: Callable[[TypeEnv], TypeSource]  # Private reader monad value of type callable which should not be modified
+
+    _value: Callable[
+        [TypeEnv], TypeSource
+    ]  # Private reader monad value of type callable which should not be modified
 
     def __init__(self, value: Callable[[TypeEnv], TypeSource]) -> None:
-        if not isinstance(value, Callable):
+        if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("Reader value must be of type Callable")
         self._value = value
 
-    def map(self: Reader[TypeEnv, TypeSource], function: Callable[[TypeSource], TypeResult]) -> Reader[
-        TypeEnv, TypeResult]:
+    def map(
+        self: Reader[TypeEnv, TypeSource], function: Callable[[TypeSource], TypeResult]
+    ) -> Reader[TypeEnv, TypeResult]:
         """Reader monad functor interface (>=, map).
 
         Definition: Reader(f: e -> a) >= f: a -> b => Reader(f: e -> b)
@@ -37,10 +41,12 @@ class Reader(Generic[TypeEnv, TypeSource]):
         reader: Reader[TypeEnv, TypeResult]
             Returns a reader monad with the function result as value
         """
-        return self.__class__(lambda env: function(self.run(env)))
+        return Reader(lambda env: function(self.run(env)))
 
-    def bind(self: Reader[TypeEnv, TypeSource],
-             function: Callable[[TypeSource], Reader[TypeEnv, TypeResult]]) -> Reader[TypeEnv, TypeResult]:
+    def bind(
+        self: Reader[TypeEnv, TypeSource],
+        function: Callable[[TypeSource], Reader[TypeEnv, TypeResult]],
+    ) -> Reader[TypeEnv, TypeResult]:
         """Reader monad bind interface (>>=, bind, flatMap).
 
         Definition: Reader(f: e -> a) >= f: a -> Reader(f: e -> b) => Reader(f: e -> b)
@@ -55,10 +61,12 @@ class Reader(Generic[TypeEnv, TypeSource]):
         reader: Reader[TypeEnv, TypeResult]
             Returns a reader monad with the function result
         """
-        return self.__class__(lambda x: function(self.run(x)).run(x))
+        return Reader(lambda x: function(self.run(x)).run(x))
 
-    def apply(self: Reader[TypeEnv, TypeSource],
-              applicative: Reader[TypeEnv, Callable[[TypeSource], TypeResult]]) -> Reader[TypeEnv, TypeResult]:
+    def apply(
+        self: Reader[TypeEnv, TypeSource],
+        applicative: Reader[TypeEnv, Callable[..., TypeResult]],
+    ) -> Reader[TypeEnv, TypeResult]:
         """Reader monad applicative interface for reader monads containing a value (<*>).
 
         Definition: Reader(f: e -> a) <*> Reader(f: e -> f: a -> b) => Reader(f: e -> b)
@@ -75,8 +83,10 @@ class Reader(Generic[TypeEnv, TypeSource]):
             Applies a reader monad containing a value to a reader monad containing a function.
         """
 
-        def binder(applicative_function: Callable[[TypeSource], TypeResult]) -> Reader[TypeEnv, TypeResult]:
-            def inner(x: TypeSource) -> Any:
+        def binder(
+            applicative_function: Callable[..., TypeResult],
+        ) -> Reader[TypeEnv, TypeResult]:
+            def inner(x: Any) -> Any:
                 try:
                     return applicative_function(x)
                 except TypeError:
@@ -86,8 +96,10 @@ class Reader(Generic[TypeEnv, TypeSource]):
 
         return applicative.bind(binder)
 
-    def apply2(self: Reader[TypeEnv, Callable[[TypeSource], TypeResult]],
-               applicative_value: Reader[TypeEnv, TypeSource]) -> Reader[TypeEnv, TypeResult]:
+    def apply2(
+        self: Reader[TypeEnv, Callable[..., TypeResult]],
+        applicative_value: Reader[TypeEnv, Any],
+    ) -> Reader[TypeEnv, TypeResult]:
         """Reader monad applicative interface for reader monads containing a function (<*>).
 
         Definition: Reader(f: e -> f: a -> b) <*> Reader(f: e -> a) => Reader(f: e -> b)
@@ -103,8 +115,10 @@ class Reader(Generic[TypeEnv, TypeSource]):
             Applies a reader monad containing a function to a reader monad with a value or function.
         """
 
-        def binder(applicative_function: Callable[[TypeSource], TypeResult]) -> Reader[TypeEnv, TypeResult]:
-            def inner(x: TypeSource) -> Any:
+        def binder(
+            applicative_function: Callable[..., TypeResult],
+        ) -> Reader[TypeEnv, TypeResult]:
+            def inner(x: Any) -> Any:
                 try:
                     return applicative_function(x)
                 except TypeError:
@@ -131,7 +145,9 @@ class Reader(Generic[TypeEnv, TypeSource]):
 
         return cls(identity)
 
-    def local(self: Reader[TypeEnv, TypeSource], function: Callable[[TypeEnv], TypeEnv]) -> Reader[TypeEnv, TypeEnv]:
+    def local(
+        self: Reader[TypeEnv, TypeSource], function: Callable[[TypeEnv], TypeEnv]
+    ) -> Reader[TypeEnv, TypeSource]:
         """Reader monad specific function local. Allows to affect the environment before the next reader gets it.
 
         Parameters
@@ -144,7 +160,7 @@ class Reader(Generic[TypeEnv, TypeSource]):
         reader: Reader[TypeEnv, TypeSource]
             Returns a new reader instance with the modified environment from the passed function.
         """
-        return self.__class__(lambda env: self.run(function(env)))  # type: ignore
+        return Reader(lambda env: self.run(function(env)))
 
     def run(self: Reader[TypeEnv, TypeSource], env: TypeEnv) -> TypeSource:
         """Reader monad lazy run function to start the reader and pass an environment.
@@ -159,7 +175,7 @@ class Reader(Generic[TypeEnv, TypeSource]):
         return self._value(env)
 
     def __str__(self: Reader[TypeEnv, TypeSource]) -> str:
-        return f'Reader({self._value})'
+        return f"Reader({self._value})"
 
     def __repr__(self: Reader[TypeEnv, TypeSource]) -> str:
         return str(self)

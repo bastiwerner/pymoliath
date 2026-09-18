@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 from functools import partial
-from typing import Callable, Generic, TypeVar, Tuple
+from typing import Any, Callable, Generic, Protocol, TypeVar, Tuple
 
-TypeSource = TypeVar('TypeSource')
+TSupportsAdd = TypeVar("TSupportsAdd", bound="SupportsAdd")
+
+
+class SupportsAdd(Protocol):
+    """Structural bound for TypeMonoid: any type implementing the monoid closure law (a + b is also in TypeMonoid)."""
+
+    def __add__(self: TSupportsAdd, other: TSupportsAdd, /) -> TSupportsAdd: ...
+
+
+TypeSource = TypeVar("TypeSource")
 TypePure = TypeVar("TypePure")
-TypeMonoid = TypeVar('TypeMonoid')
-TypeResult = TypeVar('TypeResult')
+TypeMonoid = TypeVar("TypeMonoid", bound=SupportsAdd)
+TypeInner = TypeVar("TypeInner")
+TypeResult = TypeVar("TypeResult")
 
 
 class Writer(Generic[TypeSource, TypeMonoid]):
@@ -27,7 +37,10 @@ class Writer(Generic[TypeSource, TypeMonoid]):
     2. Identity: There exists an element in TypeMonoid (denoted 0) such that: a + 0 = a = 0 + a
     3. Associativity: (a + b) + c = a + (b + c)
     """
-    _value: Tuple[TypeSource, TypeMonoid]  # Private writer monad value which should not be modified
+
+    _value: Tuple[
+        TypeSource, TypeMonoid
+    ]  # Private writer monad value which should not be modified
 
     def __init__(self, value: TypeSource, monoid: TypeMonoid) -> None:
         """Writer monad constructor which takes a value of type TypeSource and a monoid of type TypeMonoid.
@@ -41,8 +54,10 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         """
         self._value = (value, monoid)
 
-    def map(self: Writer[TypeSource, TypeMonoid],
-            function: Callable[[TypeSource], TypeResult]) -> Writer[TypeResult, TypeMonoid]:
+    def map(
+        self: Writer[TypeSource, TypeMonoid],
+        function: Callable[[TypeSource], TypeResult],
+    ) -> Writer[TypeResult, TypeMonoid]:
         """Writer monad functor interface (>=, map).
 
         Definition: M(a, m) >= f: a -> b => M(b, m)
@@ -58,10 +73,12 @@ class Writer(Generic[TypeSource, TypeMonoid]):
             Returns a writer monad with the function result as value and the closure of the monoids (+)
         """
         value, monoid = self.run()
-        return self.__class__(function(value), monoid)
+        return Writer(function(value), monoid)
 
-    def bind(self: Writer[TypeSource, TypeMonoid],
-             function: Callable[[TypeSource], Writer[TypeResult, TypeMonoid]]) -> Writer[TypeResult, TypeMonoid]:
+    def bind(
+        self: Writer[TypeSource, TypeMonoid],
+        function: Callable[[TypeSource], Writer[TypeResult, TypeMonoid]],
+    ) -> Writer[TypeResult, TypeMonoid]:
         """Writer monad bind interface (>>=, bind, flatMap).
 
         Parameters
@@ -76,10 +93,12 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         """
         value, monoid = self.run()
         result, other_monoid = function(value).run()
-        return self.__class__(result, monoid + other_monoid)  # type: ignore 
+        return Writer(result, monoid + other_monoid)
 
-    def apply(self: Writer[TypeSource, TypeMonoid],
-              applicative: Writer[Callable[[TypeSource], TypeResult], TypeMonoid]) -> Writer[TypeResult, TypeMonoid]:
+    def apply(
+        self: Writer[TypeSource, TypeMonoid],
+        applicative: Writer[Callable[..., TypeResult], TypeMonoid],
+    ) -> Writer[TypeResult, TypeMonoid]:
         """Writer monad applicative interface for writer monads containing a value.
 
         Parameters
@@ -97,12 +116,17 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         value, monoid = self.run()
         function, other_monoid = applicative.run()
         try:
-            return self.__class__(function(value), monoid + other_monoid)  # type: ignore
+            return Writer(function(value), monoid + other_monoid)
         except TypeError:
-            return self.__class__(partial(function, value), monoid + other_monoid)  # type: ignore
+            # The dynamic partial-application fallback can't be typed statically:
+            # partial[TypeResult] isn't TypeResult, but it's a valid TypeResult once
+            # fully applied by a later apply/apply2 call.
+            return Writer(partial(function, value), monoid + other_monoid)  # pyright: ignore[reportReturnType]
 
-    def apply2(self: Writer[Callable[[TypePure], TypeResult], TypeMonoid],
-               monad_value: Writer[TypePure, TypeMonoid]) -> Writer[TypeResult, TypeMonoid]:
+    def apply2(
+        self: Writer[Callable[..., TypeResult], TypeMonoid],
+        monad_value: Writer[Any, TypeMonoid],
+    ) -> Writer[TypeResult, TypeMonoid]:
         """Writer monad applicative interface for writer monads containing a function.
 
         Parameters
@@ -119,11 +143,13 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         value_function, monoid = self.run()
         value, other_monoid = monad_value.run()
         try:
-            return self.__class__(value_function(value), monoid + other_monoid)  # type: ignore
+            return Writer(value_function(value), monoid + other_monoid)
         except TypeError:
-            return self.__class__(partial(value_function, value), monoid + other_monoid)  # type: ignore
+            return Writer(partial(value_function, value), monoid + other_monoid)  # pyright: ignore[reportReturnType]
 
-    def tell(self: Writer[TypeSource, TypeMonoid], monoid_value: TypeMonoid) -> Writer[TypeSource, TypeMonoid]:
+    def tell(
+        self: Writer[TypeSource, TypeMonoid], monoid_value: TypeMonoid
+    ) -> Writer[TypeSource, TypeMonoid]:
         """Writer monad specific function to add or create a writer monad with a monoid value.
 
         Definition: Monad(a, m) :: tell(n) -> Monad(a, m + n)  where m must be a monoid which can be empty.
@@ -139,9 +165,11 @@ class Writer(Generic[TypeSource, TypeMonoid]):
            Returns a writer monad containing the closure (+) of the passed monoid value.
         """
         value, monoid = self.run()
-        return self.__class__(value, monoid + monoid_value)  # type: ignore
+        return Writer(value, monoid + monoid_value)
 
-    def listen(self: Writer[TypeSource, TypeMonoid]) -> Writer[Tuple[TypeSource, TypeMonoid], TypeMonoid]:
+    def listen(
+        self: Writer[TypeSource, TypeMonoid],
+    ) -> Writer[Tuple[TypeSource, TypeMonoid], TypeMonoid]:
         """Writer monad specific function listen.
 
         Definition: listen :: Monad(a, m) -> Monad(a, (a, m))
@@ -154,8 +182,9 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         """
         return self.map(lambda _: self.run())  # type: ignore
 
-    def pass_(self: Writer[Tuple[TypeSource, Callable[[TypeMonoid], TypeMonoid]], TypeMonoid]) -> Writer[
-        TypeSource, TypeMonoid]:
+    def pass_(
+        self: Writer[Tuple[TypeInner, Callable[[TypeMonoid], TypeMonoid]], TypeMonoid],
+    ) -> Writer[TypeInner, TypeMonoid]:
         """Writer monad specific function pass_ (actually pass)
 
         Definition: pass :: Monad((a, f: m -> m), m) -> Monad(a, m)
@@ -169,13 +198,13 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         """
         pass_tuple, monoid = self.run()
         value, monoid_function = pass_tuple
-        return self.__class__(value, monoid_function(monoid))  # type: ignore
+        return Writer(value, monoid_function(monoid))
 
     def run(self: Writer[TypeSource, TypeMonoid]) -> Tuple[TypeSource, TypeMonoid]:
         return self._value
 
     def __str__(self) -> str:
-        return f'Writer({self._value})'
+        return f"Writer({self._value})"
 
     def __repr__(self) -> str:
         return str(self)

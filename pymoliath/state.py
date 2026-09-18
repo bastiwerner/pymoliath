@@ -3,9 +3,9 @@ from __future__ import annotations
 from functools import partial
 from typing import Any, TypeVar, Generic, Callable, Tuple, Type
 
-TypeState = TypeVar('TypeState')
-TypeSource = TypeVar('TypeSource')
-TypeResult = TypeVar('TypeResult')
+TypeState = TypeVar("TypeState")
+TypeSource = TypeVar("TypeSource")
+TypeResult = TypeVar("TypeResult")
 
 
 class State(Generic[TypeState, TypeSource]):
@@ -15,15 +15,21 @@ class State(Generic[TypeState, TypeSource]):
     through a series of function calls, to simulate stateful code.
 
     """
-    _value: Callable[[TypeState], Tuple[TypeState, TypeSource]]  # Private state monad value of type callable
 
-    def __init__(self, value: Callable[[TypeState], Tuple[TypeState, TypeSource]]) -> None:
-        if not isinstance(value, Callable):
+    _value: Callable[
+        [TypeState], Tuple[TypeState, TypeSource]
+    ]  # Private state monad value of type callable
+
+    def __init__(
+        self, value: Callable[[TypeState], Tuple[TypeState, TypeSource]]
+    ) -> None:
+        if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("State Monad value must be of type Callable")
         self._value = value
 
-    def map(self: State[TypeState, TypeSource],
-            function: Callable[[TypeSource], TypeResult]) -> State[TypeState, TypeResult]:
+    def map(
+        self: State[TypeState, TypeSource], function: Callable[[TypeSource], TypeResult]
+    ) -> State[TypeState, TypeResult]:
         """State monad functor interface (>=, map)
 
         Definition: State(f: s -> (s, a)) >= f: a -> b => State(f: s -> (s, b))
@@ -43,10 +49,12 @@ class State(Generic[TypeState, TypeSource]):
             new_state, result = self.run(state)
             return new_state, function(result)
 
-        return self.__class__(mapper)
+        return State(mapper)
 
-    def bind(self: State[TypeState, TypeSource],
-             function: Callable[[TypeSource], State[TypeState, TypeResult]]) -> State[TypeState, TypeResult]:
+    def bind(
+        self: State[TypeState, TypeSource],
+        function: Callable[[TypeSource], State[TypeState, TypeResult]],
+    ) -> State[TypeState, TypeResult]:
         """State monad bind interface (>>=, bind, flatMap)
 
         Definition: State(f: s -> (s, a)) >>= f: a -> State(s, b) => State(f: s -> (s, b))
@@ -66,10 +74,12 @@ class State(Generic[TypeState, TypeSource]):
             new_state, value = self.run(state)
             return function(value).run(new_state)
 
-        return self.__class__(mapper)
+        return State(mapper)
 
-    def apply(self: State[TypeState, TypeSource],
-              applicative: State[TypeState, Callable[[TypeSource], TypeResult]]) -> State[TypeState, TypeResult]:
+    def apply(
+        self: State[TypeState, TypeSource],
+        applicative: State[TypeState, Callable[..., TypeResult]],
+    ) -> State[TypeState, TypeResult]:
         """State monad applicative interface for state monads containing a value (<*>).
 
         Definition: State(f: s -> a) <*> State(f: s -> f: a -> b) => State(f: s -> b)
@@ -86,8 +96,10 @@ class State(Generic[TypeState, TypeSource]):
             Applies a state monad containing a value to a state monad containing a function.
         """
 
-        def binder(applicative_function: Callable[[TypeSource], TypeResult]) -> State[TypeState, TypeResult]:
-            def inner(x: TypeSource) -> Any:
+        def binder(
+            applicative_function: Callable[..., TypeResult],
+        ) -> State[TypeState, TypeResult]:
+            def inner(x: Any) -> Any:
                 try:
                     return applicative_function(x)
                 except TypeError:
@@ -97,8 +109,10 @@ class State(Generic[TypeState, TypeSource]):
 
         return applicative.bind(binder)
 
-    def apply2(self: State[TypeState, Callable[[TypeSource], TypeResult]],
-               applicative_value: State[TypeState, TypeSource]) -> State[TypeState, TypeResult]:
+    def apply2(
+        self: State[TypeState, Callable[..., TypeResult]],
+        applicative_value: State[TypeState, Any],
+    ) -> State[TypeState, TypeResult]:
         """Reader monad applicative interface for state monads containing a function (<*>).
 
         Definition: State(f: e -> f: a -> b) <*> State(f: e -> a) => State(f: e -> b)
@@ -114,8 +128,10 @@ class State(Generic[TypeState, TypeSource]):
             Applies a state monad containing a function to a state monad with a value or function.
         """
 
-        def binder(applicative_function: Callable[[TypeSource], TypeResult]) -> State[TypeState, TypeResult]:
-            def inner(x: TypeSource) -> Any:
+        def binder(
+            applicative_function: Callable[..., TypeResult],
+        ) -> State[TypeState, TypeResult]:
+            def inner(x: Any) -> Any:
                 try:
                     return applicative_function(x)
                 except TypeError:
@@ -134,10 +150,12 @@ class State(Generic[TypeState, TypeSource]):
         state: State[TypeState, TypeState]
             Return the state from the internals of the monad.
         """
-        return cls(lambda state: (state, state))
+        return State(lambda state: (state, state))
 
     @classmethod
-    def put(cls: Type[State[TypeState, TypeSource]], new_state: TypeState) -> State[TypeState, Tuple[TypeState, Any]]:
+    def put(
+        cls: Type[State[TypeState, TypeSource]], new_state: TypeState
+    ) -> State[TypeState, Tuple[TypeState, Any]]:
         """State monad specific get function.
 
         Returns
@@ -149,9 +167,11 @@ class State(Generic[TypeState, TypeSource]):
         def mapper(_: TypeState) -> Tuple[TypeState, Any]:
             return new_state, ()
 
-        return cls(mapper)
+        return State(mapper)
 
-    def run(self: State[TypeState, TypeSource], state: TypeState) -> Tuple[TypeState, TypeSource]:
+    def run(
+        self: State[TypeState, TypeSource], state: TypeState
+    ) -> Tuple[TypeState, TypeSource]:
         """State monad lazy run function to start the state monad by passing an initial state value.
 
         Definition: State(f: s -> (s, a)).run(b) => (b, a)
@@ -165,7 +185,7 @@ class State(Generic[TypeState, TypeSource]):
         return new_state, value
 
     def __str__(self: State[TypeState, TypeSource]) -> str:
-        return f'State({self._value})'
+        return f"State({self._value})"
 
     def __repr__(self: State[TypeState, TypeSource]) -> str:
         return str(self)

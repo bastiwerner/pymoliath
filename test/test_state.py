@@ -25,9 +25,14 @@ class TestState(unittest.TestCase):
         """
         state_function = lambda x: State(lambda state: (state, x))
 
-        self.assertEqual(state_function(10).run(1), State(lambda state: (state, 10)).bind(state_function).run(1))
+        self.assertEqual(
+            state_function(10).run(1),
+            State(lambda state: (state, 10)).bind(state_function).run(1),
+        )
         self.assertEqual((1, 10), state_function(10).run(1))
-        self.assertEqual((1, 10), State(lambda state: (state, 10)).bind(state_function).run(1))
+        self.assertEqual(
+            (1, 10), State(lambda state: (state, 10)).bind(state_function).run(1)
+        )
 
     def test_state_monad_right_identity_law(self):
         """Right identity law: m >>= return ≡ m
@@ -36,12 +41,16 @@ class TestState(unittest.TestCase):
         Right identity: The second law states that if we have a monadic value
         and we use >>= to feed it to return, the result is our original monadic value.
         """
-        state_value = State(lambda state: (state, f'Hello {state}'))
+        state_value = State(lambda state: (state, f"Hello {state}"))
         bind_unit = lambda v: State(lambda state: (state, v))
 
-        self.assertEqual(state_value.run('world'), state_value.bind(bind_unit).run('world'))
-        self.assertEqual(('world', 'Hello world'), state_value.run('world'))
-        self.assertEqual(('world', 'Hello world'), state_value.bind(bind_unit).run('world'))
+        self.assertEqual(
+            state_value.run("world"), state_value.bind(bind_unit).run("world")
+        )
+        self.assertEqual(("world", "Hello world"), state_value.run("world"))
+        self.assertEqual(
+            ("world", "Hello world"), state_value.bind(bind_unit).run("world")
+        )
 
     def test_just_monad_associativity_law(self):
         """Associativity law: (m >>= f) >>= g ≡ m >>= (x -> f x >>= g)
@@ -54,7 +63,10 @@ class TestState(unittest.TestCase):
         f = lambda x: State(lambda state: (state, x + 1000))
         g = lambda y: State(lambda state: (state, y * 42))
 
-        self.assertEqual(state_value.bind(f).bind(g).run(1), state_value.bind(lambda x: f(x).bind(g)).run(1))
+        self.assertEqual(
+            state_value.bind(f).bind(g).run(1),
+            state_value.bind(lambda x: f(x).bind(g)).run(1),
+        )
         self.assertEqual((1, 43764), state_value.bind(f).bind(g).run(1))
         self.assertEqual((1, 43764), state_value.bind(lambda x: f(x).bind(g)).run(1))
 
@@ -82,7 +94,9 @@ class TestState(unittest.TestCase):
         f = lambda x: x + 1000
         g = lambda y: y * 42
 
-        self.assertEqual(state_value.map(compose(f, g)).run(1), state_value.map(g).map(f).run(1))
+        self.assertEqual(
+            state_value.map(compose(f, g)).run(1), state_value.map(g).map(f).run(1)
+        )
 
     def test_state_monad_applicative_identity_law(self):
         """Applicative identity law: m (f x -> x) <*> m a ≡ m a
@@ -94,8 +108,12 @@ class TestState(unittest.TestCase):
         state_value = State(lambda state: (state, 42))
         applicative_state = State(lambda state: (state, lambda x: x))
 
-        self.assertEqual(state_value.apply(applicative_state).run(1), state_value.run(1))
-        self.assertEqual(applicative_state.apply2(state_value).run(1), state_value.run(1))
+        self.assertEqual(
+            state_value.apply(applicative_state).run(1), state_value.run(1)
+        )
+        self.assertEqual(
+            applicative_state.apply2(state_value).run(1), state_value.run(1)
+        )
 
     def test_state_monad_applicative_homomorphism_law(self):
         """Applicative homomorphism law: pure f <*> pure x = pure (f x)
@@ -109,8 +127,14 @@ class TestState(unittest.TestCase):
         state_value = State(lambda state: (state, x))
         state_applicative = State(lambda state: (state, f))
 
-        self.assertEqual(state_value.apply(state_applicative).run(1), State(lambda state: (state, f(x))).run(1))
-        self.assertEqual(state_applicative.apply2(state_value).run(1), State(lambda state: (state, f(x))).run(1))
+        self.assertEqual(
+            state_value.apply(state_applicative).run(1),
+            State(lambda state: (state, f(x))).run(1),
+        )
+        self.assertEqual(
+            state_applicative.apply2(state_value).run(1),
+            State(lambda state: (state, f(x))).run(1),
+        )
 
     def test_state_monad_applicative_composition_law(self):
         """Applicative composition law: pure (.) <*> u <*> v <*> w = u <*> (v <*> w)
@@ -122,36 +146,46 @@ class TestState(unittest.TestCase):
         w = State(lambda state: (state, 42))
         u = State(lambda state: (state, lambda x: x + 42))
         v = State(lambda state: (state, lambda x: x * 42))
-        state_function_composition = State(lambda state: (state, lambda f, g: compose(f, g)))
+        state_function_composition = State(
+            lambda state: (state, lambda f, g: compose(f, g))
+        )
 
-        self.assertEqual(w.apply(v.apply(u.apply(state_function_composition))).run(1), w.apply(v).apply(u).run(1))
-        self.assertEqual(state_function_composition.apply2(u).apply2(v).apply2(w).run(1), u.apply2(v.apply2(w)).run(1))
+        self.assertEqual(
+            w.apply(v.apply(u.apply(state_function_composition))).run(1),
+            w.apply(v).apply(u).run(1),
+        )
+        self.assertEqual(
+            state_function_composition.apply2(u).apply2(v).apply2(w).run(1),
+            u.apply2(v.apply2(w)).run(1),
+        )
 
     def test_state_monad_representation(self):
-        state_greeter = (State.get()
-                         .bind(lambda name: (State.put("tintin")
-                                             .bind(lambda _: State(lambda state: (state, f"hello, {name}!")))
-                                             )
-                               )
-                         )
+        state_greeter = State.get().bind(
+            lambda name: State.put("tintin").bind(
+                lambda _: State(lambda state: (state, f"hello, {name}!"))
+            )
+        )
 
-        result = state_greeter.run('adit')
-        self.assertEqual(('tintin', 'hello, adit!'), result)
-        self.assertEqual('tintin', result[0])
-        self.assertEqual('hello, adit!', result[1])
+        result = state_greeter.run("adit")
+        self.assertEqual(("tintin", "hello, adit!"), result)
+        self.assertEqual("tintin", result[0])
+        self.assertEqual("hello, adit!", result[1])
 
-        x = (State
-             .get()
-             .bind(lambda name: State(lambda _: ('tintin', name)))
-             .bind(lambda name: State(lambda state: (state, f"hello, {name}!")))
-             )
-        self.assertEqual(('tintin', 'hello, adit!'), x.run('adit'))
+        x = (
+            State.get()
+            .bind(lambda name: State(lambda _: ("tintin", name)))
+            .bind(lambda name: State(lambda state: (state, f"hello, {name}!")))
+        )
+        self.assertEqual(("tintin", "hello, adit!"), x.run("adit"))
 
-        self.assertEqual(State(lambda state: ('new state', ())).run(Any), State.put('new state').run(Any))
+        self.assertEqual(
+            State(lambda state: ("new state", ())).run("unused"),
+            State.put("new state").run("unused"),
+        )
 
         def test_function(state: Any):
-            return state, 'a'
+            return state, "a"
 
         state_value = State(test_function)
 
-        self.assertEqual(str(state_value), f'State({str(test_function)})')
+        self.assertEqual(str(state_value), f"State({str(test_function)})")

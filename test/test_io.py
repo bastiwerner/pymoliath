@@ -34,7 +34,7 @@ class TestIOMonads(unittest.TestCase):
         Right identity: The second law states that if we have a monadic value
         and we use >>= to feed it to return, the result is our original monadic value.
         """
-        io_value = IO(lambda: 'Hello')
+        io_value = IO(lambda: "Hello")
 
         self.assertEqual(io_value.run(), io_value.bind(lambda x: IO(lambda: x)).run())
 
@@ -49,7 +49,9 @@ class TestIOMonads(unittest.TestCase):
         f = lambda x: IO(lambda: x + 1000)
         g = lambda y: IO(lambda: y * 42)
 
-        self.assertEqual(io_value.bind(f).bind(g).run(), io_value.bind(lambda x: f(x).bind(g)).run())
+        self.assertEqual(
+            io_value.bind(f).bind(g).run(), io_value.bind(lambda x: f(x).bind(g)).run()
+        )
 
     def test_monad_functor_identity_law(self):
         """Functors identity law: (m a >= f x -> x) ≡ m a
@@ -70,7 +72,9 @@ class TestIOMonads(unittest.TestCase):
         f = lambda x: x + 1000
         g = lambda y: y * 42
 
-        self.assertEqual(io_value.map(compose(f, g)).run(), io_value.map(g).map(f).run())
+        self.assertEqual(
+            io_value.map(compose(f, g)).run(), io_value.map(g).map(f).run()
+        )
 
     def test_monad_applicative_identity_law(self):
         """Applicative identity law: m (f x -> x) <*> m a ≡ m a
@@ -94,8 +98,12 @@ class TestIOMonads(unittest.TestCase):
         x = 42
         f = lambda x: x * 42
 
-        self.assertEqual(IO(lambda: x).apply(IO(lambda: f)).run(), IO(lambda: f(x)).run())
-        self.assertEqual(IO(lambda: f).apply2(IO(lambda: x)).run(), IO(lambda: f(x)).run())
+        self.assertEqual(
+            IO(lambda: x).apply(IO(lambda: f)).run(), IO(lambda: f(x)).run()
+        )
+        self.assertEqual(
+            IO(lambda: f).apply2(IO(lambda: x)).run(), IO(lambda: f(x)).run()
+        )
 
     def test_monad_applicative_composition_law(self):
         """Applicative composition law: pure (.) <*> u <*> v <*> w = u <*> (v <*> w)
@@ -109,43 +117,50 @@ class TestIOMonads(unittest.TestCase):
         v = IO(lambda: lambda x: x * 42)
         composition = lambda f, g: compose(f, g)
 
-        self.assertEqual(w.apply(v.apply(u.apply(IO(lambda: composition)))).run(), w.apply(v).apply(u).run())
-        self.assertEqual(IO(lambda: composition).apply2(u).apply2(v).apply2(w).run(), u.apply2(v.apply2(w)).run())
+        self.assertEqual(
+            w.apply(v.apply(u.apply(IO(lambda: composition)))).run(),
+            w.apply(v).apply(u).run(),
+        )
+        self.assertEqual(
+            IO(lambda: composition).apply2(u).apply2(v).apply2(w).run(),
+            u.apply2(v.apply2(w)).run(),
+        )
 
     def test_io_monad_non_callable_value_raises_error(self):
         with self.assertRaises(TypeError):
-            IO(42)
+            IO(42)  # pyright: ignore[reportArgumentType]
 
     def test_io_monad_representation(self):
         def test():
-            return 'a'
+            return "a"
 
         io = IO(test)
 
-        self.assertEqual(str(io), f'IO({str(test)})')
+        self.assertEqual(str(io), f"IO({str(test)})")
 
-    @patch('builtins.print')
+    @patch("builtins.print")
     def test_io_result_function(self, mock_print: Mock):
-        io = IO(lambda: 'a')
+        io = IO(lambda: "a")
 
-        self.assertEqual('a', io.run())
+        self.assertEqual("a", io.run())
 
-        io_function = IO(lambda: 'hello')
+        io_function = IO(lambda: "hello")
 
-        self.assertEqual('hello world', io_function.map(lambda x: f'{x} world').run())
+        self.assertEqual("hello world", io_function.map(lambda x: f"{x} world").run())
 
         read = lambda id: IO(lambda: id)
-        write = lambda id: lambda value: IO(lambda: print(f'{id}: {value}'))
+        write = lambda id: lambda value: IO(lambda: print(f"{id}: {value}"))
         to_upper = lambda text: str(text).upper()
 
-        change_to_upper_io = (read("value")
-                              .map(to_upper)
-                              .bind(write('WRITE'))
-                              .bind(lambda _: read('yes'))
-                              .map(to_upper)
-                              .bind(write("WRITE"))
-                              )
+        change_to_upper_io = (
+            read("value")
+            .map(to_upper)
+            .bind(write("WRITE"))
+            .bind(lambda _: read("yes"))
+            .map(to_upper)
+            .bind(write("WRITE"))
+        )
 
         change_to_upper_io.run()
 
-        mock_print.assert_has_calls([call('WRITE: VALUE'), call('WRITE: YES')])
+        mock_print.assert_has_calls([call("WRITE: VALUE"), call("WRITE: YES")])

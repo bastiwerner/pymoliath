@@ -3,9 +3,9 @@ from __future__ import annotations
 from functools import partial
 from typing import Any, Callable, Generic, TypeVar
 
-TypeSource = TypeVar('TypeSource')
-TypeResult = TypeVar('TypeResult')
-TypePure = TypeVar('TypePure')
+TypeSource = TypeVar("TypeSource")
+TypeResult = TypeVar("TypeResult")
+TypePure = TypeVar("TypePure")
 
 
 class IO(Generic[TypeSource]):
@@ -13,14 +13,19 @@ class IO(Generic[TypeSource]):
 
     A value of type IO a is a computation which, when performed, does some I/O before returning a value of type a.
     """
-    _value: Callable[[], TypeSource]  # Private io monad value of type callable which should not be modified
+
+    _value: Callable[
+        [], TypeSource
+    ]  # Private io monad value of type callable which should not be modified
 
     def __init__(self, value: Callable[[], TypeSource]):
-        if not isinstance(value, Callable):
+        if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("IO value must be of type Callable")
         self._value = value
 
-    def map(self: IO[TypeSource], function: Callable[[TypeSource], TypeResult]) -> IO[TypeResult]:
+    def map(
+        self: IO[TypeSource], function: Callable[[TypeSource], TypeResult]
+    ) -> IO[TypeResult]:
         """IO monad functor interface (>=, map).
 
         Definition: IO(f: _ -> a) >= f: a -> b => IO(f: _ -> b)
@@ -35,9 +40,11 @@ class IO(Generic[TypeSource]):
         io: IO[TypeResult]
             Returns a new io monad containing the result of the passed function and the io call.
         """
-        return self.__class__(lambda: function(self.run()))
+        return IO(lambda: function(self.run()))
 
-    def bind(self: IO[TypeSource], function: Callable[[TypeSource], IO[TypeResult]]) -> IO[TypeResult]:
+    def bind(
+        self: IO[TypeSource], function: Callable[[TypeSource], IO[TypeResult]]
+    ) -> IO[TypeResult]:
         """IO monad bind interface (>>=, bind, flatMap).
 
         Definition: IO(f: _ -> a) >>= f: a -> IO(f: _ -> b) => IO(f: _ -> b)
@@ -54,7 +61,9 @@ class IO(Generic[TypeSource]):
         """
         return function(self.run())
 
-    def apply(self: IO[TypeSource], applicative: IO[Callable[[TypeSource], TypeResult]]) -> IO[TypeResult]:
+    def apply(
+        self: IO[TypeSource], applicative: IO[Callable[..., TypeResult]]
+    ) -> IO[TypeResult]:
         """IO monad applicative interface for io monads containing a function returning a value (<*>).
 
         Definition: IO(f: _ -> a) <*> IO(f: _ -> f: a -> b) => IO(f: _ -> b)
@@ -71,8 +80,10 @@ class IO(Generic[TypeSource]):
             of type Callable[[TypeSource], TypeResult].
         """
 
-        def binder(applicative_function: Callable[[TypeSource], TypeResult]) -> IO[TypeResult]:
-            def inner(x: TypeSource) -> Any:
+        def binder(
+            applicative_function: Callable[..., TypeResult],
+        ) -> IO[TypeResult]:
+            def inner(x: Any) -> Any:
                 try:
                     return applicative_function(x)
                 except TypeError:
@@ -82,7 +93,9 @@ class IO(Generic[TypeSource]):
 
         return applicative.bind(binder)
 
-    def apply2(self: IO[Callable[[TypePure], TypeResult]], applicative_value: IO[TypePure]) -> IO[TypeResult]:
+    def apply2(
+        self: IO[Callable[..., TypeResult]], applicative_value: IO[Any]
+    ) -> IO[TypeResult]:
         """IO monad applicative interface for io monads containing a function (<*>).
 
         Definition: IO(f: _ -> f: a -> b) <*> IO(f: _ -> a) => IO(f: _ -> b)
@@ -99,8 +112,10 @@ class IO(Generic[TypeSource]):
             to an io monad of type TypePure (value or function).
         """
 
-        def binder(applicative_function: Callable[[TypePure], TypeResult]) -> IO[TypeResult]:
-            def inner(x: TypePure) -> Any:
+        def binder(
+            applicative_function: Callable[..., TypeResult],
+        ) -> IO[TypeResult]:
+            def inner(x: Any) -> Any:
                 try:
                     return applicative_function(x)
                 except TypeError:
@@ -123,7 +138,7 @@ class IO(Generic[TypeSource]):
         return self._value()
 
     def __str__(self) -> str:
-        return f'IO({self._value})'
+        return f"IO({self._value})"
 
     def __repr__(self) -> str:
         return str(self)

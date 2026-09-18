@@ -34,7 +34,7 @@ class TestMonadList(unittest.TestCase):
         Right identity: The second law states that if we have a monadic value
         and we use >>= to feed it to return, the result is our original monadic value.
         """
-        list_value = ListMonad(['Hello', 'world'])
+        list_value = ListMonad(["Hello", "world"])
 
         self.assertEqual(list_value, list_value.bind(lambda x: ListMonad([x])))
 
@@ -49,7 +49,9 @@ class TestMonadList(unittest.TestCase):
         f = lambda x: ListMonad([x + 1000])
         g = lambda y: ListMonad([y * 42])
 
-        self.assertEqual(list_value.bind(f).bind(g), list_value.bind(lambda x: f(x).bind(g)))
+        self.assertEqual(
+            list_value.bind(f).bind(g), list_value.bind(lambda x: f(x).bind(g))
+        )
 
     def test_monad_functor_identity_law(self):
         """Functors identity law: (m a >= f x -> x) ≡ m a
@@ -109,27 +111,34 @@ class TestMonadList(unittest.TestCase):
         v = ListMonad([lambda x: x * 42])
         composition = lambda f, g: compose(f, g)
 
-        self.assertEqual(w.apply(v.apply(u.apply(ListMonad([composition])))), w.apply(v).apply(u))
-        self.assertEqual(ListMonad([composition]).apply2(u).apply2(v).apply2(w), u.apply2(v.apply2(w)))
+        self.assertEqual(
+            w.apply(v.apply(u.apply(ListMonad([composition])))), w.apply(v).apply(u)
+        )
+        self.assertEqual(
+            ListMonad([composition]).apply2(u).apply2(v).apply2(w),
+            u.apply2(v.apply2(w)),
+        )
 
     def test_list_monad_representation(self):
-        list = ListMonad(['a'])
+        list = ListMonad(["a"])
 
-        self.assertTrue(isinstance(ListMonad(['a']), ListMonad))
+        self.assertTrue(isinstance(ListMonad(["a"]), ListMonad))  # pyright: ignore[reportUnnecessaryIsInstance]
         self.assertEqual("ListMonad(['a'])", str(list))
 
     def test_list_monad_with_nested_list_and_enumeration_returns_correct_result(self):
-        result: ListMonad[Tuple[int, str]] = (ListMonad([['hello', 'world']])
-                                              .bind(lambda d: enumerate(d))
-                                              .map(lambda tuple_result: (tuple_result[0], tuple_result[1])))
+        result: ListMonad[Tuple[int, str]] = (
+            ListMonad([["hello", "world"]])
+            .bind(lambda d: ListMonad(enumerate(d)))
+            .map(lambda tuple_result: (tuple_result[0], tuple_result[1]))
+        )
 
-        self.assertEqual([(0, 'hello'), (1, 'world')], result)
+        self.assertEqual([(0, "hello"), (1, "world")], result)
 
     def test_list_monad_to_list_returns_correct_python_list(self):
         result = ListMonad([1, 2, 3, 4])
 
         self.assertEqual([1, 2, 3, 4], result.to_list())
-        self.assertEqual('[1, 2, 3, 4]', str(result.to_list()))
+        self.assertEqual("[1, 2, 3, 4]", str(result.to_list()))
 
     def test_list_monad_with_filter_and_take_returns_corrected_filtered_list(self):
         result = ListMonad([1, 2, 3, 4, 5, 6, 7, 8, 9])
@@ -160,10 +169,20 @@ class TestMonadList(unittest.TestCase):
         # test list to str
         self.assertEqual("ListMonad([1, 2, 3, 4, 5])", str(list_monad))
 
-        self.assertEqual(['$2.00', '$100.00', '$5.00'], (ListMonad([1, 99, 4])
-                                                         .bind(lambda val: ListMonad([val + 1]))
-                                                         .bind(lambda val: ListMonad([f"${val}.00"]))))
+        self.assertEqual(
+            ["$2.00", "$100.00", "$5.00"],
+            (
+                ListMonad([1, 99, 4])
+                .bind(lambda val: ListMonad([val + 1]))
+                .bind(lambda val: ListMonad([f"${val}.00"]))
+            ),
+        )
 
-        self.assertEqual(['$2.00', '$100.00', '$5.00'], (ListMonad([1, 99, 4])
-                                                         .map(lambda val: val + 1)
-                                                         .bind(lambda val: ListMonad([f"${val}.00"]))))
+        self.assertEqual(
+            ["$2.00", "$100.00", "$5.00"],
+            (
+                ListMonad([1, 99, 4])
+                .map(lambda val: val + 1)
+                .bind(lambda val: ListMonad([f"${val}.00"]))
+            ),
+        )

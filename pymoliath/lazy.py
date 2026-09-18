@@ -27,7 +27,9 @@ class LazyMonad(Generic[TypeSource]):
         else:
             self._computation = lambda: value
 
-    def map(self: LazyMonad[TypeSource], function: Callable[[TypeSource], TypeResult]) -> LazyMonad[TypeResult]:
+    def map(
+        self: LazyMonad[TypeSource], function: Callable[[TypeSource], TypeResult]
+    ) -> LazyMonad[TypeResult]:
         """Lazy monad functor interface (>=, map).
 
         Parameters
@@ -40,10 +42,12 @@ class LazyMonad(Generic[TypeSource]):
         io: LazyMonad[TypeResult]
             Returns a new lazy monad containing the result of the passed function and the io call.
         """
-        return self.__class__(lambda: function(self.run()))
+        return LazyMonad(lambda: function(self.run()))
 
-    def bind(self: LazyMonad[TypeSource], function: Callable[[TypeSource], LazyMonad[TypeResult]]) -> LazyMonad[
-        TypeResult]:
+    def bind(
+        self: LazyMonad[TypeSource],
+        function: Callable[[TypeSource], LazyMonad[TypeResult]],
+    ) -> LazyMonad[TypeResult]:
         """Lazy monad bind interface (>>=, bind, flatMap).
 
         Parameters
@@ -58,8 +62,10 @@ class LazyMonad(Generic[TypeSource]):
         """
         return function(self.run())
 
-    def apply(self: LazyMonad[TypeSource], applicative: LazyMonad[Callable[[TypeSource], TypeResult]]) -> LazyMonad[
-        TypeResult]:
+    def apply(
+        self: LazyMonad[TypeSource],
+        applicative: LazyMonad[Callable[..., TypeResult]],
+    ) -> LazyMonad[TypeResult]:
         """LazyMonad monad applicative interface for lazy monads containing a function returning a value (<*>).
 
         Parameters
@@ -74,8 +80,10 @@ class LazyMonad(Generic[TypeSource]):
             of type Callable[[TypeSource], TypeResult].
         """
 
-        def binder(applicative_function: Callable[[TypeSource], TypeResult]) -> LazyMonad[TypeResult]:
-            def inner(x: TypeSource) -> Any:
+        def binder(
+            applicative_function: Callable[..., TypeResult],
+        ) -> LazyMonad[TypeResult]:
+            def inner(x: Any) -> Any:
                 try:
                     return applicative_function(x)
                 except TypeError:
@@ -85,8 +93,10 @@ class LazyMonad(Generic[TypeSource]):
 
         return applicative.bind(binder)
 
-    def apply2(self: LazyMonad[Callable[[TypePure], TypeResult]], applicative_value: LazyMonad[TypePure]) -> LazyMonad[
-        TypeResult]:
+    def apply2(
+        self: LazyMonad[Callable[..., TypeResult]],
+        applicative_value: LazyMonad[Any],
+    ) -> LazyMonad[TypeResult]:
         """LazyMonad monad applicative interface for lazy monads containing a function (<*>).
 
         Parameters
@@ -101,8 +111,10 @@ class LazyMonad(Generic[TypeSource]):
             to an lazy monad of type TypePure (value or function).
         """
 
-        def binder(applicative_function: Callable[[TypePure], TypeResult]) -> LazyMonad[TypeResult]:
-            def inner(x: TypePure) -> Any:
+        def binder(
+            applicative_function: Callable[..., TypeResult],
+        ) -> LazyMonad[TypeResult]:
+            def inner(x: Any) -> Any:
                 try:
                     return applicative_function(x)
                 except TypeError:
@@ -123,17 +135,18 @@ class LazyMonad(Generic[TypeSource]):
         return self._computation()
 
     def __str__(self) -> str:
-        return f'LazyMonad({self._computation})'
+        return f"LazyMonad({self._computation})"
 
     def __repr__(self) -> str:
         return str(self)
 
 
 class Sequence(Generic[TypeSource]):
-    """Lazy sequence evaluation using the list monad
-    """
+    """Lazy sequence evaluation using the list monad"""
 
-    def __init__(self, value: Union[Iterable[TypeSource], Callable[[], Iterable[TypeSource]]]):
+    def __init__(
+        self, value: Union[Iterable[TypeSource], Callable[[], Iterable[TypeSource]]]
+    ):
         """Lazy Sequence Monad constructor/unit function
 
         Parameters
@@ -146,7 +159,9 @@ class Sequence(Generic[TypeSource]):
         else:
             self._callable = lambda: ListMonad(value)
 
-    def map(self: Sequence[TypeSource], function: Callable[[TypeSource], TypeResult]) -> Sequence[TypeResult]:
+    def map(
+        self: Sequence[TypeSource], function: Callable[[TypeSource], TypeResult]
+    ) -> Sequence[TypeResult]:
         """Sequence Monad map function
 
         Parameters
@@ -159,10 +174,12 @@ class Sequence(Generic[TypeSource]):
         sequence: Sequence[TypeResult]
             Returns a new sequence monad containing the resulting value
         """
-        return self.__class__(lambda: self._callable().map(function))
+        return Sequence(lambda: self._callable().map(function))
 
-    def bind(self: Sequence[TypeSource], function: Callable[[TypeSource], Sequence[TypeResult]]) -> Sequence[
-        TypeResult]:
+    def bind(
+        self: Sequence[TypeSource],
+        function: Callable[[TypeSource], Sequence[TypeResult]],
+    ) -> Sequence[TypeResult]:
         """Sequence Monad bind function
 
         Parameters
@@ -175,12 +192,15 @@ class Sequence(Generic[TypeSource]):
         sequence: Sequence[TypeResult]
             Returns the new sequence monad from the bind function
         """
+
         def bind_function(value: TypeSource) -> ListMonad[TypeResult]:
             return ListMonad(function(value).run())
 
-        return self.__class__(lambda: self._callable().bind(bind_function))
+        return Sequence(lambda: self._callable().bind(bind_function))
 
-    def filter(self: Sequence[TypeSource], filter_function: Callable[[TypeSource], bool]) -> Sequence[TypeSource]:
+    def filter(
+        self: Sequence[TypeSource], filter_function: Callable[[TypeSource], bool]
+    ) -> Sequence[TypeSource]:
         """Sequence filter function
 
         Parameters
@@ -193,7 +213,7 @@ class Sequence(Generic[TypeSource]):
         sequence: Sequence[TypeSource]
             Returns a filtered sequence monad
         """
-        return self.__class__(lambda: self._callable().filter(filter_function))
+        return Sequence(lambda: self._callable().filter(filter_function))
 
     def take(self: Sequence[TypeSource], amount: int) -> Sequence[TypeSource]:
         """Sequence monad take function
@@ -208,7 +228,7 @@ class Sequence(Generic[TypeSource]):
         sequence: Sequence[TypeSource]
             Takes our only an specific amount of values from the list for further execution.
         """
-        return self.__class__(lambda: self._callable().take(amount))
+        return Sequence(lambda: self._callable().take(amount))
 
     def skip(self: Sequence[TypeSource], amount: int) -> Sequence[TypeSource]:
         """Sequence monad skip function
@@ -223,10 +243,12 @@ class Sequence(Generic[TypeSource]):
         sequence: Sequence[TypeSource]
             Skips an amount of values from the list for further execution.
         """
-        return self.__class__(lambda: self._callable().skip(amount))
+        return Sequence(lambda: self._callable().skip(amount))
 
-    def apply(self: Sequence[TypeSource], applicative: Sequence[Callable[[TypeSource], TypeResult]]) -> Sequence[
-        TypeResult]:
+    def apply(
+        self: Sequence[TypeSource],
+        applicative: Sequence[Callable[..., TypeResult]],
+    ) -> Sequence[TypeResult]:
         """Sequence monad applicative interface for sequence monads containing a function returning a value (<*>).
 
         Parameters
@@ -240,10 +262,12 @@ class Sequence(Generic[TypeSource]):
             Applies a sequnece monad containing values of type TypeSource to an sequence monad containing a function
             of type Callable[[TypeSource], TypeResult].
         """
-        return self.__class__(lambda: self._callable().apply(ListMonad(applicative.run())))  # type: ignore
+        return Sequence(lambda: self._callable().apply(ListMonad(applicative.run())))
 
-    def apply2(self: Sequence[Callable[[TypePure], TypeResult]], applicative_value: Sequence[TypePure]) -> Sequence[
-        TypeResult]:
+    def apply2(
+        self: Sequence[Callable[..., TypeResult]],
+        applicative_value: Sequence[Any],
+    ) -> Sequence[TypeResult]:
         """Sequence monad applicative interface for sequence monads containing a function (<*>).
 
         Parameters
@@ -257,7 +281,9 @@ class Sequence(Generic[TypeSource]):
             Applies an sequence monad containing a function of type Callable[[TypePure], TypeResult]
             to a sequence monad of type TypePure (value or function).
         """
-        return self.__class__(lambda: self._callable().apply2(ListMonad(applicative_value.run())))  # type: ignore
+        return Sequence(
+            lambda: self._callable().apply2(ListMonad(applicative_value.run()))
+        )
 
     def run(self) -> Iterable[TypeSource]:
         """Sequence monad lazy evaluation function
@@ -270,7 +296,7 @@ class Sequence(Generic[TypeSource]):
         return list(self._callable())
 
     def __str__(self) -> str:
-        return f'Sequence({self._callable})'
+        return f"Sequence({self._callable})"
 
     def __repr__(self) -> str:
         return str(self)

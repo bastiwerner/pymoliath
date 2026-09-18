@@ -25,7 +25,10 @@ class TestReader(unittest.TestCase):
         """
         reader_function = lambda x: Reader(lambda env: x + env)
 
-        self.assertEqual(reader_function(10).run(1), Reader(lambda env: 10).bind(reader_function).run(1))
+        self.assertEqual(
+            reader_function(10).run(1),
+            Reader(lambda env: 10).bind(reader_function).run(1),
+        )
         self.assertEqual(11, reader_function(10).run(1))
         self.assertEqual(11, Reader(lambda env: 10).bind(reader_function).run(1))
 
@@ -36,11 +39,17 @@ class TestReader(unittest.TestCase):
         Right identity: The second law states that if we have a monadic value
         and we use >>= to feed it to return, the result is our original monadic value.
         """
-        reader_value = Reader(lambda env: f'Hello {env}')
+        reader_value = Reader(lambda env: f"Hello {env}")
 
-        self.assertEqual(reader_value.run('world'), reader_value.bind(lambda x: Reader(lambda env: x)).run('world'))
-        self.assertEqual('Hello world', reader_value.run('world'))
-        self.assertEqual('Hello world', reader_value.bind(lambda x: Reader(lambda env: x)).run('world'))
+        self.assertEqual(
+            reader_value.run("world"),
+            reader_value.bind(lambda x: Reader(lambda env: x)).run("world"),
+        )
+        self.assertEqual("Hello world", reader_value.run("world"))
+        self.assertEqual(
+            "Hello world",
+            reader_value.bind(lambda x: Reader(lambda env: x)).run("world"),
+        )
 
     def test_just_monad_associativity_law(self):
         """Associativity law: (m >>= f) >>= g ≡ m >>= (x -> f x >>= g)
@@ -53,7 +62,10 @@ class TestReader(unittest.TestCase):
         f = lambda x: Reader(lambda env: x + 1000)
         g = lambda y: Reader(lambda env: y * 42)
 
-        self.assertEqual(reader_value.bind(f).bind(g).run(1), reader_value.bind(lambda x: f(x).bind(g)).run(1))
+        self.assertEqual(
+            reader_value.bind(f).bind(g).run(1),
+            reader_value.bind(lambda x: f(x).bind(g)).run(1),
+        )
         self.assertEqual(43764, reader_value.bind(f).bind(g).run(1))
         self.assertEqual(43764, reader_value.bind(lambda x: f(x).bind(g)).run(1))
 
@@ -63,9 +75,14 @@ class TestReader(unittest.TestCase):
 
         Map the identity function over a monad container, the result should be the same monad container object.
         """
-        self.assertEqual(Reader(lambda env: env + 10).map(lambda x: x).run(1), Reader(lambda env: env + 10).run(1))
-        self.assertEqual(11, Reader(lambda env: env + 10).map(lambda x: x).run(1))
-        self.assertEqual(11, Reader(lambda env: env + 10).run(1))
+        self.assertEqual(
+            Reader[int, int](lambda env: env + 10).map(lambda x: x).run(1),
+            Reader[int, int](lambda env: env + 10).run(1),
+        )
+        self.assertEqual(
+            11, Reader[int, int](lambda env: env + 10).map(lambda x: x).run(1)
+        )
+        self.assertEqual(11, Reader[int, int](lambda env: env + 10).run(1))
 
     def test_monad_functor_composition_law(self):
         """Functors composition law: map (f . g) x ≡ map f (map g x)
@@ -78,7 +95,9 @@ class TestReader(unittest.TestCase):
         f = lambda x: x + 1000
         g = lambda y: y * 42
 
-        self.assertEqual(reader_value.map(compose(f, g)).run(1), reader_value.map(g).map(f).run(1))
+        self.assertEqual(
+            reader_value.map(compose(f, g)).run(1), reader_value.map(g).map(f).run(1)
+        )
 
     def test_monad_applicative_identity_law(self):
         """Applicative identity law: m (f x -> x) <*> m a ≡ m a
@@ -89,8 +108,14 @@ class TestReader(unittest.TestCase):
         """
         reader_value = Reader(lambda env: 42)
 
-        self.assertEqual(reader_value.apply(Reader(lambda env: lambda x: x)).run(1), reader_value.run(1))
-        self.assertEqual(Reader(lambda env: lambda x: x).apply2(reader_value).run(1), reader_value.run(1))
+        self.assertEqual(
+            reader_value.apply(Reader(lambda env: lambda x: x)).run(1),
+            reader_value.run(1),
+        )
+        self.assertEqual(
+            Reader(lambda env: lambda x: x).apply2(reader_value).run(1),
+            reader_value.run(1),
+        )
 
     def test_monad_applicative_homomorphism_law(self):
         """Applicative homomorphism law: pure f <*> pure x = pure (f x)
@@ -102,8 +127,14 @@ class TestReader(unittest.TestCase):
         x = 42
         f = lambda x: x * 42
 
-        self.assertEqual(Reader(lambda env: x).apply(Reader(lambda env: f)).run(1), Reader(lambda env: f(x)).run(1))
-        self.assertEqual(Reader(lambda env: f).apply2(Reader(lambda env: x)).run(1), Reader(lambda env: f(x)).run(1))
+        self.assertEqual(
+            Reader(lambda env: x).apply(Reader(lambda env: f)).run(1),
+            Reader(lambda env: f(x)).run(1),
+        )
+        self.assertEqual(
+            Reader(lambda env: f).apply2(Reader(lambda env: x)).run(1),
+            Reader(lambda env: f(x)).run(1),
+        )
 
     def test_monad_applicative_composition_law(self):
         """Applicative composition law: pure (.) <*> u <*> v <*> w = u <*> (v <*> w)
@@ -117,19 +148,25 @@ class TestReader(unittest.TestCase):
         v = Reader(lambda env: lambda x: x * 42)
         composed_reader = Reader(lambda env: lambda f, g: compose(f, g))
 
-        self.assertEqual(w.apply(v.apply(u.apply(composed_reader))).run(1), w.apply(v).apply(u).run(1))
-        self.assertEqual(composed_reader.apply2(u).apply2(v).apply2(w).run(1), u.apply2(v.apply2(w)).run(1))
+        self.assertEqual(
+            w.apply(v.apply(u.apply(composed_reader))).run(1),
+            w.apply(v).apply(u).run(1),
+        )
+        self.assertEqual(
+            composed_reader.apply2(u).apply2(v).apply2(w).run(1),
+            u.apply2(v.apply2(w)).run(1),
+        )
 
     def test_reader_monad_representation(self):
         def test(env: Any):
-            return 'a'
+            return "a"
 
         reader = Reader(test)
 
-        self.assertEqual(str(reader), f'Reader({str(test)})')
+        self.assertEqual(str(reader), f"Reader({str(test)})")
 
         calculate_length = Reader.ask().map(lambda v: len(v))
-        calculate_modified_length = calculate_length.local(lambda env: f'Prefix {env}')
+        calculate_modified_length = calculate_length.local(lambda env: f"Prefix {env}")
 
-        self.assertEqual(5, calculate_length.run('12345'))
-        self.assertEqual(12, calculate_modified_length.run('12345'))
+        self.assertEqual(5, calculate_length.run("12345"))
+        self.assertEqual(12, calculate_modified_length.run("12345"))

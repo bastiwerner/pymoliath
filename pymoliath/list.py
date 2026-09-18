@@ -3,16 +3,17 @@ from __future__ import annotations
 import itertools
 from functools import partial
 from itertools import chain
-from typing import Any, TypeVar, List, Callable
+from typing import Any, Callable, List, TypeVar
 
-TypeSource = TypeVar('TypeSource')
-TypeResult = TypeVar('TypeResult')
-TypePure = TypeVar('TypePure')
+TypeSource = TypeVar("TypeSource")
+TypeResult = TypeVar("TypeResult")
+TypePure = TypeVar("TypePure")
 
 
 class ListMonad(List[TypeSource]):
-
-    def map(self: ListMonad[TypeSource], function: Callable[[TypeSource], TypeResult]) -> ListMonad[TypeResult]:
+    def map(
+        self: ListMonad[TypeSource], function: Callable[[TypeSource], TypeResult]
+    ) -> ListMonad[TypeResult]:
         """ListMonad monad functor interface (>=, map).
 
         Parameters
@@ -25,10 +26,12 @@ class ListMonad(List[TypeSource]):
         list: ListMonad[TypeResult]
             Returns a new list monad with the elements applied to the function.
         """
-        return self.__class__(map(function, self))
+        return ListMonad(map(function, self))
 
-    def bind(self: ListMonad[TypeSource], function: Callable[[TypeSource], ListMonad[TypeResult]]) -> ListMonad[
-        TypeResult]:
+    def bind(
+        self: ListMonad[TypeSource],
+        function: Callable[[TypeSource], ListMonad[TypeResult]],
+    ) -> ListMonad[TypeResult]:
         """ListMonad monad bind interface (>>=, bind, flatMap).
 
         Parameters
@@ -41,9 +44,11 @@ class ListMonad(List[TypeSource]):
         list: ListMonad[TypeResult]
             Returns a list monad from the result of the function call.
         """
-        return self.__class__(chain.from_iterable(map(function, self)))
+        return ListMonad(chain.from_iterable(map(function, self)))
 
-    def filter(self: ListMonad[TypeSource], filter_function: Callable[[TypeSource], bool]) -> ListMonad[TypeSource]:
+    def filter(
+        self: ListMonad[TypeSource], filter_function: Callable[[TypeSource], bool]
+    ) -> ListMonad[TypeSource]:
         """ListMonad filter function
 
         Parameters
@@ -56,7 +61,7 @@ class ListMonad(List[TypeSource]):
         filtered: ListMonad[TypeSource]
             Returns a new filtered ListMonad
         """
-        return self.__class__(filter(filter_function, self))
+        return ListMonad(filter(filter_function, self))
 
     def take(self: ListMonad[TypeSource], amount: int) -> ListMonad[TypeSource]:
         """ListMonad take function
@@ -71,7 +76,7 @@ class ListMonad(List[TypeSource]):
         list: ListMonad[TypeSource]
             Takes our only an specific amount of values from the list for further execution.
         """
-        return self.__class__(itertools.islice(self, amount))
+        return ListMonad(itertools.islice(self, amount))
 
     def skip(self: ListMonad[TypeSource], amount: int) -> ListMonad[TypeSource]:
         """ListMonad skip function
@@ -86,10 +91,12 @@ class ListMonad(List[TypeSource]):
         list: ListMonad[TypeSource]
             Skips an amount of values from the list for further execution.
         """
-        return self.__class__(itertools.islice(self, amount, None))
+        return ListMonad(itertools.islice(self, amount, None))
 
-    def apply(self: ListMonad[TypeSource], applicative: ListMonad[Callable[[TypeSource], TypeResult]]) -> ListMonad[
-        TypeResult]:
+    def apply(
+        self: ListMonad[TypeSource],
+        applicative: ListMonad[Callable[..., TypeResult]],
+    ) -> ListMonad[TypeResult]:
         """ListMonad monad applicative interface for list monads containing a function returning a value (<*>).
 
         Parameters
@@ -104,8 +111,10 @@ class ListMonad(List[TypeSource]):
             of type Callable[[TypeSource], TypeResult].
         """
 
-        def binder(applicative_function: Callable[[TypeSource], TypeResult]) -> ListMonad[TypeResult]:
-            def inner(x: TypeSource) -> Any:
+        def binder(
+            applicative_function: Callable[..., TypeResult],
+        ) -> ListMonad[TypeResult]:
+            def inner(x: Any) -> Any:
                 try:
                     return applicative_function(x)
                 except TypeError:
@@ -115,8 +124,10 @@ class ListMonad(List[TypeSource]):
 
         return applicative.bind(binder)
 
-    def apply2(self: ListMonad[Callable[[TypePure], TypeResult]], applicative_value: ListMonad[TypePure]) -> ListMonad[
-        TypeResult]:
+    def apply2(
+        self: ListMonad[Callable[..., TypeResult]],
+        applicative_value: ListMonad[Any],
+    ) -> ListMonad[TypeResult]:
         """ListMonad monad applicative interface for list monads containing a function (<*>).
 
         Parameters
@@ -131,8 +142,10 @@ class ListMonad(List[TypeSource]):
             to a list monad of type TypePure (value or function).
         """
 
-        def binder(applicative_function: Callable[[TypePure], TypeResult]) -> ListMonad[TypeResult]:
-            def inner(x: TypePure) -> Any:
+        def binder(
+            applicative_function: Callable[..., TypeResult],
+        ) -> ListMonad[TypeResult]:
+            def inner(x: Any) -> Any:
                 try:
                     return applicative_function(x)
                 except TypeError:
@@ -146,4 +159,4 @@ class ListMonad(List[TypeSource]):
         return list(self)
 
     def __str__(self: ListMonad[TypeSource]) -> str:
-        return f'ListMonad({super().__str__()})'
+        return f"ListMonad({super().__str__()})"
