@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
+from pymoliath.option import Nil, Some
 from pymoliath.result import Err, Ok, Result, result_safe
 from pymoliath.util import compose
 
@@ -212,6 +213,54 @@ class TestResultMonad(unittest.TestCase):
                 .bind_err(lambda e: Err(f"{e} sucks"))
             ),
         )
+
+    def test_result_monad_is_ok_and_is_err_and(self):
+        ok_value = Ok(10)
+        err_value = Err("error")
+
+        self.assertTrue(ok_value.is_ok_and(lambda v: v > 5))
+        self.assertFalse(ok_value.is_ok_and(lambda v: v > 10))
+        self.assertFalse(ok_value.is_err_and(lambda e: e == "error"))
+        self.assertTrue(err_value.is_err_and(lambda e: e == "error"))
+        self.assertFalse(err_value.is_ok_and(lambda v: v > 5))
+
+    def test_result_monad_map_or(self):
+        ok_value = Ok(10)
+        err_value = Err("error")
+
+        self.assertEqual(11, ok_value.map_or(0, lambda v: v + 1))
+        self.assertEqual(0, err_value.map_or(0, lambda v: v + 1))
+
+    def test_result_monad_and_or(self):
+        ok_value = Ok(10)
+        err_value = Err("error")
+
+        self.assertEqual(Ok(20), ok_value.and_(Ok(20)))
+        self.assertEqual(err_value, err_value.and_(Ok(20)))
+        self.assertEqual(ok_value, ok_value.or_(Ok(20)))
+        self.assertEqual(Ok(20), err_value.or_(Ok(20)))
+
+    def test_result_monad_zip(self):
+        ok_value = Ok(10)
+        err_value = Err("error")
+
+        self.assertEqual(Ok((10, "a")), ok_value.zip(Ok("a")))
+        self.assertEqual(Err("error"), ok_value.zip(Err("error")))
+        self.assertEqual(err_value, err_value.zip(Ok("a")))
+
+    def test_result_monad_flatten(self):
+        self.assertEqual(Ok(10), Ok(Ok(10)).flatten())
+        self.assertEqual(Err("error"), Ok(Err("error")).flatten())
+        self.assertEqual(Err("error"), Err("error").flatten())
+
+    def test_result_monad_ok_and_err(self):
+        ok_value = Ok(10)
+        err_value = Err("error")
+
+        self.assertEqual(Some(10), ok_value.ok())
+        self.assertEqual(Nil(), ok_value.err())
+        self.assertEqual(Nil(), err_value.ok())
+        self.assertEqual(Some("error"), err_value.err())
 
     def test_result_supports_structural_pattern_matching(self):
         def describe(value: Result[int, str]) -> str:

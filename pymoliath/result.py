@@ -1,8 +1,21 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Generic, TypeAlias, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Generic,
+    Tuple,
+    TypeAlias,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from pymoliath.util import curry
+
+if TYPE_CHECKING:
+    from pymoliath.option import Option
 
 TypeResult = TypeVar("TypeResult")
 TypePure = TypeVar("TypePure")
@@ -137,6 +150,140 @@ class Ok(Generic[TypeOk]):
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
+
+    def is_ok_and(self, function: Callable[[TypeOk], bool]) -> bool:
+        """Returns True if the Result Monad is Ok and the predicate returns True for the contained value.
+
+        Parameters
+        ----------
+        function: Callable[[TypeOk], bool]
+            Predicate function applied to the Ok value.
+
+        Returns
+        -------
+        result: bool
+            Returns the predicate result.
+        """
+        return function(self._ok_value)
+
+    def is_err_and(self, function: Callable[[Any], bool]) -> bool:
+        """Returns False, since this Result Monad is Ok.
+
+        Parameters
+        ----------
+        function: Callable[[TypeErr], bool]
+            Predicate function which would be applied to the Err value.
+
+        Returns
+        -------
+        result: bool
+            Returns False.
+        """
+        return False
+
+    def map_or(
+        self, default_value: TypeReturn, function: Callable[[TypeOk], TypeReturn]
+    ) -> TypeReturn:
+        """Applies the function to the Ok value, or returns the default value if Err.
+
+        Parameters
+        ----------
+        default_value: TypeReturn
+            Default value to be returned if the Result Monad is Err.
+        function: Callable[[TypeOk], TypeReturn]
+            Function applied to the Ok value.
+
+        Returns
+        -------
+        result: TypeReturn
+            Returns the function result.
+        """
+        return function(self._ok_value)
+
+    def and_(self, other: Result[TypeReturn, Any]) -> Result[TypeReturn, Any]:
+        """Returns `other` if the Result Monad is Ok, otherwise Err.
+
+        Parameters
+        ----------
+        other: Result[TypeReturn, TypeErr]
+            Result Monad to be returned if this Result Monad is Ok.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]
+            Returns `other`.
+        """
+        return other
+
+    def or_(self, other: Result[TypeOk, Any]) -> Result[TypeOk, Any]:
+        """Returns this Result Monad if it is Ok, otherwise `other`.
+
+        Parameters
+        ----------
+        other: Result[TypeOk, TypeErr]
+            Result Monad to be returned if this Result Monad is Err.
+
+        Returns
+        -------
+        result: Result[TypeOk, TypeErr]
+            Returns this Ok.
+        """
+        return self
+
+    def zip(self, other: Result[TypePure, Any]) -> Result[Tuple[TypeOk, TypePure], Any]:
+        """Combines this Result Monad with another into a Result Monad of a tuple, or Err if either is Err.
+
+        Parameters
+        ----------
+        other: Result[TypePure, TypeErr]
+            Result Monad to be zipped with this Result Monad.
+
+        Returns
+        -------
+        result: Result[Tuple[TypeOk, TypePure], TypeErr]
+            Returns Ok of a tuple of both values, or Err.
+        """
+        return other.map(lambda o: (self._ok_value, o))
+
+    @overload
+    def flatten(self: Ok[Ok[TypeReturn]]) -> Result[TypeReturn, Any]: ...
+
+    @overload
+    def flatten(self: Ok[Err[TypeErr]]) -> Result[Any, TypeErr]: ...
+
+    def flatten(self) -> Result[Any, Any]:
+        """Flattens a nested Result Monad by one level.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]
+            Returns the nested Result Monad.
+        """
+        return cast(Result[Any, Any], self._ok_value)
+
+    def ok(self) -> Option[TypeOk]:
+        """Converts the Result Monad into an Option Monad, discarding any Err value.
+
+        Returns
+        -------
+        option: Option[TypeOk]
+            Returns Some with the Ok value.
+        """
+        from pymoliath.option import Some
+
+        return Some(self._ok_value)
+
+    def err(self) -> Option[Any]:
+        """Converts the Result Monad into an Option Monad of the Err value, discarding the Ok value.
+
+        Returns
+        -------
+        option: Option[TypeErr]
+            Returns Nil, since this Result Monad is Ok.
+        """
+        from pymoliath.option import Nil
+
+        return Nil()
 
     def unwrap(self) -> TypeOk:
         """Returns the Ok value if not Err, or otherwise raises an Exception with the Err value.
@@ -304,6 +451,39 @@ class Err(Generic[TypeErr]):
 
     def apply2(self, applicative_value: Result[Any, TypeErr]) -> Result[Any, TypeErr]:
         return self
+
+    def is_ok_and(self, function: Callable[[Any], bool]) -> bool:
+        return False
+
+    def is_err_and(self, function: Callable[[TypeErr], bool]) -> bool:
+        return function(self._err_value)
+
+    def map_or(
+        self, default_value: TypeReturn, function: Callable[[Any], TypeReturn]
+    ) -> TypeReturn:
+        return default_value
+
+    def and_(self, other: Result[Any, TypeErr]) -> Result[Any, TypeErr]:
+        return self
+
+    def or_(self, other: Result[TypeOk, Any]) -> Result[TypeOk, Any]:
+        return other
+
+    def zip(self, other: Result[Any, Any]) -> Result[Any, TypeErr]:
+        return self
+
+    def flatten(self) -> Result[Any, TypeErr]:
+        return self
+
+    def ok(self) -> Option[Any]:
+        from pymoliath.option import Nil
+
+        return Nil()
+
+    def err(self) -> Option[TypeErr]:
+        from pymoliath.option import Some
+
+        return Some(self._err_value)
 
     def unwrap(self) -> Any:
         raise Exception(self._err_value)
