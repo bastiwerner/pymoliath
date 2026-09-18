@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from functools import partial
 from typing import Any, Callable, Generic, TypeVar
+
+from pymoliath.util import curry
 
 TypeSource = TypeVar("TypeSource")
 TypeResult = TypeVar("TypeResult")
@@ -83,13 +84,7 @@ class IO(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> IO[TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return self.map(inner)
+            return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
 
@@ -115,13 +110,7 @@ class IO(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> IO[TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return applicative_value.map(inner)
+            return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
 

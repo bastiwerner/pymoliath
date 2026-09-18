@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from functools import partial
 from typing import Any, Callable, Generic, TypeAlias, TypeVar
+
+from pymoliath.util import curry
 
 TypeSource = TypeVar("TypeSource")
 TypeResult = TypeVar("TypeResult")
@@ -76,13 +77,7 @@ class Some(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Option[TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return self.map(inner)
+            return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
 
@@ -106,13 +101,7 @@ class Some(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Option[TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return applicative_value.map(inner)
+            return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
 
@@ -133,7 +122,7 @@ class Some(Generic[TypeSource]):
         """
         if filter_function(self._value):
             return Nil()
-        return Some(self._value)
+        return self
 
     def unwrap(self) -> TypeSource:
         """Returns the internal value of the Some or raises an exception if Nothing.
@@ -228,7 +217,7 @@ class Some(Generic[TypeSource]):
         return f"Some({self._value})"
 
     def __eq__(self, __o: object) -> bool:
-        return str(self) == str(__o)
+        return isinstance(__o, Some) and str(self) == str(__o)
 
     def __repr__(self) -> str:
         return str(self)
@@ -295,7 +284,7 @@ class Nil(Generic[TypeSource]):
         return "Nil()"
 
     def __eq__(self, __o: object) -> bool:
-        return str(self) == str(__o)
+        return isinstance(__o, Nil)
 
     def __repr__(self) -> str:
         return str(self)

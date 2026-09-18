@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from functools import partial
 from typing import Any, TypeVar, Generic, Callable, Tuple, Type
+
+from pymoliath.util import curry
 
 TypeState = TypeVar("TypeState")
 TypeSource = TypeVar("TypeSource")
@@ -99,13 +100,7 @@ class State(Generic[TypeState, TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> State[TypeState, TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return self.map(inner)
+            return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
 
@@ -131,13 +126,7 @@ class State(Generic[TypeState, TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> State[TypeState, TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return applicative_value.map(inner)
+            return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
 

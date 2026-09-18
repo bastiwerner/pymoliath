@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from functools import partial
 from typing import Any, Callable, Generic, Protocol, TypeVar, Tuple
+
+from pymoliath.util import curry
 
 TSupportsAdd = TypeVar("TSupportsAdd", bound="SupportsAdd")
 
@@ -115,13 +116,10 @@ class Writer(Generic[TypeSource, TypeMonoid]):
 
         value, monoid = self.run()
         function, other_monoid = applicative.run()
-        try:
-            return Writer(function(value), monoid + other_monoid)
-        except TypeError:
-            # The dynamic partial-application fallback can't be typed statically:
-            # partial[TypeResult] isn't TypeResult, but it's a valid TypeResult once
-            # fully applied by a later apply/apply2 call.
-            return Writer(partial(function, value), monoid + other_monoid)  # pyright: ignore[reportReturnType]
+        # The dynamic partial-application fallback can't be typed statically:
+        # partial[TypeResult] isn't TypeResult, but it's a valid TypeResult once
+        # fully applied by a later apply/apply2 call.
+        return Writer(curry(function)(value), monoid + other_monoid)  # pyright: ignore[reportReturnType]
 
     def apply2(
         self: Writer[Callable[..., TypeResult], TypeMonoid],
@@ -142,10 +140,7 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         """
         value_function, monoid = self.run()
         value, other_monoid = monad_value.run()
-        try:
-            return Writer(value_function(value), monoid + other_monoid)
-        except TypeError:
-            return Writer(partial(value_function, value), monoid + other_monoid)  # pyright: ignore[reportReturnType]
+        return Writer(curry(value_function)(value), monoid + other_monoid)  # pyright: ignore[reportReturnType]
 
     def tell(
         self: Writer[TypeSource, TypeMonoid], monoid_value: TypeMonoid

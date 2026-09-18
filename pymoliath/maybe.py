@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from functools import partial
 from typing import Any, Callable, Generic, TypeAlias, TypeVar
+
+from pymoliath.util import curry
 
 TypeSource = TypeVar("TypeSource")
 TypeResult = TypeVar("TypeResult")
@@ -74,13 +75,7 @@ class Just(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Maybe[TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return self.map(inner)
+            return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
 
@@ -103,13 +98,7 @@ class Just(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Maybe[TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return applicative_value.map(inner)
+            return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
 
@@ -130,7 +119,7 @@ class Just(Generic[TypeSource]):
         """
         if filter_function(self._value):
             return Nothing()
-        return Just(self._value)
+        return self
 
     def unwrap(self) -> TypeSource:
         """Returns the internal value of the Just or raises an exception if Nothing.
@@ -225,7 +214,7 @@ class Just(Generic[TypeSource]):
         return f"Just({self._value})"
 
     def __eq__(self, __o: object) -> bool:
-        return str(self) == str(__o)
+        return isinstance(__o, Just) and str(self) == str(__o)
 
     def __repr__(self) -> str:
         return str(self)
@@ -290,7 +279,7 @@ class Nothing(Generic[TypeSource]):
         return "Nothing()"
 
     def __eq__(self, __o: object) -> bool:
-        return str(self) == str(__o)
+        return isinstance(__o, Nothing)
 
     def __repr__(self) -> str:
         return str(self)

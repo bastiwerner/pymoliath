@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from functools import partial
 from typing import Any, Callable, Generic, TypeAlias, TypeVar, cast
+
+from pymoliath.util import curry
 
 TypeResult = TypeVar("TypeResult")
 TypePure = TypeVar("TypePure")
@@ -108,13 +109,7 @@ class Ok(Generic[TypeOk]):
         def binder(
             applicative_function: Callable[..., TypeReturn],
         ) -> Result[TypeReturn, Any]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return self.map(inner)
+            return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
 
@@ -139,13 +134,7 @@ class Ok(Generic[TypeOk]):
         def binder(
             applicative_function: Callable[..., TypeReturn],
         ) -> Result[TypeReturn, Any]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return applicative_value.map(inner)
+            return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
 

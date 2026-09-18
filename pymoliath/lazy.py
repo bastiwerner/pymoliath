@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from functools import partial
 from typing import Callable, Generic, TypeVar, Union, Any, Iterable
 
 from pymoliath.list import ListMonad
+from pymoliath.util import curry
 
 TypeSource = TypeVar("TypeSource")
 TypeRight = TypeVar("TypeRight")
@@ -83,13 +83,7 @@ class LazyMonad(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> LazyMonad[TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return self.map(inner)
+            return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
 
@@ -114,13 +108,7 @@ class LazyMonad(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> LazyMonad[TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return applicative_value.map(inner)
+            return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
 

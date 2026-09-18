@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from functools import partial
 from typing import Any, Callable, Generic, TypeAlias, TypeVar
+
+from pymoliath.util import curry
 
 TypeLeft = TypeVar("TypeLeft")
 TypeRight = TypeVar("TypeRight")
@@ -104,13 +105,7 @@ class Right(Generic[TypeRight]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Either[Any, TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return self.map(inner)
+            return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
 
@@ -135,13 +130,7 @@ class Right(Generic[TypeRight]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Either[Any, TypeResult]:
-            def inner(x: Any) -> Any:
-                try:
-                    return applicative_function(x)
-                except TypeError:
-                    return partial(applicative_function, x)
-
-            return applicative_value.map(inner)
+            return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
 
@@ -269,7 +258,7 @@ class Right(Generic[TypeRight]):
         return f"Right({self._right_value})"
 
     def __eq__(self, __o: object) -> bool:
-        return str(self) == str(__o)
+        return isinstance(__o, Right) and str(self) == str(__o)
 
     def __repr__(self) -> str:
         return str(self)
@@ -349,7 +338,7 @@ class Left(Generic[TypeLeft]):
         return f"Left({self._left_value})"
 
     def __eq__(self, __o: object) -> bool:
-        return str(self) == str(__o)
+        return isinstance(__o, Left) and str(self) == str(__o)
 
     def __repr__(self) -> str:
         return str(self)
