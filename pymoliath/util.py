@@ -45,12 +45,12 @@ def compose(
     return composition
 
 
-def curry(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
+def curry(function: Callable[..., Any]) -> Callable[[Any], Any]:
     """Currying function
 
     Parameters
     ----------
-    function: Callable[[Any], Any]
+    function: Callable[..., Any]
         Any function to be curried
 
     Returns
@@ -67,3 +67,107 @@ def curry(function: Callable[[Any], Any]) -> Callable[[Any], Any]:
             return partial(function, value)
 
     return inner
+
+
+def pipe(
+    *callables: Callable[[TypeSource], TypeResult],
+) -> Callable[[TypeSource], TypeResult]:
+    """Compose multiple functions left to right.
+
+    Composes zero or more functions into a functional composition. The
+    functions are composed left to right (the mirror of `compose`). A
+    composition of zero functions gives back the identity function.
+
+    Parameters
+    ----------
+    callables: Callable
+      Multiple functions to be composed
+
+    Returns
+    -------
+    result: Callable
+      Composed callable function
+
+    Example
+    -------
+    >>> pipe()(10)
+    10
+    >>> pipe(lambda x: x)(11)
+    11
+    >>> pipe(lambda x: x, lambda y: y + 2)(10)
+    12
+    """
+    return compose(*callables[::-1])
+
+
+def identity(value: TypeSource) -> TypeSource:
+    """Identity function (Haskell `id`).
+
+    Parameters
+    ----------
+    value: TypeSource
+        Any value
+
+    Returns
+    -------
+    result: TypeSource
+        Returns the passed value unchanged.
+
+    Example
+    -------
+    >>> identity(10)
+    10
+    """
+    return value
+
+
+def const(value: TypeSource) -> Callable[[Any], TypeSource]:
+    """Haskell `const`: returns a function which always returns `value`, ignoring its argument.
+
+    Parameters
+    ----------
+    value: TypeSource
+        Value to be returned by the constant function.
+
+    Returns
+    -------
+    result: Callable[[Any], TypeSource]
+        A function which always returns `value` regardless of the passed argument.
+
+    Example
+    -------
+    >>> const(10)("ignored")
+    10
+    """
+
+    def constant(_: Any) -> TypeSource:
+        return value
+
+    return constant
+
+
+def flip(
+    function: Callable[[TypeSource, TypeResult], TypePure],
+) -> Callable[[TypeResult, TypeSource], TypePure]:
+    """Haskell `flip`: swaps the argument order of a two-argument function.
+
+    Parameters
+    ----------
+    function: Callable[[TypeSource, TypeResult], TypePure]
+        A two-argument function.
+
+    Returns
+    -------
+    result: Callable[[TypeResult, TypeSource], TypePure]
+        The passed function with its two arguments swapped.
+
+    Example
+    -------
+    >>> flip(lambda a, b: a - b)(2, 10)
+    8
+    """
+
+    def flipped(b: TypeResult, a: TypeSource) -> TypePure:
+        return function(a, b)
+
+    return flipped
