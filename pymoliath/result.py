@@ -31,6 +31,13 @@ class Ok(Generic[TypeOk]):
     __match_args__ = ("_ok_value",)
 
     def __init__(self, value: TypeOk):
+        """Ok Monad constructor which takes a value of type TypeOk.
+
+        Parameters
+        ----------
+        value: TypeOk
+            Value to be stored in the Ok Monad.
+        """
         self._ok_value = value
 
     def map(self, function: Callable[[TypeOk], TypeReturn]) -> Result[TypeReturn, Any]:
@@ -122,6 +129,7 @@ class Ok(Generic[TypeOk]):
         def binder(
             applicative_function: Callable[..., TypeReturn],
         ) -> Result[TypeReturn, Any]:
+            """Maps the applicative's function, curried, over this Ok value."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
@@ -147,6 +155,7 @@ class Ok(Generic[TypeOk]):
         def binder(
             applicative_function: Callable[..., TypeReturn],
         ) -> Result[TypeReturn, Any]:
+            """Maps the applicative's function, curried, over the applicative_value."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
@@ -406,9 +415,11 @@ class Ok(Generic[TypeOk]):
         return False
 
     def __str__(self) -> str:
+        """Returns the string representation of the Ok Monad."""
         return f"Ok({self._ok_value})"
 
     def __eq__(self, other: object) -> bool:
+        """Returns True if `other` is an equal Ok Monad (same wrapped value string and type)."""
         if isinstance(other, Ok):
             other_ok = cast(Ok[Any], other)
             return str(self) == str(other_ok) and type(self._ok_value) is type(
@@ -417,6 +428,7 @@ class Ok(Generic[TypeOk]):
         return False
 
     def __repr__(self) -> str:
+        """Returns the string representation of the Ok Monad (same as __str__)."""
         return str(self)
 
 
@@ -424,83 +436,322 @@ class Err(Generic[TypeErr]):
     __match_args__ = ("_err_value",)
 
     def __init__(self, value: TypeErr):
+        """Err Monad constructor which takes a value of type TypeErr.
+
+        Parameters
+        ----------
+        value: TypeErr
+            Value to be stored in the Err Monad.
+        """
         self._err_value = value
 
     def map(self, function: Callable[[Any], TypeReturn]) -> Result[TypeReturn, TypeErr]:
+        """Returns this Err unchanged, since map only transforms the Ok value.
+
+        Parameters
+        ----------
+        function: Callable[[TypeOk], TypeReturn]
+            Function which would be applied to the Ok value if this Result Monad were Ok.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]
+            Returns this Err.
+        """
         return self
 
     def map_err(
         self, function: Callable[[TypeErr], TypeReturn]
     ) -> Result[Any, TypeReturn]:
+        """Calls function on the wrapped Err value and returns a new Err with the result.
+
+        Parameters
+        ----------
+        function: Callable[[TypeErr], TypeReturn]
+            Function which takes a value of TypeErr and returns a value of type TypeReturn.
+
+        Returns
+        -------
+        result: Result[TypeOk, TypeReturn]
+            Returns a new Err with the function result.
+        """
         return Err(function(self._err_value))
 
     def bind(
         self, function: Callable[[Any], Result[TypeReturn, TypeErr]]
     ) -> Result[TypeReturn, TypeErr]:
+        """Returns this Err unchanged, since bind only chains on the Ok value.
+
+        Parameters
+        ----------
+        function: Callable[[TypeOk], Result[TypeReturn, TypeErr]]
+            Function which would be called with the Ok value if this Result Monad were Ok.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]
+            Returns this Err.
+        """
         return self
 
     def bind_err(
         self, function: Callable[[TypeErr], Result[Any, TypeReturn]]
     ) -> Result[Any, TypeReturn]:
+        """Calls function with the wrapped Err value and returns its resulting Result Monad.
+
+        Parameters
+        ----------
+        function: Callable[[TypeErr], Result[TypeOk, TypeReturn]]
+            Function which takes a value of TypeErr and returns a new Result Monad.
+
+        Returns
+        -------
+        result: Result[TypeOk, TypeReturn]
+            Returns the Result Monad from the function call.
+        """
         return function(self._err_value)
 
     def apply(
         self, applicative: Result[Callable[..., TypeReturn], TypeErr]
     ) -> Result[TypeReturn, TypeErr]:
+        """Returns this Err unchanged, since apply only executes the applicative's function for Ok.
+
+        Parameters
+        ----------
+        applicative: Result[Callable[[TypeOk], TypeReturn], TypeErr]
+            Applicative Result Monad which contains a function.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]
+            Returns this Err.
+        """
         return self
 
     def apply2(self, applicative_value: Result[Any, TypeErr]) -> Result[Any, TypeErr]:
+        """Returns this Err unchanged, since apply2 only applies the value when this Result Monad is Ok.
+
+        Parameters
+        ----------
+        applicative_value: Result[TypePure, TypeErr]
+            Result Monad which contains a value.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]
+            Returns this Err.
+        """
         return self
 
     def is_ok_and(self, function: Callable[[Any], bool]) -> bool:
+        """Returns False, since this Result Monad is Err.
+
+        Parameters
+        ----------
+        function: Callable[[TypeOk], bool]
+            Predicate function which would be applied to the Ok value.
+
+        Returns
+        -------
+        result: bool
+            Returns False.
+        """
         return False
 
     def is_err_and(self, function: Callable[[TypeErr], bool]) -> bool:
+        """Returns True if the Result Monad is Err and the predicate returns True for the contained value.
+
+        Parameters
+        ----------
+        function: Callable[[TypeErr], bool]
+            Predicate function applied to the Err value.
+
+        Returns
+        -------
+        result: bool
+            Returns the predicate result.
+        """
         return function(self._err_value)
 
     def map_or(
         self, default_value: TypeReturn, function: Callable[[Any], TypeReturn]
     ) -> TypeReturn:
+        """Returns the default value, since this Result Monad is Err.
+
+        Parameters
+        ----------
+        default_value: TypeReturn
+            Default value to be returned since the Result Monad is Err.
+        function: Callable[[TypeOk], TypeReturn]
+            Function which would be applied to the Ok value if this Result Monad were Ok.
+
+        Returns
+        -------
+        result: TypeReturn
+            Returns the default value.
+        """
         return default_value
 
     def and_(self, other: Result[Any, TypeErr]) -> Result[Any, TypeErr]:
+        """Returns this Err, since and_ only returns `other` when this Result Monad is Ok.
+
+        Parameters
+        ----------
+        other: Result[TypeReturn, TypeErr]
+            Result Monad which would be returned if this Result Monad were Ok.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]
+            Returns this Err.
+        """
         return self
 
     def or_(self, other: Result[TypeOk, Any]) -> Result[TypeOk, Any]:
+        """Returns `other`, since this Result Monad is Err.
+
+        Parameters
+        ----------
+        other: Result[TypeOk, TypeErr]
+            Result Monad to be returned since this Result Monad is Err.
+
+        Returns
+        -------
+        result: Result[TypeOk, TypeErr]
+            Returns `other`.
+        """
         return other
 
     def zip(self, other: Result[Any, Any]) -> Result[Any, TypeErr]:
+        """Returns this Err, since zip cannot combine values when this Result Monad is Err.
+
+        Parameters
+        ----------
+        other: Result[TypePure, TypeErr]
+            Result Monad which would be zipped with this Result Monad if it were Ok.
+
+        Returns
+        -------
+        result: Result[Tuple[TypeOk, TypePure], TypeErr]
+            Returns this Err.
+        """
         return self
 
     def flatten(self) -> Result[Any, TypeErr]:
+        """Returns this Err unchanged, since there is nothing to flatten.
+
+        Returns
+        -------
+        result: Result[TypeReturn, TypeErr]
+            Returns this Err.
+        """
         return self
 
     def ok(self) -> Option[Any]:
+        """Converts the Result Monad into an Option Monad, discarding any Err value.
+
+        Returns
+        -------
+        option: Option[TypeOk]
+            Returns Nil, since this Result Monad is Err.
+        """
         from pymoliath.option import Nil
 
         return Nil()
 
     def err(self) -> Option[TypeErr]:
+        """Converts the Result Monad into an Option Monad of the Err value, discarding the Ok value.
+
+        Returns
+        -------
+        option: Option[TypeErr]
+            Returns Some with the Err value.
+        """
         from pymoliath.option import Some
 
         return Some(self._err_value)
 
     def unwrap(self) -> Any:
+        """Raises an Exception containing the Err value, since this Result Monad is Err.
+
+        Returns
+        -------
+        result: Any
+            Never returns; always raises an Exception.
+        """
         raise Exception(self._err_value)
 
     def unwrap_or(self, default_value: TypeOk) -> TypeOk:
+        """Returns the provided default value, since this Result Monad is Err.
+
+        Parameters
+        ----------
+        default_value: TypeOk
+            Default value of TypeOk
+
+        Returns
+        -------
+        result: TypeOk
+            Returns the default value.
+        """
         return default_value
 
     def unwrap_or_else(self, err_function: Callable[[TypeErr], TypeOk]) -> TypeOk:
+        """Calls err_function with the Err value and returns its result, since this Result Monad is Err.
+
+        Parameters
+        ----------
+        err_function: Callable[[TypeErr], TypeOk]
+            Error function which will be called with the Err value.
+
+        Returns
+        -------
+        result: TypeOk
+            Returns the result of calling err_function with the Err value.
+        """
         return err_function(self._err_value)
 
     def unwrap_err_or(self, default_value: TypeErr) -> TypeErr:
+        """Returns the Err value, since this Result Monad is Err.
+
+        Parameters
+        ----------
+        default_value: TypeErr
+            Default value of TypeErr which is ignored since this Result Monad is Err.
+
+        Returns
+        -------
+        result: TypeErr
+            Returns the Err value.
+        """
         return self._err_value
 
     def inspect(self, function: Callable[[Any], None]) -> Result[Any, TypeErr]:
+        """Returns this Err unchanged, without calling function, since this Result Monad is Err.
+
+        Parameters
+        ----------
+        function: Callable[[TypeOk], None]
+            Inspection function which would be called with the Ok value if this Result Monad were Ok.
+
+        Returns
+        -------
+        result: Result[TypeOk, TypeErr]
+        """
         return self
 
     def inspect_err(self, function: Callable[[TypeErr], None]) -> Result[Any, TypeErr]:
+        """Inspect the Result monad value of TypeErr
+
+        Parameters
+        ----------
+        function: Callable[[TypeErr], None]
+            Inspection function which takes the error value of the Result monad
+
+        Returns
+        -------
+        result: Result[TypeOk, TypeErr]
+        """
         function(self._err_value)
         return self
 
@@ -509,18 +760,43 @@ class Err(Generic[TypeErr]):
         err_function: Callable[[TypeErr], TypeReturn],
         ok_function: Callable[[Any], TypeReturn],
     ) -> TypeReturn:
+        """Matches the Result Monad to either an Err function or an Ok function with the same return type.
+
+        Parameters
+        ----------
+        err_function: Callable[[Exception], TypeReturn]
+            Callback function for either monads of type Err
+        ok_function: Callable[[TypeOk], TypeReturn]
+            Callback function for either monads of type Ok
+        """
         return err_function(self._err_value)
 
     def is_ok(self) -> bool:
+        """Returns False, since this Result Monad is Err.
+
+        Returns
+        -------
+        result: bool
+            True: if Result Monad is Ok, False: if Result Monad is Err.
+        """
         return False
 
     def is_err(self) -> bool:
+        """Returns True, since this Result Monad is Err.
+
+        Returns
+        -------
+        result: bool
+            True: if Result Monad is Err, False: if Result Monad is Ok.
+        """
         return True
 
     def __str__(self) -> str:
+        """Returns the string representation of the Err Monad."""
         return f"Err({self._err_value})"
 
     def __eq__(self, other: object) -> bool:
+        """Returns True if `other` is an equal Err Monad (same wrapped exception message and type)."""
         if isinstance(other, Err):
             other_err = cast(Err[Any], other)
             return str(self) == str(other_err) and type(self._err_value) is type(
@@ -529,6 +805,7 @@ class Err(Generic[TypeErr]):
         return False
 
     def __repr__(self) -> str:
+        """Returns the string representation of the Err Monad (same as __str__)."""
         return str(self)
 
 

@@ -21,6 +21,13 @@ class Reader(Generic[TypeEnv, TypeSource]):
     ]  # Private reader monad value of type callable which should not be modified
 
     def __init__(self, value: Callable[[TypeEnv], TypeSource]) -> None:
+        """Reader Monad constructor which takes a callable of type Callable[[TypeEnv], TypeSource].
+
+        Parameters
+        ----------
+        value: Callable[[TypeEnv], TypeSource]
+            Callable to be stored in the Reader Monad, invoked with the environment when `run` is called.
+        """
         if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("Reader value must be of type Callable")
         self._value = value
@@ -87,6 +94,7 @@ class Reader(Generic[TypeEnv, TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Reader[TypeEnv, TypeResult]:
+            """Maps the applicative's function, curried, over this Reader monad's value."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
@@ -113,6 +121,7 @@ class Reader(Generic[TypeEnv, TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Reader[TypeEnv, TypeResult]:
+            """Maps the applicative value's function, curried, over this Reader monad's function value."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
@@ -130,6 +139,7 @@ class Reader(Generic[TypeEnv, TypeSource]):
         """
 
         def identity(env: TypeEnv) -> TypeEnv:
+            """Returns the environment unchanged."""
             return env
 
         return cls(identity)
@@ -164,7 +174,9 @@ class Reader(Generic[TypeEnv, TypeSource]):
         return self._value(env)
 
     def __str__(self: Reader[TypeEnv, TypeSource]) -> str:
+        """Returns the string representation of the Reader Monad."""
         return f"Reader({self._value})"
 
     def __repr__(self: Reader[TypeEnv, TypeSource]) -> str:
+        """Returns the string representation of the Reader Monad (same as __str__)."""
         return str(self)

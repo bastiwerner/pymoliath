@@ -10,7 +10,9 @@ TSupportsAdd = TypeVar("TSupportsAdd", bound="SupportsAdd")
 class SupportsAdd(Protocol):
     """Structural bound for TypeMonoid: any type implementing the monoid closure law (a + b is also in TypeMonoid)."""
 
-    def __add__(self: TSupportsAdd, other: TSupportsAdd, /) -> TSupportsAdd: ...
+    def __add__(self: TSupportsAdd, other: TSupportsAdd, /) -> TSupportsAdd:
+        """Returns the result of combining self with other under the monoid's associative operation."""
+        ...
 
 
 TypeSource = TypeVar("TypeSource")
@@ -196,10 +198,19 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         return Writer(value, monoid_function(monoid))
 
     def run(self: Writer[TypeSource, TypeMonoid]) -> Tuple[TypeSource, TypeMonoid]:
+        """Writer monad run function to return the stored value and monoid.
+
+        Returns
+        -------
+        result: Tuple[TypeSource, TypeMonoid]
+            Returns the tuple of the stored value and monoid.
+        """
         return self._value
 
     def __str__(self) -> str:
+        """Returns the string representation of the Writer Monad."""
         return f"Writer({self._value})"
 
     def __repr__(self) -> str:
+        """Returns the string representation of the Writer Monad (same as __str__)."""
         return str(self)

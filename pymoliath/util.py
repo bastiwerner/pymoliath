@@ -37,6 +37,7 @@ def compose(
     """
 
     def composition(source: Any) -> Any:
+        """Applies `callables` right to left to `source`, falling back to unpacking on TypeError."""
         try:
             return reduce(lambda acc, f: f(acc), callables[::-1], source)
         except TypeError:
@@ -61,6 +62,7 @@ def curry(function: Callable[..., Any]) -> Callable[[Any], Any]:
     """
 
     def inner(value: Any) -> Union[Any, Callable[[Any], Any]]:
+        """Applies `value` to `function`, or partially applies it if `function` needs more arguments."""
         try:
             return function(value)
         except TypeError:
@@ -141,6 +143,7 @@ def const(value: TypeSource) -> Callable[[Any], TypeSource]:
     """
 
     def constant(_: Any) -> TypeSource:
+        """Ignores its argument and returns the enclosing `value`."""
         return value
 
     return constant
@@ -168,6 +171,7 @@ def flip(
     """
 
     def flipped(b: TypeResult, a: TypeSource) -> TypePure:
+        """Calls `function` with its two arguments in the original (unswapped) order."""
         return function(a, b)
 
     return flipped

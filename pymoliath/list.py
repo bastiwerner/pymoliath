@@ -27,14 +27,18 @@ TypeHashable = TypeVar("TypeHashable", bound=Hashable)
 
 
 class SupportsLessThan(Protocol):
-    def __lt__(self, other: Any, /) -> bool: ...
+    def __lt__(self, other: Any, /) -> bool:
+        """Returns True if self is ordered before other."""
+        ...
 
 
 TypeOrd = TypeVar("TypeOrd", bound=SupportsLessThan)
 
 
 class SupportsAdd(Protocol):
-    def __add__(self, other: Any, /) -> Any: ...
+    def __add__(self, other: Any, /) -> Any:
+        """Returns the result of adding other to self."""
+        ...
 
 
 TypeMonoid = TypeVar("TypeMonoid", bound=SupportsAdd)
@@ -144,6 +148,7 @@ class ListMonad(List[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> ListMonad[TypeResult]:
+            """Maps the applicative's function, curried, over this ListMonad's values."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
@@ -169,6 +174,7 @@ class ListMonad(List[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> ListMonad[TypeResult]:
+            """Maps the applicative value's values, curried, over this ListMonad's function."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
@@ -591,7 +597,9 @@ class ListMonad(List[TypeSource]):
         return ListMonad(sorted(self, key=key_function, reverse=reverse))
 
     def to_list(self: ListMonad[TypeSource]) -> List[TypeSource]:
+        """Converts the ListMonad into a plain built-in list."""
         return list(self)
 
     def __str__(self: ListMonad[TypeSource]) -> str:
+        """Returns the string representation of the ListMonad."""
         return f"ListMonad({super().__str__()})"

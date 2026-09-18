@@ -24,6 +24,13 @@ class State(Generic[TypeState, TypeSource]):
     def __init__(
         self, value: Callable[[TypeState], Tuple[TypeState, TypeSource]]
     ) -> None:
+        """State Monad constructor which takes a callable of type Callable[[TypeState], Tuple[TypeState, TypeSource]].
+
+        Parameters
+        ----------
+        value: Callable[[TypeState], Tuple[TypeState, TypeSource]]
+            Callable to be stored in the State Monad, invoked with the current state when `run` is called.
+        """
         if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("State Monad value must be of type Callable")
         self._value = value
@@ -47,6 +54,7 @@ class State(Generic[TypeState, TypeSource]):
         """
 
         def mapper(state: TypeState) -> Tuple[TypeState, TypeResult]:
+            """Runs the state monad with `state`, then maps `function` over the resulting value."""
             new_state, result = self.run(state)
             return new_state, function(result)
 
@@ -72,6 +80,7 @@ class State(Generic[TypeState, TypeSource]):
         """
 
         def mapper(state: TypeState):
+            """Runs the state monad with `state`, then binds `function` to the resulting value and new state."""
             new_state, value = self.run(state)
             return function(value).run(new_state)
 
@@ -100,6 +109,7 @@ class State(Generic[TypeState, TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> State[TypeState, TypeResult]:
+            """Maps the applicative's function, curried, over this State monad's value."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
@@ -126,6 +136,7 @@ class State(Generic[TypeState, TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> State[TypeState, TypeResult]:
+            """Maps the applicative value's function, curried, over this State monad's function value."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
@@ -154,6 +165,7 @@ class State(Generic[TypeState, TypeSource]):
         """
 
         def mapper(_: TypeState) -> Tuple[TypeState, Any]:
+            """Ignores the current state and replaces it with `new_state`."""
             return new_state, ()
 
         return State(mapper)
@@ -174,7 +186,9 @@ class State(Generic[TypeState, TypeSource]):
         return new_state, value
 
     def __str__(self: State[TypeState, TypeSource]) -> str:
+        """Returns the string representation of the State Monad."""
         return f"State({self._value})"
 
     def __repr__(self: State[TypeState, TypeSource]) -> str:
+        """Returns the string representation of the State Monad (same as __str__)."""
         return str(self)

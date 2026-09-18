@@ -20,6 +20,13 @@ class IO(Generic[TypeSource]):
     ]  # Private io monad value of type callable which should not be modified
 
     def __init__(self, value: Callable[[], TypeSource]):
+        """IO Monad constructor which takes a callable of type Callable[[], TypeSource].
+
+        Parameters
+        ----------
+        value: Callable[[], TypeSource]
+            Callable to be stored in the IO Monad, executed when `run` is called.
+        """
         if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("IO value must be of type Callable")
         self._value = value
@@ -84,6 +91,7 @@ class IO(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> IO[TypeResult]:
+            """Maps the applicative's function, curried, over this IO monad's value."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
@@ -110,6 +118,7 @@ class IO(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> IO[TypeResult]:
+            """Maps the applicative value's function, curried, over this IO monad's function value."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
@@ -127,7 +136,9 @@ class IO(Generic[TypeSource]):
         return self._value()
 
     def __str__(self) -> str:
+        """Returns the string representation of the IO Monad."""
         return f"IO({self._value})"
 
     def __repr__(self) -> str:
+        """Returns the string representation of the IO Monad (same as __str__)."""
         return str(self)

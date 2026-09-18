@@ -20,6 +20,14 @@ class Continuation(Generic[TypeSource, TypeReturn]):
     def __init__(
         self, computation: Callable[[Callable[[TypeSource], TypeReturn]], TypeReturn]
     ):
+        """Continuation Monad constructor which takes a computation of type
+        Callable[[Callable[[TypeSource], TypeReturn]], TypeReturn].
+
+        Parameters
+        ----------
+        computation: Callable[[Callable[[TypeSource], TypeReturn]], TypeReturn]
+            Callable to be stored in the Continuation Monad, invoked with a callback when `run` is called.
+        """
         self._computation = computation
 
     def map(
@@ -39,6 +47,7 @@ class Continuation(Generic[TypeSource, TypeReturn]):
         """
 
         def mapping(callback: Callable[[TypeResult], TypeReturn]) -> TypeReturn:
+            """Runs this continuation with a callback that first applies `function`, then `callback`."""
             return self.run(lambda source: callback(function(source)))
 
         return Continuation(mapping)
@@ -82,6 +91,7 @@ class Continuation(Generic[TypeSource, TypeReturn]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Continuation[TypeResult, TypeReturn]:
+            """Maps the applicative's function, curried, over this Continuation's value."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
@@ -106,6 +116,7 @@ class Continuation(Generic[TypeSource, TypeReturn]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Continuation[TypeResult, TypeReturn]:
+            """Maps the applicative value's function, curried, over this Continuation's function value."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)

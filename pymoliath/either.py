@@ -29,6 +29,13 @@ class Right(Generic[TypeRight]):
     __match_args__ = ("_right_value",)
 
     def __init__(self, value: TypeRight) -> None:
+        """Right Monad constructor which takes a value of type TypeRight.
+
+        Parameters
+        ----------
+        value: TypeRight
+            Value to be stored in the Right Monad.
+        """
         self._right_value = value
 
     def map(
@@ -118,6 +125,7 @@ class Right(Generic[TypeRight]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Either[Any, TypeResult]:
+            """Maps the applicative's function, curried, over this Right value."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
@@ -143,6 +151,7 @@ class Right(Generic[TypeRight]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Either[Any, TypeResult]:
+            """Maps the applicative's function, curried, over the applicative_value."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
@@ -404,12 +413,15 @@ class Right(Generic[TypeRight]):
         return True
 
     def __str__(self) -> str:
+        """Returns the string representation of the Right Monad."""
         return f"Right({self._right_value})"
 
     def __eq__(self, __o: object) -> bool:
+        """Returns True if `__o` is a Right Monad with an equal string representation."""
         return isinstance(__o, Right) and str(self) == str(__o)
 
     def __repr__(self) -> str:
+        """Returns the string representation of the Right Monad (same as __str__)."""
         return str(self)
 
 
@@ -417,89 +429,328 @@ class Left(Generic[TypeLeft]):
     __match_args__ = ("_left_value",)
 
     def __init__(self, value: TypeLeft):
+        """Left Monad constructor which takes a value of type TypeLeft.
+
+        Parameters
+        ----------
+        value: TypeLeft
+            Value to be stored in the Left Monad.
+        """
         self._left_value = value
 
     def map(
         self, function: Callable[[Any], TypeResult]
     ) -> Either[TypeLeft, TypeResult]:
+        """Returns this Left unchanged, since map only transforms the Right value.
+
+        Parameters
+        ----------
+        function: Callable[[TypeRight], TypeResult]
+            Function which would be applied to the Right value if this Either Monad were Right.
+
+        Returns
+        -------
+        either: Either[TypeLeft, TypeResult]
+            Returns this Left.
+        """
         return self
 
     def map_left(
         self, function: Callable[[TypeLeft], TypeResult]
     ) -> Either[TypeResult, Any]:
+        """Calls function on the wrapped Left value and returns a new Left with the result.
+
+        Parameters
+        ----------
+        function: Callable[[TypeLeft], TypeResult]
+            Function which takes a value of TypeLeft and returns a value of type TypeResult.
+
+        Returns
+        -------
+        either: Either[TypeResult, TypeRight]
+            Returns a new Left with the function result.
+        """
         return Left(function(self._left_value))
 
     def bind(
         self, function: Callable[[Any], Either[TypeLeft, TypeResult]]
     ) -> Either[TypeLeft, TypeResult]:
+        """Returns this Left unchanged, since bind only chains on the Right value.
+
+        Parameters
+        ----------
+        function: Callable[[TypeRight], Either[TypeLeft, TypeResult]]
+            Function which would be called with the Right value if this Either Monad were Right.
+
+        Returns
+        -------
+        either: Either[TypeLeft, TypeResult]
+            Returns this Left.
+        """
         return self
 
     def bind_left(
         self, function: Callable[[TypeLeft], Either[TypeResult, Any]]
     ) -> Either[TypeResult, Any]:
+        """Calls function with the wrapped Left value and returns its resulting Either Monad.
+
+        Parameters
+        ----------
+        function: Callable[[TypeLeft], Either[TypeResult, TypeRight]]
+            Function which takes a value of TypeLeft and returns a new Either Monad.
+
+        Returns
+        -------
+        either: Either[TypeResult, TypeRight]
+            Returns the Either Monad from the function call.
+        """
         return function(self._left_value)
 
     def apply(
         self, applicative: Either[TypeLeft, Callable[..., TypeResult]]
     ) -> Either[TypeLeft, TypeResult]:
+        """Returns this Left unchanged, since apply only executes the applicative's function for Right.
+
+        Parameters
+        ----------
+        applicative: Either[TypeLeft, Callable[[TypeRight], TypeResult]]
+            Applicative Either Monad which contains a function.
+
+        Returns
+        -------
+        result: Either[TypeLeft, TypeResult]
+            Returns this Left.
+        """
         return self
 
     def apply2(self, applicative_value: Either[TypeLeft, Any]) -> Either[TypeLeft, Any]:
+        """Returns this Left unchanged, since apply2 only applies the value when this Either Monad is Right.
+
+        Parameters
+        ----------
+        applicative_value: Either[TypeLeft, TypePure]
+            Either Monad which contains a value.
+
+        Returns
+        -------
+        result: Either[TypeLeft, TypeResult]
+            Returns this Left.
+        """
         return self
 
     def is_right_and(self, function: Callable[[Any], bool]) -> bool:
+        """Returns False, since this Either Monad is Left.
+
+        Parameters
+        ----------
+        function: Callable[[TypeRight], bool]
+            Predicate function which would be applied to the Right value.
+
+        Returns
+        -------
+        result: bool
+            Returns False.
+        """
         return False
 
     def is_left_and(self, function: Callable[[TypeLeft], bool]) -> bool:
+        """Returns True if the Either Monad is Left and the predicate returns True for the contained value.
+
+        Parameters
+        ----------
+        function: Callable[[TypeLeft], bool]
+            Predicate function applied to the Left value.
+
+        Returns
+        -------
+        result: bool
+            Returns the predicate result.
+        """
         return function(self._left_value)
 
     def map_or(
         self, default_value: TypeResult, function: Callable[[Any], TypeResult]
     ) -> TypeResult:
+        """Returns the default value, since this Either Monad is Left.
+
+        Parameters
+        ----------
+        default_value: TypeResult
+            Default value to be returned since the Either Monad is Left.
+        function: Callable[[TypeRight], TypeResult]
+            Function which would be applied to the Right value if this Either Monad were Right.
+
+        Returns
+        -------
+        result: TypeResult
+            Returns the default value.
+        """
         return default_value
 
     def and_(self, other: Either[TypeLeft, Any]) -> Either[TypeLeft, Any]:
+        """Returns this Left, since and_ only returns `other` when this Either Monad is Right.
+
+        Parameters
+        ----------
+        other: Either[TypeLeft, TypeResult]
+            Either Monad which would be returned if this Either Monad were Right.
+
+        Returns
+        -------
+        result: Either[TypeLeft, TypeResult]
+            Returns this Left.
+        """
         return self
 
     def or_(self, other: Either[Any, TypeRight]) -> Either[Any, TypeRight]:
+        """Returns `other`, since this Either Monad is Left.
+
+        Parameters
+        ----------
+        other: Either[TypeLeft, TypeRight]
+            Either Monad to be returned since this Either Monad is Left.
+
+        Returns
+        -------
+        result: Either[TypeLeft, TypeRight]
+            Returns `other`.
+        """
         return other
 
     def zip(self, other: Either[Any, Any]) -> Either[TypeLeft, Any]:
+        """Returns this Left, since zip cannot combine values when this Either Monad is Left.
+
+        Parameters
+        ----------
+        other: Either[TypeLeft, TypePure]
+            Either Monad which would be zipped with this Either Monad if it were Right.
+
+        Returns
+        -------
+        result: Either[TypeLeft, Tuple[TypeRight, TypePure]]
+            Returns this Left.
+        """
         return self
 
     def flatten(self) -> Either[TypeLeft, Any]:
+        """Returns this Left unchanged, since there is nothing to flatten.
+
+        Returns
+        -------
+        result: Either[TypeLeft, TypeResult]
+            Returns this Left.
+        """
         return self
 
     def right(self) -> Maybe[Any]:
+        """Either Monad specific function to return the Right value as a Maybe Monad.
+
+        Returns
+        -------
+        maybe: Maybe[TypeRight]
+            Returns Nothing, since this Either Monad is Left.
+        """
         from pymoliath.maybe import Nothing
 
         return Nothing()
 
     def left(self) -> Maybe[TypeLeft]:
+        """Either Monad specific function to return the Left value as a Maybe Monad.
+
+        Returns
+        -------
+        maybe: Maybe[TypeLeft]
+            Returns Just with the Left value.
+        """
         from pymoliath.maybe import Just
 
         return Just(self._left_value)
 
     def unwrap(self) -> Any:
+        """Raises an Exception containing the Left value, since this Either Monad is Left.
+
+        Returns
+        -------
+        result: Any
+            Never returns; always raises an Exception.
+        """
         raise Exception(self._left_value)
 
     def unwrap_or(self, default_value: TypeRight) -> TypeRight:
+        """Returns the provided default value, since this Either Monad is Left.
+
+        Parameters
+        ----------
+        default_value: TypeRight
+            Default value of TypeRight
+
+        Returns
+        -------
+        result: TypeRight
+            Returns the default value.
+        """
         return default_value
 
     def unwrap_or_else(
         self, left_function: Callable[[TypeLeft], TypeRight]
     ) -> TypeRight:
+        """Calls left_function with the Left value and returns its result, since this Either Monad is Left.
+
+        Parameters
+        ----------
+        left_function: Callable[[TypeLeft], TypeRight]
+            Called with the left value and must return a value of type TypeRight
+
+        Returns
+        -------
+        result: TypeRight
+            Returns the result of calling left_function with the Left value.
+        """
         return left_function(self._left_value)
 
     def unwrap_left_or(self, default_value: TypeLeft) -> TypeLeft:
+        """Returns the Left value, since this Either Monad is Left.
+
+        Parameters
+        ----------
+        default_value: TypeLeft
+            Default value of TypeLeft which is ignored since this Either Monad is Left.
+
+        Returns
+        -------
+        result: TypeLeft
+            Returns the Left value.
+        """
         return self._left_value
 
     def inspect(self, function: Callable[[Any], None]) -> Either[TypeLeft, Any]:
+        """Returns this Left unchanged, without calling function, since this Either Monad is Left.
+
+        Parameters
+        ----------
+        function: Callable[[TypeRight], None]
+            Inspection function which would be called with the Right value if this Either Monad were Right.
+
+        Returns
+        -------
+        either: Either[TypeLeft, TypeRight]
+        """
         return self
 
     def inspect_left(
         self, function: Callable[[TypeLeft], None]
     ) -> Either[TypeLeft, Any]:
+        """Inspect the Either value of TypeLeft
+
+        Parameters
+        ----------
+        function: Callable[[TypeLeft], None]
+            Inspection function which takes the left value of the Either monad
+
+        Returns
+        -------
+        either: Either[TypeLeft, TypeRight]
+        """
         function(self._left_value)
         return self
 
@@ -508,21 +759,47 @@ class Left(Generic[TypeLeft]):
         left_function: Callable[[TypeLeft], TypeResult],
         right_function: Callable[[Any], TypeResult],
     ) -> TypeResult:
+        """Left monad specific function to handle railroad orientated programming.
+
+        Parameters
+        ----------
+        left_function: Callable[[TypeLeft], TypeResult]
+            Callback function for either monads of type Left
+        right_function: Callable[[TypeRight], TypeResult]
+            Callback function for either monads of type Right
+        """
         return left_function(self._left_value)
 
     def is_left(self) -> bool:
+        """Either monad is left function
+
+        Returns
+        -------
+        result: bool
+            True: if either monad is of type left, False: if either monad is of type right
+        """
         return True
 
     def is_right(self) -> bool:
+        """Either monad is right function
+
+        Returns
+        -------
+        result: bool
+            True: if either monad is of type right, False: if either monad is of type left
+        """
         return False
 
     def __str__(self) -> str:
+        """Returns the string representation of the Left Monad."""
         return f"Left({self._left_value})"
 
     def __eq__(self, __o: object) -> bool:
+        """Returns True if `__o` is a Left Monad with an equal string representation."""
         return isinstance(__o, Left) and str(self) == str(__o)
 
     def __repr__(self) -> str:
+        """Returns the string representation of the Left Monad (same as __str__)."""
         return str(self)
 
 

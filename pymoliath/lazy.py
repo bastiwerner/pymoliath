@@ -99,6 +99,7 @@ class LazyMonad(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> LazyMonad[TypeResult]:
+            """Maps the applicative's function, curried, over this LazyMonad's value."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
@@ -124,6 +125,7 @@ class LazyMonad(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> LazyMonad[TypeResult]:
+            """Maps the applicative value's value, curried, over this LazyMonad's function."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
@@ -139,9 +141,11 @@ class LazyMonad(Generic[TypeSource]):
         return self._computation()
 
     def __str__(self) -> str:
+        """Returns the string representation of the LazyMonad."""
         return f"LazyMonad({self._computation})"
 
     def __repr__(self) -> str:
+        """Returns the string representation of the LazyMonad."""
         return str(self)
 
 
@@ -178,6 +182,7 @@ class Sequence(Generic[TypeSource]):
             self._pipeline = lambda: iter(value)
 
     def __iter__(self: Sequence[TypeSource]) -> Iterator[TypeSource]:
+        """Returns a fresh iterator over the Sequence's pipeline, pulling from the source."""
         return self._pipeline()
 
     def map(
@@ -215,6 +220,7 @@ class Sequence(Generic[TypeSource]):
         """
 
         def generator() -> Iterator[TypeResult]:
+            """Flat-maps each value from the source pipeline through `function`."""
             for value in self._pipeline():
                 yield from function(value)
 
@@ -415,6 +421,7 @@ class Sequence(Generic[TypeSource]):
         """
 
         def generator() -> Iterator[TypeSource]:
+            """Yields the first element of each run of consecutive duplicates."""
             for key, _ in itertools.groupby(self._pipeline()):
                 yield key
 
@@ -432,6 +439,7 @@ class Sequence(Generic[TypeSource]):
         """
 
         def generator() -> Iterator[TypeHashable]:
+            """Yields each value from the source pipeline only the first time it is seen."""
             seen: set[TypeHashable] = set()
             for value in self._pipeline():
                 if value not in seen:
@@ -461,6 +469,7 @@ class Sequence(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Sequence[TypeResult]:
+            """Maps the applicative's function, curried, over this Sequence's values."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
@@ -486,6 +495,7 @@ class Sequence(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Sequence[TypeResult]:
+            """Maps the applicative value's values, curried, over this Sequence's function."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
@@ -777,7 +787,9 @@ class Sequence(Generic[TypeSource]):
         return list(self._pipeline())
 
     def __str__(self) -> str:
+        """Returns the string representation of the Sequence."""
         return f"Sequence({self._pipeline})"
 
     def __repr__(self) -> str:
+        """Returns the string representation of the Sequence."""
         return str(self)

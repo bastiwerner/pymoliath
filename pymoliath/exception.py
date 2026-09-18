@@ -24,6 +24,13 @@ class Success(Generic[TypeSource]):
     __match_args__ = ("_success_value",)
 
     def __init__(self, value: TypeSource):
+        """Success Monad constructor which takes a value of type TypeSource.
+
+        Parameters
+        ----------
+        value: TypeSource
+            Value to be stored in the Success Monad.
+        """
         self._success_value = value
 
     def map(self, function: Callable[[TypeSource], TypeResult]) -> Try[TypeResult]:
@@ -119,6 +126,7 @@ class Success(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Try[TypeResult]:
+            """Maps the applicative's function, curried, over this Success value."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
@@ -144,6 +152,7 @@ class Success(Generic[TypeSource]):
         def binder(
             applicative_function: Callable[..., TypeResult],
         ) -> Try[TypeResult]:
+            """Maps the curried applicative function over the applicative's value."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
@@ -401,9 +410,11 @@ class Success(Generic[TypeSource]):
         return False
 
     def __str__(self) -> str:
+        """Returns the string representation of the Success Monad."""
         return f"Success({self._success_value})"
 
     def __eq__(self, other: object) -> bool:
+        """Returns True if `other` is a Success wrapping a value of the same type and string representation."""
         if isinstance(other, Success):
             other_success = cast(Success[Any], other)
             return str(self) == str(other_success) and type(
@@ -412,6 +423,7 @@ class Success(Generic[TypeSource]):
         return False
 
     def __repr__(self) -> str:
+        """Returns the string representation of the Success Monad (same as __str__)."""
         return str(self)
 
 
@@ -419,76 +431,303 @@ class Failure:
     __match_args__ = ("_failure_value",)
 
     def __init__(self, value: Exception):
+        """Failure Monad constructor which takes a value of type Exception.
+
+        Parameters
+        ----------
+        value: Exception
+            Exception to be stored in the Failure Monad. Must be an instance of Exception.
+        """
         assert isinstance(value, Exception), "Failure value must be of type Exception"
         self._failure_value = value
 
     def map(self, function: Callable[[Any], TypeResult]) -> Try[TypeResult]:
+        """Leaves the Failure value untouched, since this Try Monad is already a Failure.
+
+        Parameters
+        ----------
+        function: Callable[[Any], TypeResult]
+            Function which would have been applied to the Success value.
+
+        Returns
+        -------
+        result: Try[TypeResult]
+            Returns this Failure unchanged.
+        """
         return self
 
     def map_failure(self, function: Callable[[Exception], Exception]) -> Try[Any]:
+        """Calls function with the Failure value. The function is executed while checking for any exception.
+
+        Parameters
+        ----------
+        function: Callable[[Exception], Exception]
+            Function which takes an Exception and returns an Exception.
+
+        Returns
+        -------
+        result: Try[Any]
+            Returns a Failure with the function result, or a Failure of the raised exception.
+        """
         try:
             return Failure(function(self._failure_value))
         except Exception as e:
             return Failure(e)
 
     def bind(self, function: Callable[[Any], Try[TypeResult]]) -> Try[TypeResult]:
+        """Leaves this Failure untouched, since the bind function is only called for Success.
+
+        Parameters
+        ----------
+        function: Callable[[Any], Try[TypeResult]]
+            Function which would have been applied to the Success value.
+
+        Returns
+        -------
+        result: Try[TypeResult]
+            Returns this Failure unchanged.
+        """
         return self
 
     def bind_failure(
         self, function: Callable[[Exception], Try[TypeSource]]
     ) -> Try[TypeSource]:
+        """Calls function with the Failure value. The bind function is executed while checking for any exception.
+
+        Parameters
+        ----------
+        function: Callable[[Exception], Try[TypeSource]]
+            Function which takes an Exception and returns a Try Monad of TypeSource.
+
+        Returns
+        -------
+        result: Try[TypeSource]
+            Returns the Try Monad from the function result, or a Failure if it raised an exception.
+        """
         try:
             return function(self._failure_value)
         except Exception as e:
             return Failure(e)
 
     def apply(self, applicative: Try[Callable[..., TypeResult]]) -> Try[TypeResult]:
+        """Leaves this Failure untouched, since applying a function only happens for Success.
+
+        Parameters
+        ----------
+        applicative: Try[Callable[..., TypeResult]]
+            Applicative Try Monad which contains a function.
+
+        Returns
+        -------
+        result: Try[TypeResult]
+            Returns this Failure unchanged.
+        """
         return self
 
     def apply2(self, applicative_value: Try[Any]) -> Try[Any]:
+        """Leaves this Failure untouched, since applying a value only happens for Success.
+
+        Parameters
+        ----------
+        applicative_value: Try[Any]
+            Try Monad containing a value which would have been applied to the function.
+
+        Returns
+        -------
+        result: Try[Any]
+            Returns this Failure unchanged.
+        """
         return self
 
     def is_success_and(self, function: Callable[[Any], bool]) -> bool:
+        """Returns False, since this Try Monad is Failure.
+
+        Parameters
+        ----------
+        function: Callable[[Any], bool]
+            Predicate function which would be applied to the Success value.
+
+        Returns
+        -------
+        result: bool
+            Returns False.
+        """
         return False
 
     def is_failure_and(self, function: Callable[[Exception], bool]) -> bool:
+        """Returns True if the Try Monad is Failure and the predicate returns True for the contained exception.
+
+        Parameters
+        ----------
+        function: Callable[[Exception], bool]
+            Predicate function applied to the Failure value.
+
+        Returns
+        -------
+        result: bool
+            Returns the predicate result.
+        """
         return function(self._failure_value)
 
     def map_or(
         self, default_value: TypeResult, function: Callable[[Any], TypeResult]
     ) -> TypeResult:
+        """Returns the default value, since this Try Monad is Failure.
+
+        Parameters
+        ----------
+        default_value: TypeResult
+            Default value to be returned since the Try Monad is Failure.
+        function: Callable[[Any], TypeResult]
+            Function which would have been applied to the Success value.
+
+        Returns
+        -------
+        result: TypeResult
+            Returns the default value.
+        """
         return default_value
 
     def and_(self, other: Try[Any]) -> Try[Any]:
+        """Returns this Failure, since the Try Monad is not Success.
+
+        Parameters
+        ----------
+        other: Try[Any]
+            Try Monad which would have been returned if this Try Monad was Success.
+
+        Returns
+        -------
+        result: Try[Any]
+            Returns this Failure.
+        """
         return self
 
     def or_(self, other: Try[TypeSource]) -> Try[TypeSource]:
+        """Returns `other`, since this Try Monad is Failure.
+
+        Parameters
+        ----------
+        other: Try[TypeSource]
+            Try Monad to be returned since this Try Monad is Failure.
+
+        Returns
+        -------
+        result: Try[TypeSource]
+            Returns `other`.
+        """
         return other
 
     def zip(self, other: Try[Any]) -> Try[Any]:
+        """Returns this Failure, since combining values only happens for Success.
+
+        Parameters
+        ----------
+        other: Try[Any]
+            Try Monad which would have been zipped with this Try Monad.
+
+        Returns
+        -------
+        result: Try[Any]
+            Returns this Failure.
+        """
         return self
 
     def flatten(self) -> Try[Any]:
+        """Returns this Failure unchanged, since there is no nested Success value to flatten.
+
+        Returns
+        -------
+        result: Try[Any]
+            Returns this Failure.
+        """
         return self
 
     def unwrap(self) -> Any:
+        """Raises the Failure Exception, since this Try Monad is not Success.
+
+        Returns
+        -------
+        result: Any
+            Never returns, always raises the stored Exception.
+        """
         raise self._failure_value
 
     def unwrap_or(self, default_value: TypeSource) -> TypeSource:
+        """Returns the provided default value, since this Try Monad is Failure.
+
+        Parameters
+        ----------
+        default_value: TypeSource
+            Default value of TypeSource.
+
+        Returns
+        -------
+        result: TypeSource
+            Returns the default value.
+        """
         return default_value
 
     def unwrap_or_else(
         self, failure_function: Callable[[Exception], TypeSource]
     ) -> TypeSource:
+        """Calls the provided function with the Failure value and returns its result.
+
+        Parameters
+        ----------
+        failure_function: Callable[[Exception], TypeSource]
+            Called with the Failure value and must return a value of type TypeSource.
+
+        Returns
+        -------
+        result: TypeSource
+            Returns the result of the function call.
+        """
         return failure_function(self._failure_value)
 
     def unwrap_failure_or(self, default_value: Exception) -> Exception:
+        """Returns the Failure Exception, since this Try Monad is Failure.
+
+        Parameters
+        ----------
+        default_value: Exception
+            Default value of type Exception, ignored since this Try Monad is Failure.
+
+        Returns
+        -------
+        result: Exception
+            Returns the Failure value.
+        """
         return self._failure_value
 
     def inspect(self, function: Callable[[Any], None]) -> Try[Any]:
+        """Leaves this Failure untouched, since inspecting the Success value only happens for Success.
+
+        Parameters
+        ----------
+        function: Callable[[Any], None]
+            Inspection function which would have taken the Success value.
+
+        Returns
+        -------
+        result: Try[Any]
+            Returns this Failure unchanged.
+        """
         return self
 
     def inspect_failure(self, function: Callable[[Exception], None]) -> Try[Any]:
+        """Inspect the Try monad Exception value.
+
+        Parameters
+        ----------
+        function: Callable[[Exception], None]
+            Inspection function which takes the exception value of the Try monad.
+
+        Returns
+        -------
+        result: Try[Any]
+            Returns this Failure unchanged.
+        """
         function(self._failure_value)
         return self
 
@@ -497,24 +736,68 @@ class Failure:
         failure_function: Callable[[Exception], TypeResult],
         success_function: Callable[[Any], TypeResult],
     ) -> TypeResult:
+        """Try Monad specific function to handle railroad orientated types.
+
+        Parameters
+        ----------
+        failure_function: Callable[[Exception], TypeResult]
+            Callback function for Try monads of type Failure.
+        success_function: Callable[[Any], TypeResult]
+            Callback function for Try monads of type Success.
+
+        Returns
+        -------
+        result: TypeResult
+            Returns the result of calling failure_function with the Failure value.
+        """
         return failure_function(self._failure_value)
 
     def to_either(self) -> Either[Exception, Any]:
+        """Try Monad specific function to return an Either Monad.
+
+        Returns
+        -------
+        either: Either[Exception, Any]
+            Returns the Try Monad as a Left Either Monad.
+        """
         return Left(self._failure_value)
 
     def to_result(self) -> Result[Any, Exception]:
+        """Try Monad specific function to return a Result Monad.
+
+        Returns
+        -------
+        result: Result[Any, Exception]
+            Returns the Try Monad as an Err Result Monad.
+        """
         return Err(self._failure_value)
 
     def is_success(self) -> bool:
+        """Try monad is success function.
+
+        Returns
+        -------
+        result: bool
+            True: if try monad is of type success, False: if try monad is of type failure
+        """
         return False
 
     def is_failure(self) -> bool:
+        """Try monad is failure function.
+
+        Returns
+        -------
+        result: bool
+            True: if try monad is of type failure, False: if try monad is of type success
+        """
         return True
 
     def __str__(self) -> str:
+        """Returns the string representation of the Failure Monad."""
         return f"Failure({self._failure_value})"
 
     def __eq__(self, other: object) -> bool:
+        """Returns True if `other` is a Failure wrapping an exception of the same type and string representation."""
         if isinstance(other, Failure):
             return str(self) == str(other) and type(self._failure_value) is type(
                 other._failure_value
@@ -522,6 +805,7 @@ class Failure:
         return False
 
     def __repr__(self) -> str:
+        """Returns the string representation of the Failure Monad (same as __str__)."""
         return str(self)
 
 
