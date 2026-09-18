@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Generic, TypeAlias, TypeVar, cast
+from typing import Any, Callable, Generic, Tuple, TypeAlias, TypeVar, cast, overload
 
 from pymoliath.either import Either, Left, Right
 from pymoliath.result import Err, Ok, Result
@@ -147,6 +147,116 @@ class Success(Generic[TypeSource]):
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
+
+    def is_success_and(self, function: Callable[[TypeSource], bool]) -> bool:
+        """Returns True if the Try Monad is Success and the predicate returns True for the contained value.
+
+        Parameters
+        ----------
+        function: Callable[[TypeSource], bool]
+            Predicate function applied to the Success value.
+
+        Returns
+        -------
+        result: bool
+            Returns the predicate result.
+        """
+        return function(self._success_value)
+
+    def is_failure_and(self, function: Callable[[Any], bool]) -> bool:
+        """Returns False, since this Try Monad is Success.
+
+        Parameters
+        ----------
+        function: Callable[[Exception], bool]
+            Predicate function which would be applied to the Failure value.
+
+        Returns
+        -------
+        result: bool
+            Returns False.
+        """
+        return False
+
+    def map_or(
+        self, default_value: TypeResult, function: Callable[[TypeSource], TypeResult]
+    ) -> TypeResult:
+        """Applies the function to the Success value, or returns the default value if Failure.
+
+        Parameters
+        ----------
+        default_value: TypeResult
+            Default value to be returned if the Try Monad is Failure.
+        function: Callable[[TypeSource], TypeResult]
+            Function applied to the Success value.
+
+        Returns
+        -------
+        result: TypeResult
+            Returns the function result.
+        """
+        return function(self._success_value)
+
+    def and_(self, other: Try[TypeResult]) -> Try[TypeResult]:
+        """Returns `other` if the Try Monad is Success, otherwise Failure.
+
+        Parameters
+        ----------
+        other: Try[TypeResult]
+            Try Monad to be returned if this Try Monad is Success.
+
+        Returns
+        -------
+        result: Try[TypeResult]
+            Returns `other`.
+        """
+        return other
+
+    def or_(self, other: Try[TypeSource]) -> Try[TypeSource]:
+        """Returns this Try Monad if it is Success, otherwise `other`.
+
+        Parameters
+        ----------
+        other: Try[TypeSource]
+            Try Monad to be returned if this Try Monad is Failure.
+
+        Returns
+        -------
+        result: Try[TypeSource]
+            Returns this Success.
+        """
+        return self
+
+    def zip(self, other: Try[TypePure]) -> Try[Tuple[TypeSource, TypePure]]:
+        """Combines this Try Monad with another into a Try Monad of a tuple, or Failure if either is Failure.
+
+        Parameters
+        ----------
+        other: Try[TypePure]
+            Try Monad to be zipped with this Try Monad.
+
+        Returns
+        -------
+        result: Try[Tuple[TypeSource, TypePure]]
+            Returns Success of a tuple of both values, or Failure.
+        """
+        return other.map(lambda o: (self._success_value, o))
+
+    @overload
+    def flatten(self: Success[Success[TypeResult]]) -> Try[TypeResult]: ...
+
+    @overload
+    def flatten(self: Success[Failure]) -> Try[Any]: ...
+
+    def flatten(self) -> Try[Any]:
+        """Flattens a nested Try Monad by one level.
+
+        Returns
+        -------
+        result: Try[TypeResult]
+            Returns the nested Try Monad.
+        """
+        return cast(Try[Any], self._success_value)
 
     def unwrap(self) -> TypeSource:
         """Returns the Success value if not Failure, or otherwise raises the Failure Exception.
@@ -336,6 +446,29 @@ class Failure:
         return self
 
     def apply2(self, applicative_value: Try[Any]) -> Try[Any]:
+        return self
+
+    def is_success_and(self, function: Callable[[Any], bool]) -> bool:
+        return False
+
+    def is_failure_and(self, function: Callable[[Exception], bool]) -> bool:
+        return function(self._failure_value)
+
+    def map_or(
+        self, default_value: TypeResult, function: Callable[[Any], TypeResult]
+    ) -> TypeResult:
+        return default_value
+
+    def and_(self, other: Try[Any]) -> Try[Any]:
+        return self
+
+    def or_(self, other: Try[TypeSource]) -> Try[TypeSource]:
+        return other
+
+    def zip(self, other: Try[Any]) -> Try[Any]:
+        return self
+
+    def flatten(self) -> Try[Any]:
         return self
 
     def unwrap(self) -> Any:

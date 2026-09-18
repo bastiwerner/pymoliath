@@ -265,6 +265,50 @@ class TestTryMonad(unittest.TestCase):
         self.assertEqual(Ok(10), success.to_result())
         self.assertEqual(Err(Exception("error")), failure.to_result())
 
+    def test_try_monad_is_success_and_is_failure_and(self):
+        success_value = Success(10)
+        failure_value = Failure(Exception("error"))
+
+        self.assertTrue(success_value.is_success_and(lambda v: v > 5))
+        self.assertFalse(success_value.is_success_and(lambda v: v > 10))
+        self.assertFalse(success_value.is_failure_and(lambda e: str(e) == "error"))
+        self.assertTrue(failure_value.is_failure_and(lambda e: str(e) == "error"))
+        self.assertFalse(failure_value.is_success_and(lambda v: v > 5))
+
+    def test_try_monad_map_or(self):
+        success_value = Success(10)
+        failure_value = Failure(Exception("error"))
+
+        self.assertEqual(11, success_value.map_or(0, lambda v: v + 1))
+        self.assertEqual(0, failure_value.map_or(0, lambda v: v + 1))
+
+    def test_try_monad_and_or(self):
+        success_value = Success(10)
+        failure_value = Failure(Exception("error"))
+
+        self.assertEqual(Success(20), success_value.and_(Success(20)))
+        self.assertEqual(failure_value, failure_value.and_(Success(20)))
+        self.assertEqual(success_value, success_value.or_(Success(20)))
+        self.assertEqual(Success(20), failure_value.or_(Success(20)))
+
+    def test_try_monad_zip(self):
+        success_value = Success(10)
+        failure_value = Failure(Exception("error"))
+
+        self.assertEqual(Success((10, "a")), success_value.zip(Success("a")))
+        self.assertEqual(failure_value, success_value.zip(failure_value))
+        self.assertEqual(failure_value, failure_value.zip(Success("a")))
+
+    def test_try_monad_flatten(self):
+        self.assertEqual(Success(10), Success(Success(10)).flatten())
+        self.assertEqual(
+            Failure(Exception("error")),
+            Success(Failure(Exception("error"))).flatten(),
+        )
+        self.assertEqual(
+            Failure(Exception("error")), Failure(Exception("error")).flatten()
+        )
+
     def test_try_either_monad(self):
         def divide(dividen: int, divisor: int):
             return dividen / divisor
