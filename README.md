@@ -31,6 +31,26 @@ Run pymoliath tests using pytest. This command will execute all unittest in the 
 uv run pytest
 ```
 
+# Lint & Format
+
+Pymoliath uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting.
+
+```
+uv run --no-sync ruff check          # lint
+uv run --no-sync ruff check --fix    # lint, applying safe fixes
+uv run --no-sync ruff format --check # format check (no changes made)
+uv run --no-sync ruff format         # format, applying changes
+```
+
+# Type Checking
+
+Pymoliath uses [pyright](https://microsoft.github.io/pyright/) for static type checking, configured in
+`pyrightconfig.json`.
+
+```
+uv run --no-sync pyright
+```
+
 # Monads
 
 Every Monad implementation of Pymoliath has the typical haskell Monad interface.
@@ -66,12 +86,14 @@ applicative.apply2(just)  # Apply the applicative to the just value (if not noth
 
 just.unwrap()  # Returns the just value or raises an Exception
 just.unwrap_or(20)  # Returns the just value or else a default value
-just.unwrap_or_else(lambda: 20)  # Return the just value or the result from the passed fucntion
+just.unwrap_or_else(
+    lambda: 20
+)  # Return the just value or the result from the passed fucntion
 
 just.filter(filter_function)
 just.match(just_function, default_function)
 
-just.from_optional(value_or_none)
+from_optional(value_or_none)  # from pymoliath.maybe import from_optional
 ```
 
 ## Either
@@ -103,7 +125,9 @@ right.unwrap_or_else(left_function)
 right.match(left_function, right_function)
 right.to_result()  # Result[TypeRight, TypeLeft]
 
-Either.safe(unsafe_function, message)  # Either[Exception, TypeRight]
+either_safe(
+    unsafe_function
+)  # Either[Exception, TypeRight], from pymoliath.either import either_safe
 ```
 
 ## Result
@@ -114,7 +138,7 @@ Either.safe(unsafe_function, message)  # Either[Exception, TypeRight]
 # Result[TypeOk, TypeErr]
 result: Result[int, str] = Ok(10)
 error: Result[int, str] = Err("error")
-applicative = Result(lambda x: x + 1)
+applicative = Ok(lambda x: x + 1)
 
 result.is_ok()
 result.is_err()
@@ -135,7 +159,9 @@ result.unwrap_err_or(default_exception_value)
 result.match(err_function, ok_function)
 result.to_either()  # Either[TypeErr, TypeOk]
 
-Result.safe(unsafe_function)  # Result[TypeOk, Exception]
+result_safe(
+    unsafe_function
+)  # Result[TypeOk, Exception], from pymoliath.either import result_safe
 ```
 
 ## Try
@@ -158,9 +184,15 @@ success.is_err()
 success.map(ok_map_function)  # Maps only the success value with the function
 success.map_failure(err_map_function)  # Maps only the failure value with the function
 success.bind(ok_bind_function)  # Binds only the success value with the function
-success.bind_failure(err_bind_function)  # Binds only the failure value with the function
-success.apply(applicative)  # Apply the success value to the applicative (if not failure)
-applicative.apply2(success)  # Apply the applicative to the success value (if not failure)
+success.bind_failure(
+    err_bind_function
+)  # Binds only the failure value with the function
+success.apply(
+    applicative
+)  # Apply the success value to the applicative (if not failure)
+applicative.apply2(
+    success
+)  # Apply the applicative to the success value (if not failure)
 
 success.unwrap()  # Returns the success value or raises the Exception contained in the Failure.
 success.unwrap_or(default_value_of_type_ok)
@@ -171,7 +203,7 @@ success.match(err_function, ok_function)
 success.to_either()  # Either[Exception, TypeSource]
 success.to_result()  # Result[TypeSource, Exception]
 
-Try.safe(unsafe_function)  # Try[TypeSource]
+safe(unsafe_function)  # Try[TypeSource], from pymoliath.exception import safe
 ```
 
 ## IO
@@ -259,14 +291,14 @@ Haskell: [Control.Monad.Writer.Lazy](https://hackage.haskell.org/package/mtl-2.2
 
 ```python
 # Writer[TypeSource, TypeMonoid]
-writer: Writer[int, str] = Writer(10, 'hello')
+writer: Writer[int, str] = Writer(10, "hello")
 writer.run()  # (10, 'hello')
 
-writer.tell(' world')  # Writer(10, 'hello world')
+writer.tell(" world")  # Writer(10, 'hello world')
 writer.listen()  # Writer((10, 'hello world'), 'hello world')
 Writer((10, lambda w: w + " world"), "hello").pass_()  # Writer((10, "hello world")
 
-applicative = Writer(lambda x: x, '')
+applicative = Writer(lambda x: x, "")
 
 # Monad functions
 writer.map(map_function).run()  # Map resulting value with the function
@@ -282,7 +314,7 @@ Haskell: [Control.Monad.State.Lazy](https://hackage.haskell.org/package/mtl-2.2.
 ```python
 # State[TypeState, TypeSource]
 state: State[str, int] = State(lambda state: (state, 10))
-state.run('hi')  # (hi, 10)
+state.run("hi")  # (hi, 10)
 
 State.get()  # State(lambda state: (state, state))
 State.put(new_state)  # State(lambda state: (new_state, ()))
@@ -290,10 +322,10 @@ State.put(new_state)  # State(lambda state: (new_state, ()))
 applicative = State(lambda state: (state, lambda x: x * 42))
 
 # Monad functions
-state.map(map_function).run('hi')  # Map resulting value with the function
-state.bind(bind_function).run('hi')  # Bind resulting value with the function
-state.apply(applicative).run('hi')  # Apply resulting value to the applicative
-applicative.apply2(state).run('hi')  # Apply resulting applicative to the value
+state.map(map_function).run("hi")  # Map resulting value with the function
+state.bind(bind_function).run("hi")  # Bind resulting value with the function
+state.apply(applicative).run("hi")  # Apply resulting value to the applicative
+applicative.apply2(state).run("hi")  # Apply resulting applicative to the value
 ```
 
 ## LazyMonad
