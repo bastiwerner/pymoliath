@@ -1,7 +1,10 @@
+import itertools
 import unittest
 from typing import Any, Callable, Tuple
 
 from pymoliath.lazy import LazyMonad, Sequence
+from pymoliath.list import ListMonad
+from pymoliath.option import Nil, Some
 from pymoliath.util import compose
 
 
@@ -330,3 +333,105 @@ class TestSequence(unittest.TestCase):
                 .bind(lambda val: Sequence([f"${val}.00"]))
             ).run(),
         )
+
+    def test_sequence_iter(self):
+        self.assertEqual([1, 2, 3], list(Sequence([1, 2, 3])))
+
+    def test_sequence_enumerate(self):
+        self.assertEqual([(0, "a"), (1, "b")], Sequence(["a", "b"]).enumerate().run())
+
+    def test_sequence_zip_and_zip_with(self):
+        values = Sequence([1, 2, 3])
+
+        self.assertEqual([(1, "a"), (2, "b")], values.zip(["a", "b"]).run())
+        self.assertEqual(
+            ["1a", "2b"],
+            values.zip_with(["a", "b"], lambda a, b: f"{a}{b}").run(),
+        )
+
+    def test_sequence_chain_and_flatten(self):
+        self.assertEqual([1, 2, 3, 4], Sequence([1, 2]).chain([3, 4]).run())
+        self.assertEqual(
+            [1, 2, 3, 4],
+            Sequence([[1, 2], [3, 4]]).flatten().run(),
+        )
+
+    def test_sequence_take_while_and_skip_while(self):
+        values = Sequence([1, 2, 3, 1, 2])
+
+        self.assertEqual([1, 2], values.take_while(lambda v: v < 3).run())
+        self.assertEqual([3, 1, 2], values.skip_while(lambda v: v < 3).run())
+
+    def test_sequence_step_by(self):
+        self.assertEqual([0, 2, 4], Sequence([0, 1, 2, 3, 4, 5]).step_by(2).run())
+
+        with self.assertRaises(ValueError):
+            Sequence([1, 2, 3]).step_by(0)
+
+    def test_sequence_dedup_and_distinct(self):
+        values = Sequence([1, 1, 2, 2, 1, 3])
+
+        self.assertEqual([1, 2, 1, 3], values.dedup().run())
+        self.assertEqual([1, 2, 3], values.distinct().run())
+
+    def test_sequence_fold_and_reduce(self):
+        values = Sequence([1, 2, 3, 4])
+
+        self.assertEqual(10, values.fold(0, lambda acc, v: acc + v))
+        self.assertEqual(Some(10), values.reduce(lambda acc, v: acc + v))
+        self.assertEqual(Nil(), Sequence([]).reduce(lambda acc, v: acc + v))
+
+    def test_sequence_min_and_max(self):
+        values = Sequence([3, 1, 2])
+
+        self.assertEqual(Some(1), values.min())
+        self.assertEqual(Some(3), values.max())
+        self.assertEqual(Nil(), Sequence([]).min())
+        self.assertEqual(Nil(), Sequence([]).max())
+        self.assertEqual(
+            Some("b"), Sequence(["aaa", "b", "cc"]).min_by_key(lambda v: len(v))
+        )
+        self.assertEqual(
+            Some("aaa"), Sequence(["aaa", "b", "cc"]).max_by_key(lambda v: len(v))
+        )
+
+    def test_sequence_sum_and_count(self):
+        self.assertEqual(6, Sequence([1, 2, 3]).sum(0))
+        self.assertEqual(3, Sequence([1, 2, 3]).count())
+        self.assertEqual(0, Sequence([]).count())
+
+    def test_sequence_partition(self):
+        self.assertEqual(
+            (ListMonad([2, 4]), ListMonad([1, 3, 5])),
+            Sequence([1, 2, 3, 4, 5]).partition(lambda v: v % 2 == 0),
+        )
+
+    def test_sequence_rev_sorted_sort_by_return_list_monad(self):
+        self.assertEqual(ListMonad([3, 2, 1]), Sequence([1, 2, 3]).rev())
+        self.assertEqual(ListMonad([1, 2, 3]), Sequence([3, 1, 2]).sorted())
+        self.assertEqual(ListMonad([3, 2, 1]), Sequence([3, 1, 2]).sorted(reverse=True))
+        self.assertEqual(
+            ListMonad(["a", "bb", "ccc"]),
+            Sequence(["ccc", "a", "bb"]).sort_by(lambda v: len(v)),
+        )
+
+    def test_sequence_take_on_infinite_source_does_not_hang(self):
+        self.assertEqual([0, 1, 2, 3, 4], Sequence(itertools.count()).take(5).run())
+
+    def test_sequence_find_on_infinite_source_terminates(self):
+        self.assertEqual(Some(101), Sequence(itertools.count()).find(lambda x: x > 100))
+
+    def test_sequence_any_and_find_short_circuit_and_do_not_consume_whole_source(self):
+        pulled = []
+
+        def generator():
+            for value in itertools.count():
+                pulled.append(value)
+                yield value
+
+        self.assertTrue(Sequence(generator).any(lambda v: v >= 3))
+        self.assertLessEqual(len(pulled), 5)
+
+        pulled.clear()
+        self.assertEqual(Some(3), Sequence(generator).find(lambda v: v >= 3))
+        self.assertLessEqual(len(pulled), 5)
