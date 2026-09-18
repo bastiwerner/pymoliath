@@ -14,13 +14,18 @@ class Continuation(Generic[TypeSource, TypeReturn]):
     In continuation-passing style function result is not returned, but instead is passed to another function,
     received as a parameter (continuation).
     """
+
     _computation: Callable[[Callable[[TypeSource], TypeReturn]], TypeReturn]
 
-    def __init__(self, computation: Callable[[Callable[[TypeSource], TypeReturn]], TypeReturn]):
+    def __init__(
+        self, computation: Callable[[Callable[[TypeSource], TypeReturn]], TypeReturn]
+    ):
         self._computation = computation
 
-    def map(self: Continuation[TypeSource, TypeReturn], function: Callable[[TypeSource], TypeResult]) \
-            -> Continuation[TypeResult, TypeReturn]:
+    def map(
+        self: Continuation[TypeSource, TypeReturn],
+        function: Callable[[TypeSource], TypeResult],
+    ) -> Continuation[TypeResult, TypeReturn]:
         """Maps the given function by composing it with the continuation computation.
 
         Parameters
@@ -35,13 +40,14 @@ class Continuation(Generic[TypeSource, TypeReturn]):
 
         # Function signature: Callable[Callable[[TypeSource], TypeReturn], TypeResult]
         def mapping(computation: Callable[[TypeSource], TypeReturn]) -> TypeResult:
-            return self.run(compose(computation, function))  # type: ignore 
+            return self.run(compose(computation, function))  # type: ignore
 
-        return Continuation(mapping)  # type: ignore 
+        return Continuation(mapping)  # type: ignore
 
-    def bind(self: Continuation[TypeSource, TypeReturn],
-             function: Callable[[TypeSource], Continuation[TypeResult, TypeReturn]]) \
-            -> Continuation[TypeResult, TypeReturn]:
+    def bind(
+        self: Continuation[TypeSource, TypeReturn],
+        function: Callable[[TypeSource], Continuation[TypeResult, TypeReturn]],
+    ) -> Continuation[TypeResult, TypeReturn]:
         """Binds the given function by applying the continuation computation to the resulting continuation
         from passed function.
 
