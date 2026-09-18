@@ -119,7 +119,7 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         # The dynamic partial-application fallback can't be typed statically:
         # partial[TypeResult] isn't TypeResult, but it's a valid TypeResult once
         # fully applied by a later apply/apply2 call.
-        return Writer(curry(function)(value), monoid + other_monoid)  # pyright: ignore[reportReturnType]
+        return Writer(curry(function)(value), monoid + other_monoid)
 
     def apply2(
         self: Writer[Callable[..., TypeResult], TypeMonoid],
@@ -140,7 +140,7 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         """
         value_function, monoid = self.run()
         value, other_monoid = monad_value.run()
-        return Writer(curry(value_function)(value), monoid + other_monoid)  # pyright: ignore[reportReturnType]
+        return Writer(curry(value_function)(value), monoid + other_monoid)
 
     def tell(
         self: Writer[TypeSource, TypeMonoid], monoid_value: TypeMonoid
@@ -175,7 +175,7 @@ class Writer(Generic[TypeSource, TypeMonoid]):
         -------
         writer: Writer[Tuple[TypeSource, TypeMonoid], TypeMonoid]
         """
-        return self.map(lambda _: self.run())  # type: ignore
+        return self.map(lambda _: self.run())
 
     def pass_(
         self: Writer[Tuple[TypeInner, Callable[[TypeMonoid], TypeMonoid]], TypeMonoid],
