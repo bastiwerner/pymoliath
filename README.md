@@ -65,6 +65,9 @@ Every Monad implementation of Pymoliath has the typical haskell Monad interface.
     * Monad(f a -> b).apply2(Monad(a)) => Monad(b)
 * `run`: (IO, Reader, Writer, State, Lazy, Sequence)
 
+`ListMonad` and `Sequence` additionally expose a larger set of Rust `Iterator`-inspired combinators
+(`fold`, `zip`, `find`, `partition`, `sort_by`, ...) beyond this core Monad interface - see their sections below.
+
 # Structural Pattern Matching
 
 `Maybe`, `Either`, `Result`, `Try` and `Option` are modeled as closed union types (e.g. `Maybe = Just[T] | Nothing`),
@@ -106,8 +109,20 @@ just.unwrap_or_else(
     lambda: 20
 )  # Return the just value or the result from the passed fucntion
 
-just.filter(filter_function)
+just.filter(
+    filter_function
+)  # Just if filter_function(value) is True, otherwise Nothing
 just.match(just_function, default_function)
+
+just.is_just_and(filter_function)  # True if Just and filter_function(value) is True
+just.map_or(0, mapping_function)  # Maps the function, or returns the default if Nothing
+just.and_(Just(20))  # Just(20) if just is a Just, otherwise Nothing
+just.or_(Just(20))  # just if it is a Just, otherwise Just(20)
+just.zip(Just("a"))  # Just((value, "a")), or Nothing if either side is Nothing
+Just(Just(10)).flatten()  # Just(10)
+
+just.right_or("error")  # Right(value), or Left("error") if nothing
+just.right_or_else(lambda: "error")  # Right(value), or Left(error_function()) if nothing
 
 from_optional(value_or_none)  # from pymoliath.maybe import from_optional
 ```
@@ -138,8 +153,18 @@ some.unwrap_or_else(
     lambda: 20
 )  # Return the some value or the result from the passed function
 
-some.filter(filter_function)
+some.filter(filter_function)  # Some if filter_function(value) is True, otherwise Nil
 some.match(some_function, default_function)
+
+some.is_some_and(filter_function)  # True if Some and filter_function(value) is True
+some.map_or(0, mapping_function)  # Maps the function, or returns the default if Nil
+some.and_(Some(20))  # Some(20) if some is a Some, otherwise Nil
+some.or_(Some(20))  # some if it is a Some, otherwise Some(20)
+some.zip(Some("a"))  # Some((value, "a")), or Nil if either side is Nil
+Some(Some(10)).flatten()  # Some(10)
+
+some.ok_or("error")  # Ok(value), or Err("error") if nil
+some.ok_or_else(lambda: "error")  # Ok(value), or Err(error_function()) if nil
 
 from_optional(value_or_none)  # from pymoliath.option import from_optional
 ```
@@ -171,7 +196,17 @@ right.unwrap_left_or(default_value_of_type_left)
 right.unwrap_or_else(left_function)
 
 right.match(left_function, right_function)
-right.to_result()  # Result[TypeRight, TypeLeft]
+
+right.is_right_and(filter_function)  # True if Right and filter_function(value) is True
+right.is_left_and(filter_function)  # True if Left and filter_function(value) is True
+right.map_or(0, mapping_function)  # Maps the function, or returns the default if Left
+right.and_(Right(20))  # Right(20) if right is a Right, otherwise the Left unchanged
+right.or_(Right(20))  # right if it is a Right, otherwise Right(20)
+right.zip(Right("a"))  # Right((value, "a")), or the Left if either side is Left
+Right(Right(10)).flatten()  # Right(10)
+
+right.right()  # Maybe[TypeRight]: Just(value) if Right, otherwise Nothing
+right.left()  # Maybe[TypeLeft]: Just(error) if Left, otherwise Nothing
 
 either_safe(
     unsafe_function
@@ -205,7 +240,17 @@ result.unwrap_or_else(err_function)
 result.unwrap_err_or(default_exception_value)
 
 result.match(err_function, ok_function)
-result.to_either()  # Either[TypeErr, TypeOk]
+
+result.is_ok_and(filter_function)  # True if Ok and filter_function(value) is True
+result.is_err_and(filter_function)  # True if Err and filter_function(value) is True
+result.map_or(0, mapping_function)  # Maps the function, or returns the default if Err
+result.and_(Ok(20))  # Ok(20) if result is an Ok, otherwise the Err unchanged
+result.or_(Ok(20))  # result if it is an Ok, otherwise Ok(20)
+result.zip(Ok("a"))  # Ok((value, "a")), or the Err if either side is Err
+Ok(Ok(10)).flatten()  # Ok(10)
+
+result.ok()  # Option[TypeOk]: Some(value) if Ok, otherwise Nil
+result.err()  # Option[TypeErr]: Some(error) if Err, otherwise Nil
 
 result_safe(
     unsafe_function
@@ -251,6 +296,24 @@ success.match(err_function, ok_function)
 success.to_either()  # Either[Exception, TypeSource]
 success.to_result()  # Result[TypeSource, Exception]
 
+success.is_success_and(
+    filter_function
+)  # True if Success and filter_function(value) is True
+success.is_failure_and(
+    filter_function
+)  # True if Failure and filter_function(exception) is True
+success.map_or(
+    0, mapping_function
+)  # Maps the function, or returns the default if Failure
+success.and_(
+    Success(20)
+)  # Success(20) if success is a Success, otherwise the Failure unchanged
+success.or_(Success(20))  # success if it is a Success, otherwise Success(20)
+success.zip(
+    Success("a")
+)  # Success((value, "a")), or the Failure if either side is a Failure
+Success(Success(10)).flatten()  # Success(10)
+
 safe(unsafe_function)  # Try[TypeSource], from pymoliath.exception import safe
 ```
 
@@ -278,6 +341,9 @@ io_value.run()  # Returns the value 10
 
 Haskell: [Data.List](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data-List.html)
 
+Besides the Monad interface, `ListMonad` offers a set of Rust `Iterator`-inspired combinators. All of them return a
+new `ListMonad`/`Option`/tuple - none mutate the underlying list in place.
+
 ```python
 # ListMonad[TypeSource]
 list_monad: ListMonad[int] = ListMonad([1, 2, 3, 4, 5, 6])
@@ -291,11 +357,51 @@ list_monad.map(map_function)  # Maps all values with the function
 list_monad.bind(bind_function)  # Binds all values the function
 list_monad.apply(applicative)  # Applies all values to the applicative
 applicative.apply2(list_monad)  # Applies the applicative to all values
+
+# Iterator-style combinators
+list_monad.fold(0, lambda acc, v: acc + v)  # Left fold with a seed value
+list_monad.reduce(lambda acc, v: acc + v)  # Option[TypeSource]: Nil if empty
+list_monad.enumerate()  # ListMonad[(index, value)]
+list_monad.zip(other)  # ListMonad[(value, other_value)], stops at the shorter one
+list_monad.zip_with(other, combine_function)  # zip + combine in one step
+list_monad.chain(other)  # Concatenates this ListMonad with another iterable
+ListMonad(
+    [[1, 2], [3, 4]]
+).flatten()  # ListMonad([1, 2, 3, 4]): flattens one level of nesting
+list_monad.any(filter_function)  # True if any element matches
+list_monad.all(filter_function)  # True if all elements match
+list_monad.find(filter_function)  # Option[TypeSource]: first match, or Nil
+list_monad.position(filter_function)  # Option[int]: index of the first match, or Nil
+list_monad.min()  # Option[TypeSource], Nil if empty
+list_monad.max()  # Option[TypeSource], Nil if empty
+list_monad.min_by_key(key_function)  # Option[TypeSource], Nil if empty
+list_monad.max_by_key(key_function)  # Option[TypeSource], Nil if empty
+list_monad.partition(filter_function)  # (matching, non_matching) ListMonads
+list_monad.take_while(filter_function)  # Leading elements while the predicate holds
+list_monad.skip_while(filter_function)  # Remainder from the first non-matching element
+list_monad.step_by(2)  # Every 2nd element, starting with the first
+list_monad.rev()  # New ListMonad in reverse order
+list_monad.sum(0)  # Sums all elements, starting from an initial value
+list_monad.dedup()  # Removes consecutive duplicates only (Rust Vec::dedup semantics)
+list_monad.distinct()  # Removes all duplicates, preserving first-occurrence order (requires hashable elements)
+list_monad.sorted()  # New sorted ListMonad
+list_monad.sort_by(key_function)  # New ListMonad sorted by a key function
 ```
 
 ## Sequence (lazy list)
 
-Evaluates a given list in a lazy way.
+Evaluates a given list in a lazy way. Every intermediate operation (`map`/`bind`/`filter`/`take`/`skip`/`enumerate`/
+`zip`/`chain`/`flatten`/`take_while`/`skip_while`/`step_by`/`dedup`/`distinct`) builds a new pipeline without
+consuming the source - it is only pulled from element by element once a terminal operation is called
+(`run`/`fold`/`reduce`/`any`/`all`/`find`/`position`/`min`/`max`/`sum`/`count`/`partition`, or iterating the
+`Sequence` directly). Predicate-based terminal operations (`any`, `all`, `find`, `position`) genuinely short-circuit,
+so they work on infinite sources, e.g. `Sequence(itertools.count()).find(lambda x: x > 100)` terminates. `rev()`,
+`sorted()` and `sort_by()` need to see every element to produce their first result, so they fully materialize the
+Sequence and return a `ListMonad` instead of a `Sequence` - they will hang on an infinite source.
+
+Note: constructing a `Sequence` directly from a raw generator/iterator (rather than from a list, or a callable
+returning a fresh iterable) makes the `Sequence` single-use, since the underlying generator is exhausted the first
+time it is consumed.
 
 ```python
 # Sequence[TypeSource]
@@ -310,6 +416,34 @@ sequence.map(map_function).run()  # Lazy mapping of all values with the function
 sequence.bind(bind_function).run()  # Lazy binding of all values with the function
 sequence.apply(applicative).run()  # Lazy applies all values to the applicative
 applicative.apply2(sequence).run()  # Lazy applies the applicative to all values
+
+# Iterator-style combinators - same semantics as ListMonad, see above
+sequence.enumerate()  # Sequence[(index, value)]
+sequence.zip(other)  # Sequence[(value, other_value)]
+sequence.chain(other)  # Sequence concatenation
+sequence.take_while(filter_function)
+sequence.skip_while(filter_function)
+sequence.step_by(2)
+sequence.dedup()
+sequence.distinct()
+
+# Terminal operations
+sequence.fold(0, lambda acc, v: acc + v)
+sequence.reduce(lambda acc, v: acc + v)  # Option[TypeSource]
+sequence.any(filter_function)  # Short-circuits
+sequence.all(filter_function)  # Short-circuits
+sequence.find(filter_function)  # Option[TypeSource], short-circuits
+sequence.position(filter_function)  # Option[int], short-circuits
+sequence.min()  # Option[TypeSource]
+sequence.max()  # Option[TypeSource]
+sequence.min_by_key(key_function)  # Option[TypeSource]
+sequence.max_by_key(key_function)  # Option[TypeSource]
+sequence.sum(0)
+sequence.count()  # int
+sequence.partition(filter_function)  # (ListMonad, ListMonad)
+sequence.rev()  # ListMonad, terminates the pipeline
+sequence.sorted()  # ListMonad, terminates the pipeline
+sequence.sort_by(key_function)  # ListMonad, terminates the pipeline
 ```
 
 ## Reader
@@ -411,4 +545,34 @@ continuation.map(map_function).run(
 continuation.bind(bind_function).run(
     callback
 )  # Binds the resulting value to a new continuation
+
+applicative: Continuation[Callable[[int], str], str] = Continuation(
+    lambda callback: callback(lambda x: str(x))
+)
+continuation.apply(applicative).run(
+    callback
+)  # Apply the resulting value to the applicative
+applicative.apply2(continuation).run(
+    callback
+)  # Apply the resulting applicative to the value
+```
+
+# Util
+
+`pymoliath.util` provides a small set of functional-programming prelude helpers used internally (`curry` powers
+every Monad's `apply`/`apply2`) and available for general use.
+
+```python
+from pymoliath.util import compose, curry, pipe, identity, const, flip
+
+compose(f, g)(x)  # f(g(x)): composes functions right to left
+pipe(f, g)(x)  # g(f(x)): composes functions left to right, the mirror of compose
+
+curry(
+    function
+)  # Returns a curried version of function, applying arguments until all are provided
+
+identity(x)  # x: returns its argument unchanged
+const(10)("ignored")  # 10: always returns 10 regardless of the argument
+flip(lambda a, b: a - b)(2, 10)  # 8: swaps the argument order of a 2-arg function
 ```
