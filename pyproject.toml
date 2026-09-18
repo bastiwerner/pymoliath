@@ -1,17 +1,16 @@
-[tool.poetry]
+[project]
 name = "pymoliath"
 version = "1.0.0"
 description = ""
-authors = ["Bastian Werner <bastian-werner@outlook.com>"]
+authors = [{ name = "Bastian Werner", email = "bastian-werner@outlook.com" }]
+requires-python = ">=3.10,<4.0"
 
-[tool.poetry.dependencies]
-python = "^3.7"
+[dependency-groups]
+dev = ["pytest"]
 
-[tool.poetry.dev-dependencies]
-
-[tool.poetry.scripts]
-test = 'scripts:test'
+[tool.uv.build-backend]
+module-root = ""
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["uv_build>=0.12.16,<0.13"]
+build-backend = "uv_build"

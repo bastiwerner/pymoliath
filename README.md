@@ -14,22 +14,21 @@ as well as existing Monad implementations in python.
 
 # Getting started
 
-The pymoliath repository uses [poetry](https://python-poetry.org/) as dependency management tool. The project can be
+The pymoliath repository uses [uv](https://docs.astral.sh/uv/) as dependency management tool. The project can be
 installed using the following command.
 
 ```
-poetry install
+uv sync
 ```
 
-> Poetry will create a virtual environment and install all dependencies.
-> Configuration: `poetry config virtualenvs.create false --local`
+> uv will create a virtual environment and install all dependencies, including the dev dependency group.
 
 # Test
 
-Run pymoliath tests using poetry run scripts. This command will execute all unittest in the virtual environment.
+Run pymoliath tests using pytest. This command will execute all unittest in the virtual environment.
 
 ```
-poetry run test
+uv run pytest
 ```
 
 # Monads
