@@ -1,4 +1,5 @@
 from . import util
+from .async_maybe import AsyncMaybe
 from .either import Either, Left, Right
 from .exception import Failure, Success, Try
 from .io import IO
@@ -28,10 +29,11 @@ __all__ = [
     "ListMonad",
     "Maybe",
     "Just",
+    "Nothing",
+    "AsyncMaybe",
     "Nil",
     "Option",
     "Some",
-    "Nothing",
     "Reader",
     "State",
     "Writer",
