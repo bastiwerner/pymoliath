@@ -18,7 +18,7 @@ from typing import (
 )
 
 from pymoliath.option import Nil, Option, Some
-from pymoliath.util import curry, identity
+from pymoliath.util import curry
 
 TypeSource = TypeVar("TypeSource")
 TypeResult = TypeVar("TypeResult")
@@ -387,7 +387,9 @@ class ListMonad(List[TypeSource]):
         result: Option[TypeOrd]
             Returns Some of the smallest element, or Nil if the ListMonad is empty.
         """
-        return self.min_by_key(identity)
+        if not self:
+            return Nil()
+        return Some(min(self))
 
     def max(self: ListMonad[TypeOrd]) -> Option[TypeOrd]:
         """Returns the largest element.
@@ -397,7 +399,9 @@ class ListMonad(List[TypeSource]):
         result: Option[TypeOrd]
             Returns Some of the largest element, or Nil if the ListMonad is empty.
         """
-        return self.max_by_key(identity)
+        if not self:
+            return Nil()
+        return Some(max(self))
 
     def min_by_key(
         self: ListMonad[TypeSource], key_function: Callable[[TypeSource], TypeOrd]

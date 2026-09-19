@@ -19,7 +19,7 @@ from typing import (
 
 from pymoliath.list import ListMonad, TypeHashable, TypeMonoid, TypeOrd
 from pymoliath.option import Nil, Option, Some
-from pymoliath.util import curry, identity
+from pymoliath.util import curry
 
 TypeSource = TypeVar("TypeSource")
 TypeRight = TypeVar("TypeRight")
@@ -630,7 +630,10 @@ class Sequence(Generic[TypeSource]):
         result: Option[TypeOrd]
             Returns Some of the smallest element, or Nil if the Sequence is empty.
         """
-        return self.min_by_key(identity)
+        values = list(self._pipeline())
+        if not values:
+            return Nil()
+        return Some(min(values))
 
     def max(self: Sequence[TypeOrd]) -> Option[TypeOrd]:
         """Returns the largest element. Terminal operation.
@@ -640,7 +643,10 @@ class Sequence(Generic[TypeSource]):
         result: Option[TypeOrd]
             Returns Some of the largest element, or Nil if the Sequence is empty.
         """
-        return self.max_by_key(identity)
+        values = list(self._pipeline())
+        if not values:
+            return Nil()
+        return Some(max(values))
 
     def min_by_key(
         self: Sequence[TypeSource], key_function: Callable[[TypeSource], TypeOrd]
