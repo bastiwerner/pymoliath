@@ -144,7 +144,7 @@ class AsyncMaybe(Generic[TypeSource]):
             """Awaits self, then applies `function`, short-circuiting on Nothing."""
             maybe = await self
             if maybe.is_nothing():
-                return cast(Maybe[TypeResult], maybe)
+                return Nothing()
             return Just(await _resolve(function(maybe.unwrap())))
 
         return AsyncMaybe(run)
@@ -176,7 +176,7 @@ class AsyncMaybe(Generic[TypeSource]):
             """Awaits self, then chains into `function`'s result, short-circuiting on Nothing."""
             maybe = await self
             if maybe.is_nothing():
-                return cast(Maybe[TypeResult], maybe)
+                return Nothing()
             result = function(maybe.unwrap())
             if isinstance(result, AsyncMaybe):
                 return await result
@@ -317,7 +317,7 @@ class AsyncMaybe(Generic[TypeSource]):
             """Awaits both self and `other`, combining their values if both are Just."""
             maybe = await self
             if maybe.is_nothing():
-                return cast(Maybe[Tuple[TypeSource, TypePure]], maybe)
+                return Nothing()
             other_maybe = await other
             return other_maybe.map(lambda o: (maybe.unwrap(), o))
 
@@ -337,7 +337,7 @@ class AsyncMaybe(Generic[TypeSource]):
             """Awaits self, then awaits the nested AsyncMaybe if Just."""
             maybe = await self
             if maybe.is_nothing():
-                return cast(Maybe[TypeResult], maybe)
+                return Nothing()
             return await maybe.unwrap()
 
         return AsyncMaybe(run)
