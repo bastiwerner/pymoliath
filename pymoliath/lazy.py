@@ -166,6 +166,12 @@ class Sequence(Generic[TypeSource]):
     or a callable returning a fresh iterable) makes the Sequence single-use, since the underlying
     generator is exhausted the first time it is consumed - a second terminal call would then see
     an empty source.
+
+    Note: consecutive .map()/.filter() calls are deliberately left as nested built-in map/filter
+    iterators rather than fused into one composed function. Benchmarked: CPython's C-level
+    map/filter iterator step is cheaper than the Python-level closure calls a fused composition
+    would add, so fusing is consistently slower (and increasingly so with chain depth) - not
+    just unnecessary complexity.
     """
 
     __slots__ = ("_pipeline",)
