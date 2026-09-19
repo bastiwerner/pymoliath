@@ -186,6 +186,10 @@ class TestOption(unittest.TestCase):
         self.assertTrue(isinstance(Some("a"), (Some, Nil)))  # pyright: ignore[reportUnnecessaryIsInstance]
         self.assertTrue(isinstance(Nil(), (Some, Nil)))  # pyright: ignore[reportUnnecessaryIsInstance]
 
+    def test_nil_is_singleton(self):
+        self.assertIs(Nil(), Nil())
+        self.assertIs(Nil[int](), Nil[str]())
+
     def test_maybe_from_and_to_optional(self):
         maybe_dict: Option[dict[Any, Any]] = from_optional({})
         maybe_string: Option[str] = from_optional("")

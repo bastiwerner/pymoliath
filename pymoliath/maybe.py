@@ -4,6 +4,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    ClassVar,
     Generic,
     Tuple,
     TypeAlias,
@@ -420,6 +421,18 @@ class Nothing(Generic[TypeSource]):
     """
 
     __slots__ = ()
+
+    _instance: ClassVar[Nothing[Any] | None] = None
+
+    def __new__(cls) -> Nothing[TypeSource]:
+        """Returns the single shared Nothing instance, creating it on first call.
+
+        Nothing holds no data and is always equal to any other Nothing, so every call can
+        safely share one instance instead of allocating a new one.
+        """
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cast(Nothing[TypeSource], cls._instance)
 
     def map(self, function: Callable[[Any], TypeResult]) -> Maybe[TypeResult]:
         """Maybe monad functor interface (>=, map).

@@ -186,6 +186,10 @@ class TestMaybe(unittest.TestCase):
         self.assertTrue(isinstance(Just("a"), (Just, Nothing)))  # pyright: ignore[reportUnnecessaryIsInstance]
         self.assertTrue(isinstance(Nothing(), (Just, Nothing)))  # pyright: ignore[reportUnnecessaryIsInstance]
 
+    def test_nothing_is_singleton(self):
+        self.assertIs(Nothing(), Nothing())
+        self.assertIs(Nothing[int](), Nothing[str]())
+
     def test_maybe_from_and_to_optional(self):
         maybe_dict: Maybe[dict[Any, Any]] = from_optional({})
         maybe_string: Maybe[str] = from_optional("")

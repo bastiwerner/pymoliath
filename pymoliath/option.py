@@ -4,6 +4,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
+    ClassVar,
     Generic,
     Tuple,
     TypeAlias,
@@ -423,6 +424,18 @@ class Nil(Generic[TypeSource]):
     """
 
     __slots__ = ()
+
+    _instance: ClassVar[Nil[Any] | None] = None
+
+    def __new__(cls) -> Nil[TypeSource]:
+        """Returns the single shared Nil instance, creating it on first call.
+
+        Nil holds no data and is always equal to any other Nil, so every call can safely
+        share one instance instead of allocating a new one.
+        """
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cast(Nil[TypeSource], cls._instance)
 
     def map(self, function: Callable[[Any], TypeResult]) -> Option[TypeResult]:
         """Option monad functor interface (>=, map).
