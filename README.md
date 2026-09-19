@@ -68,6 +68,9 @@ Every Monad implementation of Pymoliath has the typical haskell Monad interface.
 `ListMonad` and `Sequence` additionally expose a larger set of Rust `Iterator`-inspired combinators
 (`fold`, `zip`, `find`, `partition`, `sort_by`, ...) beyond this core Monad interface - see their sections below.
 
+`Maybe`, `Option`, `Either`, `Result`, `Try`, `IO`, `Writer`, `Reader` and `State` additionally have a directly
+awaitable `AsyncX` counterpart for use in async code - see [Async Monads](#async-monads) below.
+
 # Structural Pattern Matching
 
 `Maybe`, `Either`, `Result`, `Try` and `Option` are modeled as closed union types (e.g. `Maybe = Just[T] | Nothing`),
@@ -555,6 +558,139 @@ continuation.apply(applicative).run(
 applicative.apply2(continuation).run(
     callback
 )  # Apply the resulting applicative to the value
+```
+
+# Async Monads
+
+`Async*` counterparts exist for `Maybe`, `Option`, `Either`, `Result`, `Try`, `IO`, `Writer`, `Reader` and `State`
+(`ListMonad`, `Sequence`, `LazyMonad` and `Continuation` stay sync-only). Each `AsyncX` wraps a deferred computation
+instead of a value: building a chain of `map`/`bind`/... never executes anything - only awaiting the final `AsyncX`
+does.
+
+* **Directly awaitable.** `await AsyncMaybe.from_value(1).map(f)` runs the whole pipeline and resolves to the
+  underlying sync monad (`Just`/`Nothing`, `Left`/`Right`, `Ok`/`Err`, `Some`/`Nil`, `Success`/`Failure`), so
+  short-circuiting and pattern matching work exactly like the sync versions once awaited. `AsyncIO` and
+  `AsyncWriter` have no failure state, so they resolve directly to the raw value / `(value, monoid)` tuple instead,
+  matching their sync `run()`. `AsyncReader` and `AsyncState` need an `env`/`state` argument to run, so instead of
+  a bare `await`, call `await an_async_reader.run(env)` / `await an_async_state.run(state)`.
+* **Sync or async callbacks, auto-detected.** `map`/`bind`/`filter`/`inspect` (and their `_left`/`_err`/`_failure`
+  counterparts) accept a plain sync function or an `async def` function interchangeably - whichever is returned is
+  detected at the point it's called, so real async I/O composes freely with plain transforms in the same chain.
+  `bind` (and its channel-specific counterparts) similarly accepts a callback returning another `AsyncX`, a plain
+  sync monad, or an awaitable resolving to one.
+* **Construction.** Every `AsyncX` can be built from an already-resolved value or sync monad (`from_value`,
+  `from_maybe`, `from_either`, `from_result`, ...) or from an async callable (`from_coroutine`), and stays
+  re-awaitable/re-runnable as long as that callable produces a fresh awaitable each call.
+* **Same MVP scope as the sync terminal methods.** `unwrap*`, `match`, `is_*`, and the `Maybe`/`Result`/`Either`
+  cross-conversions aren't duplicated on the `Async*` classes - awaiting already hands back the full sync monad,
+  so e.g. `(await an_async_maybe).unwrap_or(0)` works with zero extra API surface.
+
+## AsyncMaybe / AsyncOption
+
+```python
+# AsyncMaybe[TypeSource] - AsyncOption[TypeSource] is the same interface (Some/Nil naming)
+await AsyncMaybe.from_value(10).map(lambda x: x + 1)  # Just(11)
+await AsyncMaybe.from_maybe(Nothing()).map(lambda x: x + 1)  # Nothing(), map is never called
+
+
+async def fetch(x: int) -> int: ...
+
+
+await AsyncMaybe.from_value(10).map(fetch)  # async callback, auto-detected
+await AsyncMaybe.from_value(10).bind(lambda x: AsyncMaybe.from_value(x + 1))  # Just(11)
+await AsyncMaybe.from_value(10).filter(lambda x: x > 5)  # Just(10)
+
+
+async def fetch_ten() -> int:
+    return 10
+
+
+await AsyncMaybe.from_coroutine(fetch_ten)  # Just(10)
+```
+
+## AsyncEither
+
+```python
+# AsyncEither[TypeLeft, TypeRight]
+await AsyncEither.from_right(10).map(lambda x: x + 1)  # Right(11)
+await AsyncEither.from_left("error").map(lambda x: x + 1)  # Left("error"), map is never called
+await AsyncEither.from_right(10).map_left(lambda e: e.upper())  # Right(10), map_left is never called
+await AsyncEither.from_left("error").map_left(str.upper)  # Left("ERROR")
+
+await AsyncEither.from_right(10).bind(lambda x: AsyncEither.from_right(x + 1))  # Right(11)
+await AsyncEither.from_either(Right(10))  # lifts an existing sync Either
+```
+
+## AsyncResult
+
+```python
+# AsyncResult[TypeOk, TypeErr]
+await AsyncResult.from_ok(10).map(lambda x: x + 1)  # Ok(11)
+await AsyncResult.from_err("error").map(lambda x: x + 1)  # Err("error"), map is never called
+await AsyncResult.from_err("error").map_err(str.upper)  # Err("ERROR")
+
+await AsyncResult.from_ok(10).bind(lambda x: AsyncResult.from_ok(x + 1))  # Ok(11)
+await AsyncResult.from_result(Ok(10))  # lifts an existing sync Result
+```
+
+## AsyncTry
+
+```python
+# AsyncTry[TypeSource]
+await AsyncTry.from_success(10).map(lambda x: x + 1)  # Success(11)
+await AsyncTry.from_failure(Exception("error")).map(lambda x: x + 1)  # Failure(...), map never called
+
+
+def boom(x: int) -> int:
+    raise ValueError("boom")
+
+
+await AsyncTry.from_success(10).map(boom)  # Failure(ValueError("boom")) - exceptions are caught, like sync Try
+await AsyncTry.from_success(10).bind(lambda x: AsyncTry.from_success(x + 1))  # Success(11)
+await AsyncTry.from_try(Success(10))  # lifts an existing sync Try
+```
+
+## AsyncIO
+
+```python
+# AsyncIO[TypeSource] - resolves directly to the raw value, no wrapper (IO always "succeeds")
+await AsyncIO.from_value(10).map(lambda x: x + 1)  # 11
+await AsyncIO.from_value(10).bind(lambda x: AsyncIO.from_value(x + 1))  # 11
+await AsyncIO.from_io(IO(lambda: 10))  # lifts an existing sync IO
+await AsyncIO.from_coroutine(fetch_ten)  # 10
+```
+
+## AsyncWriter
+
+```python
+# AsyncWriter[TypeSource, TypeMonoid] - resolves directly to (value, monoid), no wrapper
+await AsyncWriter.from_value(10, "hello")  # (10, 'hello')
+await AsyncWriter.from_value(10, "hello").map(lambda x: x + 1)  # (11, 'hello')
+await AsyncWriter.from_value(10, "hello").tell(" world")  # (10, 'hello world')
+await AsyncWriter.from_value(10, "hello").bind(
+    lambda x: AsyncWriter.from_value(x + 1, " world")
+)  # (11, 'hello world') - monoids combine via +
+```
+
+## AsyncReader
+
+```python
+# AsyncReader[TypeEnvironment, TypeSource] - NOT bare-awaitable, run() needs the environment
+reader = AsyncReader.from_value(10).map(lambda x: x + 1)
+await reader.run("env")  # 11 - the environment is ignored here, from_value always resolves to 10 -> 11
+
+await AsyncReader.ask().run(12)  # 12
+await AsyncReader.from_reader(Reader(lambda env: str(env))).run(12)  # '12'
+```
+
+## AsyncState
+
+```python
+# AsyncState[TypeState, TypeSource] - NOT bare-awaitable, run() needs the initial state
+await AsyncState.from_value(10).map(lambda x: x + 1).run("hi")  # ('hi', 11)
+
+await AsyncState.get().run("hi")  # ('hi', 'hi')
+await AsyncState.put("new").run("hi")  # ('new', ())
 ```
 
 # Util
