@@ -51,6 +51,14 @@ Pymoliath uses [pyright](https://microsoft.github.io/pyright/) for static type c
 uv run --no-sync pyright
 ```
 
+# Documentation
+
+Pymoliath uses [pdoc](https://pdoc.dev/docs/pdoc.html) for generating documentation with a custom theme mimik rust cargo.
+
+```
+uv run pdoc -t .pdoc/rust pymoliath
+```
+
 # Monads
 
 Every Monad implementation of Pymoliath has the typical haskell Monad interface.

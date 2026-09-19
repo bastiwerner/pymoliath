@@ -1,3 +1,7 @@
+"""
+.. include:: ../README.md
+"""
+
 from . import util
 from .async_either import AsyncEither
 from .async_io import AsyncIO
