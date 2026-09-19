@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from typing import (
     Any,
     Awaitable,
@@ -10,22 +9,15 @@ from typing import (
     Tuple,
     TypeVar,
     Union,
-    cast,
 )
 
+from pymoliath._async import resolve as _resolve
 from pymoliath.maybe import Just, Maybe, Nothing
 from pymoliath.util import curry
 
 TypeSource = TypeVar("TypeSource")
 TypeResult = TypeVar("TypeResult")
 TypePure = TypeVar("TypePure")
-
-
-async def _resolve(value: Union[TypeResult, Awaitable[TypeResult]]) -> TypeResult:
-    """Awaits `value` if it is awaitable, otherwise returns it unchanged."""
-    if inspect.isawaitable(value):
-        return await value
-    return cast(TypeResult, value)
 
 
 class AsyncMaybe(Generic[TypeSource]):
