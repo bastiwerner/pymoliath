@@ -45,6 +45,8 @@ TypeMonoid = TypeVar("TypeMonoid", bound=SupportsAdd)
 
 
 class ListMonad(List[TypeSource]):
+    __slots__ = ()
+
     def map(
         self: ListMonad[TypeSource], function: Callable[[TypeSource], TypeResult]
     ) -> ListMonad[TypeResult]:

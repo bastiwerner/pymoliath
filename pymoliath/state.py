@@ -17,6 +17,8 @@ class State(Generic[TypeState, TypeSource]):
 
     """
 
+    __slots__ = ("_value",)
+
     _value: Callable[
         [TypeState], Tuple[TypeState, TypeSource]
     ]  # Private state monad value of type callable

@@ -15,6 +15,8 @@ class Continuation(Generic[TypeSource, TypeReturn]):
     received as a parameter (continuation).
     """
 
+    __slots__ = ("_computation",)
+
     _computation: Callable[[Callable[[TypeSource], TypeReturn]], TypeReturn]
 
     def __init__(

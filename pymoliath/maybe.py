@@ -32,6 +32,7 @@ class Just(Generic[TypeSource]):
         Value to be stored in the Just Maybe Monad.
     """
 
+    __slots__ = ("_value",)
     __match_args__ = ("_value",)
 
     def __init__(self, value: TypeSource):
@@ -417,6 +418,8 @@ class Nothing(Generic[TypeSource]):
     parameter (like Rust's Option<T>::None) that lets map/bind/apply/filter/
     inspect propagate real types instead of collapsing to Any.
     """
+
+    __slots__ = ()
 
     def map(self, function: Callable[[Any], TypeResult]) -> Maybe[TypeResult]:
         """Maybe monad functor interface (>=, map).

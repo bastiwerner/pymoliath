@@ -28,6 +28,8 @@ TypePure = TypeVar("TypePure")
 
 
 class LazyMonad(Generic[TypeSource]):
+    __slots__ = ("_computation",)
+
     _computation: Callable[[], TypeSource]
 
     def __init__(self, value: Union[TypeSource, Callable[[], TypeSource]]):
@@ -165,6 +167,8 @@ class Sequence(Generic[TypeSource]):
     generator is exhausted the first time it is consumed - a second terminal call would then see
     an empty source.
     """
+
+    __slots__ = ("_pipeline",)
 
     def __init__(
         self, value: Union[Iterable[TypeSource], Callable[[], Iterable[TypeSource]]]

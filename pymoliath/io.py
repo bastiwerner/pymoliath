@@ -15,6 +15,8 @@ class IO(Generic[TypeSource]):
     A value of type IO a is a computation which, when performed, does some I/O before returning a value of type a.
     """
 
+    __slots__ = ("_value",)
+
     _value: Callable[
         [], TypeSource
     ]  # Private io monad value of type callable which should not be modified

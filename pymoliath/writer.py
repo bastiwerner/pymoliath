@@ -41,6 +41,8 @@ class Writer(Generic[TypeSource, TypeMonoid]):
     3. Associativity: (a + b) + c = a + (b + c)
     """
 
+    __slots__ = ("_value",)
+
     _value: Tuple[
         TypeSource, TypeMonoid
     ]  # Private writer monad value which should not be modified

@@ -26,6 +26,7 @@ TypePure = TypeVar("TypePure")
 class Right(Generic[TypeRight]):
     """The Either Monad represents values with two possibilities: either Left[A] or Right[B]."""
 
+    __slots__ = ("_right_value",)
     __match_args__ = ("_right_value",)
 
     def __init__(self, value: TypeRight) -> None:
@@ -426,6 +427,7 @@ class Right(Generic[TypeRight]):
 
 
 class Left(Generic[TypeLeft]):
+    __slots__ = ("_left_value",)
     __match_args__ = ("_left_value",)
 
     def __init__(self, value: TypeLeft):

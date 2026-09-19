@@ -28,6 +28,7 @@ TypeErr = TypeVar("TypeErr")
 class Ok(Generic[TypeOk]):
     """Result is a Monad that represents either success (Ok) or failure (Err)."""
 
+    __slots__ = ("_ok_value",)
     __match_args__ = ("_ok_value",)
 
     def __init__(self, value: TypeOk):
@@ -433,6 +434,7 @@ class Ok(Generic[TypeOk]):
 
 
 class Err(Generic[TypeErr]):
+    __slots__ = ("_err_value",)
     __match_args__ = ("_err_value",)
 
     def __init__(self, value: TypeErr):

@@ -16,6 +16,8 @@ class Reader(Generic[TypeEnv, TypeSource]):
     environment, pass values from function to function, and execute sub-computations in a modified environment.
     """
 
+    __slots__ = ("_value",)
+
     _value: Callable[
         [TypeEnv], TypeSource
     ]  # Private reader monad value of type callable which should not be modified

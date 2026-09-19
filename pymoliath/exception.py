@@ -21,6 +21,7 @@ class Success(Generic[TypeSource]):
     * Failure: represents the failure way which contains the actual exception
     """
 
+    __slots__ = ("_success_value",)
     __match_args__ = ("_success_value",)
 
     def __init__(self, value: TypeSource):
@@ -428,6 +429,7 @@ class Success(Generic[TypeSource]):
 
 
 class Failure:
+    __slots__ = ("_failure_value",)
     __match_args__ = ("_failure_value",)
 
     def __init__(self, value: Exception):
