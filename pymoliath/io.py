@@ -1,3 +1,51 @@
+"""
+# IO Monad
+
+The IO Monad is a container used to represent a computation that performs side effects (reading a
+file, printing to the console, calling an external service) before producing a value. It wraps a
+zero-argument callable rather than a plain value, so the side effect is deferred: constructing an
+`IO` does nothing by itself, and the wrapped computation only actually runs once `run()` is called.
+
+* Haskell: [System.IO](https://hackage.haskell.org/package/base-4.16.0.0/docs/System-IO.html)
+
+This implementation is heavily inspired by Haskell's `IO` monad.
+
+The `IO[TypeSource]` type wraps a `Callable[[], TypeSource]`: a computation which, once run,
+performs some I/O before returning a value of type `TypeSource`.
+
+```python
+IO[TypeSource]
+```
+
+## Practical Examples and Benefits:
+
+The IO Monad is useful for keeping side-effecting code explicit and composable: instead of calling
+side-effecting functions eagerly and interleaving them with pure logic, you build up a description
+of the computation with `map`/`bind`, and only trigger the actual effects once, at the edge of the
+program, by calling `run()`.
+
+### Benefits:
+1. Explicit Effects: Wrapping a computation in `IO` marks it as side-effecting in the type system,
+   separating it from pure functions.
+2. Deferred Execution: Nothing runs until `run()` is called, so a chain of `map`/`bind` calls can be
+   built up and passed around as a value before any side effect actually happens.
+3. Composability: `map`/`bind`/`apply` let you combine IO actions the same way you would combine
+   pure functions, instead of manually sequencing statements.
+
+#### Example: Reading a value and transforming it before printing it.
+
+```python
+# Without IO (Imperative)
+raw = input("Enter a number: ")
+doubled = int(raw) * 2
+print(doubled)
+
+# With IO (Functional)
+action = IO(lambda: input("Enter a number: ")).map(lambda raw: int(raw) * 2).map(print)
+action.run()
+```
+"""
+
 from __future__ import annotations
 
 from typing import Any, Callable, Generic, TypeVar
@@ -12,7 +60,9 @@ TypePure = TypeVar("TypePure")
 class IO(Generic[TypeSource]):
     """IO monad implementation
 
-    A value of type IO a is a computation which, when performed, does some I/O before returning a value of type a.
+    A value of type `IO[TypeSource]` is a computation which, when performed, does some I/O before
+    returning a value of type `TypeSource`. Unlike `Maybe`/`Result`, `IO` has no failure state -
+    every `IO` action "succeeds" from the monad's perspective, and exceptions propagate normally.
     """
 
     __slots__ = ("_value",)
@@ -28,6 +78,12 @@ class IO(Generic[TypeSource]):
         ----------
         value: Callable[[], TypeSource]
             Callable to be stored in the IO Monad, executed when `run` is called.
+
+        Examples
+        --------
+        >>> action: IO[int] = IO(lambda: 10)
+        >>> action.run()
+        10
         """
         if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("IO value must be of type Callable")
@@ -49,6 +105,12 @@ class IO(Generic[TypeSource]):
         -------
         io: IO[TypeResult]
             Returns a new io monad containing the result of the passed function and the io call.
+
+        Examples
+        --------
+        >>> action: IO[int] = IO(lambda: 10)
+        >>> action.map(lambda x: x + 1).run()
+        11
         """
         return IO(lambda: function(self.run()))
 
@@ -68,6 +130,12 @@ class IO(Generic[TypeSource]):
         -------
         io: IO[TypeResult]
             Returns an io monad with the function call result
+
+        Examples
+        --------
+        >>> action: IO[int] = IO(lambda: 10)
+        >>> action.bind(lambda x: IO(lambda: x + 1)).run()
+        11
         """
         return function(self.run())
 
@@ -88,6 +156,13 @@ class IO(Generic[TypeSource]):
         io: IO[TypeResult]
             Applies an io monad containing a value of type TypeSource to an io monad containing a function
             of type Callable[[TypeSource], TypeResult].
+
+        Examples
+        --------
+        >>> val: IO[int] = IO(lambda: 10)
+        >>> func: IO[Callable[[int], int]] = IO(lambda: (lambda x: x * 2))
+        >>> val.apply(func).run()
+        20
         """
 
         def binder(
@@ -115,6 +190,13 @@ class IO(Generic[TypeSource]):
         io: IO[TypeResult]
             Applies an io monad containing a function of type Callable[[TypePure], TypeResult]
             to an io monad of type TypePure (value or function).
+
+        Examples
+        --------
+        >>> func: IO[Callable[[int], int]] = IO(lambda: (lambda x: x * 2))
+        >>> val: IO[int] = IO(lambda: 10)
+        >>> func.apply2(val).run()
+        20
         """
 
         def binder(
@@ -134,13 +216,31 @@ class IO(Generic[TypeSource]):
         -------
         result: TypeSource
             Calls the io monad function which returns a value of type TypeSource.
+
+        Examples
+        --------
+        >>> action: IO[int] = IO(lambda: 10)
+        >>> action.run()
+        10
         """
         return self._value()
 
     def __str__(self) -> str:
-        """Returns the string representation of the IO Monad."""
+        """Returns the string representation of the IO Monad.
+
+        Examples
+        --------
+        >>> str(IO(lambda: 10))  # doctest: +ELLIPSIS
+        'IO(<function...>)'
+        """
         return f"IO({self._value})"
 
     def __repr__(self) -> str:
-        """Returns the string representation of the IO Monad (same as __str__)."""
+        """Returns the string representation of the IO Monad (same as __str__).
+
+        Examples
+        --------
+        >>> repr(IO(lambda: 10))  # doctest: +ELLIPSIS
+        'IO(<function...>)'
+        """
         return str(self)

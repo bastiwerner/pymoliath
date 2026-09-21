@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, Mock
 
-from pymoliath import AsyncOption
+from pymoliath.aio import AsyncOption
 from pymoliath.option import Nil, Some
 
 

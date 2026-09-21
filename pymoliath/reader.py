@@ -1,3 +1,56 @@
+"""
+# Reader Monad
+
+The Reader Monad (also called the Environment monad) represents a computation that can read
+values from a shared environment. It wraps a `Callable[[TypeEnv], TypeSource]`: a function that,
+given an environment, produces a value, allowing environment-dependent computations to be composed
+with `map`/`bind` without threading the environment through every function call by hand.
+
+* Haskell: [Control.Monad.Reader](https://hackage.haskell.org/package/mtl/docs/Control-Monad-Reader.html)
+
+This implementation is heavily inspired by Haskell's `Reader` monad.
+
+The `Reader[TypeEnv, TypeSource]` type wraps a `Callable[[TypeEnv], TypeSource]`: a computation
+which, given a value of type `TypeEnv`, produces a value of type `TypeSource`.
+
+```python
+Reader[TypeEnv, TypeSource]
+```
+
+## Practical Examples and Benefits:
+
+The Reader Monad is particularly useful for dependency injection: instead of passing a
+configuration object, database connection, or other shared context as an explicit parameter to
+every function in a call chain, functions are written as `Reader`s over that environment and
+composed with `map`/`bind`; the environment is only supplied once, when the whole pipeline is run.
+
+### Benefits:
+1. Implicit Environment Threading: The environment doesn't need to be passed explicitly through
+   every function in a call chain - `bind` takes care of it.
+2. Composability: Environment-dependent computations can be built up with `map`/`bind` just like
+   any other monad, and only evaluated once `run(env)` is called.
+3. Local Overrides: `local` lets a sub-computation run against a modified environment without
+   affecting the environment seen by the rest of the pipeline.
+
+#### Example: Reading configuration without threading it through every call.
+
+```python
+# Without Reader (Imperative)
+def get_greeting(config):
+    return f"{config['greeting']}, {get_name(config)}!"
+
+def get_name(config):
+    return config["name"]
+
+print(get_greeting({"greeting": "Hello", "name": "World"}))
+
+# With Reader (Functional)
+get_name = Reader(lambda config: config["name"])
+get_greeting = get_name.map(lambda name: f"Hello, {name}!")
+print(get_greeting.run({"name": "World"}))
+```
+"""
+
 from __future__ import annotations
 
 from typing import Any, Callable, Generic, Type, TypeVar
@@ -10,10 +63,11 @@ TypeResult = TypeVar("TypeResult")
 
 
 class Reader(Generic[TypeEnv, TypeSource]):
-    """Read Monad implementation
+    """Reader Monad implementation
 
     The Reader monad (also called the Environment monad). Represents a computation, which can read values from a shared
     environment, pass values from function to function, and execute sub-computations in a modified environment.
+
     """
 
     __slots__ = ("_value",)
@@ -29,6 +83,12 @@ class Reader(Generic[TypeEnv, TypeSource]):
         ----------
         value: Callable[[TypeEnv], TypeSource]
             Callable to be stored in the Reader Monad, invoked with the environment when `run` is called.
+
+        Examples
+        --------
+        >>> reader: Reader[dict, int] = Reader(lambda env: env["value"])
+        >>> reader.run({"value": 10})
+        10
         """
         if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("Reader value must be of type Callable")
@@ -50,6 +110,12 @@ class Reader(Generic[TypeEnv, TypeSource]):
         -------
         reader: Reader[TypeEnv, TypeResult]
             Returns a reader monad with the function result as value
+
+        Examples
+        --------
+        >>> reader: Reader[dict, int] = Reader(lambda env: env["value"])
+        >>> reader.map(lambda x: x + 1).run({"value": 10})
+        11
         """
         return Reader(lambda env: function(self.run(env)))
 
@@ -70,6 +136,12 @@ class Reader(Generic[TypeEnv, TypeSource]):
         -------
         reader: Reader[TypeEnv, TypeResult]
             Returns a reader monad with the function result
+
+        Examples
+        --------
+        >>> reader: Reader[dict, int] = Reader(lambda env: env["value"])
+        >>> reader.bind(lambda x: Reader(lambda env: x + env["extra"])).run({"value": 10, "extra": 1})
+        11
         """
         return Reader(lambda x: function(self.run(x)).run(x))
 
@@ -91,6 +163,13 @@ class Reader(Generic[TypeEnv, TypeSource]):
         -------
         reader: Reader[TypeEnv, TypeResult]
             Applies a reader monad containing a value to a reader monad containing a function.
+
+        Examples
+        --------
+        >>> val: Reader[dict, int] = Reader(lambda env: env["value"])
+        >>> func: Reader[dict, Callable[[int], int]] = Reader(lambda env: (lambda x: x * 2))
+        >>> val.apply(func).run({"value": 10})
+        20
         """
 
         def binder(
@@ -118,6 +197,13 @@ class Reader(Generic[TypeEnv, TypeSource]):
         -------
         reader: Reader[TypeEnv, TypeResult]
             Applies a reader monad containing a function to a reader monad with a value or function.
+
+        Examples
+        --------
+        >>> func: Reader[dict, Callable[[int], int]] = Reader(lambda env: (lambda x: x * 2))
+        >>> val: Reader[dict, int] = Reader(lambda env: env["value"])
+        >>> func.apply2(val).run({"value": 10})
+        20
         """
 
         def binder(
@@ -138,6 +224,11 @@ class Reader(Generic[TypeEnv, TypeSource]):
         -------
         result: TypeSource
             Calls the reader monad function by passing the environment and returns the result.
+
+        Examples
+        --------
+        >>> Reader[dict, dict].ask().run({"value": 10})
+        {'value': 10}
         """
 
         def identity(env: TypeEnv) -> TypeEnv:
@@ -160,6 +251,12 @@ class Reader(Generic[TypeEnv, TypeSource]):
         -------
         reader: Reader[TypeEnv, TypeSource]
             Returns a new reader instance with the modified environment from the passed function.
+
+        Examples
+        --------
+        >>> reader: Reader[dict, int] = Reader(lambda env: env["value"])
+        >>> reader.local(lambda env: {**env, "value": env["value"] + 1}).run({"value": 10})
+        11
         """
         return Reader(lambda env: self.run(function(env)))
 
@@ -172,13 +269,31 @@ class Reader(Generic[TypeEnv, TypeSource]):
         -------
         result: TypeSource
             Calls the reader monad function by passing the environment and returns the result.
+
+        Examples
+        --------
+        >>> reader: Reader[dict, int] = Reader(lambda env: env["value"])
+        >>> reader.run({"value": 10})
+        10
         """
         return self._value(env)
 
     def __str__(self: Reader[TypeEnv, TypeSource]) -> str:
-        """Returns the string representation of the Reader Monad."""
+        """Returns the string representation of the Reader Monad.
+
+        Examples
+        --------
+        >>> str(Reader(lambda env: env))  # doctest: +ELLIPSIS
+        'Reader(<function...>)'
+        """
         return f"Reader({self._value})"
 
     def __repr__(self: Reader[TypeEnv, TypeSource]) -> str:
-        """Returns the string representation of the Reader Monad (same as __str__)."""
+        """Returns the string representation of the Reader Monad (same as __str__).
+
+        Examples
+        --------
+        >>> repr(Reader(lambda env: env))  # doctest: +ELLIPSIS
+        'Reader(<function...>)'
+        """
         return str(self)

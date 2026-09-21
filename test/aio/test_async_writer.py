@@ -1,6 +1,6 @@
 import unittest
 
-from pymoliath import AsyncWriter
+from pymoliath.aio import AsyncWriter
 from pymoliath.writer import Writer
 
 

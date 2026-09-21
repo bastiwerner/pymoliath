@@ -1,6 +1,6 @@
 import unittest
 
-from pymoliath import AsyncReader
+from pymoliath.aio import AsyncReader
 from pymoliath.reader import Reader
 
 

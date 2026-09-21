@@ -1,6 +1,23 @@
 """
-.. include:: ../docs/state/README.md
-   :start-after: ## AsyncState
+# AsyncState
+
+`AsyncState` is the directly-runnable-with-an-initial-state counterpart of `pymoliath.state.State`
+- see `pymoliath.aio` for the general design shared by all `Async*` monads.
+
+Unlike the other `Async*` monads, `AsyncState` is not bare-`await`-able: it needs an initial state
+value to run, so call `await an_async_state.run(state)` instead of `await an_async_state`.
+
+```python
+import asyncio
+
+
+async def increment(n: int) -> tuple[int, int]:
+    return n + 1, n + 1
+
+
+asyncio.run(AsyncState(increment).run(0))  # (1, 1)
+asyncio.run(AsyncState.from_value(10).map(lambda x: x + 1).run(0))  # (0, 11)
+```
 """
 
 from __future__ import annotations
@@ -54,6 +71,13 @@ class AsyncState(Generic[TypeState, TypeSource]):
             (new_state, value) tuple. To stay re-runnable, `run` must produce a *new* awaitable
             every call rather than handing back an already-created (and possibly already-consumed)
             coroutine object.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def run(n): return (n + 1, n)
+        >>> asyncio.run(AsyncState(run).run(0))
+        (1, 0)
         """
         self._run = run
 
@@ -70,6 +94,13 @@ class AsyncState(Generic[TypeState, TypeSource]):
         Returns
         -------
         result: Tuple[TypeState, TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> state: AsyncState[int, int] = AsyncState.from_state(State(lambda n: (n + 1, n)))
+        >>> asyncio.run(state.run(0))
+        (1, 0)
         """
         return await self._run(state)
 
@@ -85,6 +116,12 @@ class AsyncState(Generic[TypeState, TypeSource]):
         Returns
         -------
         async_state: AsyncState[Any, TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncState.from_value(10).run(0))
+        (0, 10)
         """
 
         async def run(state: Any) -> Tuple[Any, TypeSource]:
@@ -107,6 +144,13 @@ class AsyncState(Generic[TypeState, TypeSource]):
         Returns
         -------
         async_state: AsyncState[TypeState, TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> state: State[int, int] = State(lambda n: (n + 1, n))
+        >>> asyncio.run(AsyncState.from_state(state).run(0))
+        (1, 0)
         """
 
         async def run(state: TypeState) -> Tuple[TypeState, TypeSource]:
@@ -133,6 +177,13 @@ class AsyncState(Generic[TypeState, TypeSource]):
         Returns
         -------
         async_state: AsyncState[TypeState, TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def fetch(n: int): return (n + 1, n)
+        >>> asyncio.run(AsyncState.from_coroutine(fetch).run(0))
+        (1, 0)
         """
         return AsyncState(coroutine_function)
 
@@ -152,6 +203,13 @@ class AsyncState(Generic[TypeState, TypeSource]):
         -------
         async_state: AsyncState[TypeState, TypeResult]
             Returns a new AsyncState with the result of the map function and the internal state.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> state: AsyncState[int, int] = AsyncState.from_state(State(lambda n: (n + 1, n)))
+        >>> asyncio.run(state.map(lambda x: x * 2).run(0))
+        (1, 0)
         """
 
         async def run(state: TypeState) -> Tuple[TypeState, TypeResult]:
@@ -187,6 +245,14 @@ class AsyncState(Generic[TypeState, TypeSource]):
         -------
         async_state: AsyncState[TypeState, TypeResult]
             Returns a new AsyncState with the result of the bind function and the internal state.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> state: AsyncState[int, int] = AsyncState.from_state(State(lambda n: (n + 1, n)))
+        >>> chained = state.bind(lambda x: AsyncState.from_state(State(lambda n: (n + 1, x + n))))
+        >>> asyncio.run(chained.run(0))
+        (2, 1)
         """
 
         async def run(state: TypeState) -> Tuple[TypeState, TypeResult]:
@@ -218,6 +284,14 @@ class AsyncState(Generic[TypeState, TypeSource]):
         -------
         async_state: AsyncState[TypeState, TypeResult]
             Applies an AsyncState containing a value to an AsyncState containing a function.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> val: AsyncState[int, int] = AsyncState.from_value(10)
+        >>> func: AsyncState[int, Callable[[int], int]] = AsyncState.from_value(lambda x: x * 2)
+        >>> asyncio.run(val.apply(func).run(0))
+        (0, 20)
         """
 
         def binder(
@@ -245,6 +319,14 @@ class AsyncState(Generic[TypeState, TypeSource]):
         -------
         async_state: AsyncState[TypeState, TypeResult]
             Applies an AsyncState containing a function to an AsyncState with a value or function.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func: AsyncState[int, Callable[[int], int]] = AsyncState.from_value(lambda x: x * 2)
+        >>> val: AsyncState[int, int] = AsyncState.from_value(10)
+        >>> asyncio.run(func.apply2(val).run(0))
+        (0, 20)
         """
 
         def binder(
@@ -265,6 +347,12 @@ class AsyncState(Generic[TypeState, TypeSource]):
         -------
         async_state: AsyncState[TypeState, TypeState]
             Returns the state from the internals of the monad once run.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncState[int, Any].get().run(10))
+        (10, 10)
         """
 
         async def run(state: TypeState) -> Tuple[TypeState, TypeState]:
@@ -283,6 +371,12 @@ class AsyncState(Generic[TypeState, TypeSource]):
         -------
         async_state: AsyncState[TypeState, TypeState]
             Replaces the state inside the monad, and the value with an empty tuple, once run.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncState[int, Any].put(42).run(10))
+        (42, ())
         """
 
         async def run(_: TypeState) -> Tuple[TypeState, Any]:
@@ -292,9 +386,21 @@ class AsyncState(Generic[TypeState, TypeSource]):
         return AsyncState(run)
 
     def __str__(self) -> str:
-        """Returns the string representation of the AsyncState."""
+        """Returns the string representation of the AsyncState.
+
+        Examples
+        --------
+        >>> str(AsyncState.from_value(10))  # doctest: +ELLIPSIS
+        'AsyncState(<function...>)'
+        """
         return f"AsyncState({self._run})"
 
     def __repr__(self) -> str:
-        """Returns the string representation of the AsyncState (same as __str__)."""
+        """Returns the string representation of the AsyncState (same as __str__).
+
+        Examples
+        --------
+        >>> repr(AsyncState.from_value(10))  # doctest: +ELLIPSIS
+        'AsyncState(<function...>)'
+        """
         return str(self)

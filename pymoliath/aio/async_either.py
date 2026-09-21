@@ -1,6 +1,29 @@
 """
-.. include:: ../docs/either/README.md
-   :start-after: ## AsyncEither
+# AsyncEither
+
+`AsyncEither` is the directly-awaitable counterpart of `pymoliath.either.Either` - see
+`pymoliath.aio` for the general design shared by all `Async*` monads.
+
+```python
+import asyncio
+
+asyncio.run(AsyncEither.from_right(10).map(lambda x: x + 1))  # Right(11)
+asyncio.run(AsyncEither.from_left("error").map(lambda x: x + 1))  # Left(error), map is never called
+
+
+async def fetch(x: int) -> int: ...
+
+
+asyncio.run(AsyncEither.from_right(10).map(fetch))  # async callback, auto-detected
+asyncio.run(AsyncEither.from_right(10).bind(lambda x: AsyncEither.from_right(x + 1)))  # Right(11)
+
+
+async def fetch_ten() -> int:
+    return 10
+
+
+asyncio.run(AsyncEither.from_coroutine(fetch_ten))  # Right(10)
+```
 """
 
 from __future__ import annotations
@@ -58,11 +81,25 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
             To stay re-awaitable, `run` must produce a *new* awaitable every call rather than
             handing back an already-created (and possibly already-consumed) coroutine object -
             the same caveat Sequence's docstring makes about raw generators/iterators.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def run(): return Right(10)
+        >>> asyncio.run(AsyncEither(run))
+        Right(10)
         """
         self._run = run
 
     def __await__(self) -> Generator[Any, None, Either[TypeLeft, TypeRight]]:
-        """Runs the pipeline and resolves to the final Either[TypeLeft, TypeRight]."""
+        """Runs the pipeline and resolves to the final Either[TypeLeft, TypeRight].
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_right(10))
+        Right(10)
+        """
         return self._run().__await__()
 
     @staticmethod
@@ -77,6 +114,12 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Returns
         -------
         async_either: AsyncEither[Any, TypeRight]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_right(10))
+        Right(10)
         """
 
         async def run() -> Either[Any, TypeRight]:
@@ -97,6 +140,12 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Returns
         -------
         async_either: AsyncEither[TypeLeft, Any]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_left("error"))
+        Left(error)
         """
 
         async def run() -> Either[TypeLeft, Any]:
@@ -119,6 +168,14 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Returns
         -------
         async_either: AsyncEither[TypeLeft, TypeRight]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_either(Right(10)))
+        Right(10)
+        >>> asyncio.run(AsyncEither.from_either(Left("error")))
+        Left(error)
         """
 
         async def run() -> Either[TypeLeft, TypeRight]:
@@ -143,6 +200,13 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Returns
         -------
         async_either: AsyncEither[Any, TypeRight]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def fetch_ten() -> int: return 10
+        >>> asyncio.run(AsyncEither.from_coroutine(fetch_ten))
+        Right(10)
         """
 
         async def run() -> Either[Any, TypeRight]:
@@ -167,6 +231,14 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
             Returns a new AsyncEither which resolves to Right with the function result, or the
             original Left untouched without calling `function`, if this AsyncEither resolves to
             Left.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_right(5).map(lambda x: x + 1))
+        Right(6)
+        >>> asyncio.run(AsyncEither.from_left("error").map(lambda x: x + 1))
+        Left(error)
         """
 
         async def run() -> Either[TypeLeft, TypeResult]:
@@ -194,6 +266,14 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
             Returns a new AsyncEither which resolves to Left with the function result, or the
             original Right untouched without calling `function`, if this AsyncEither resolves to
             Right.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_left("error").map_left(str.upper))
+        Left(ERROR)
+        >>> asyncio.run(AsyncEither.from_right(10).map_left(str.upper))
+        Right(10)
         """
 
         async def run() -> Either[TypeResult, TypeRight]:
@@ -232,6 +312,14 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         async_either: AsyncEither[TypeLeft, TypeResult]
             Returns a new AsyncEither with the function result if Right, otherwise the original
             Left untouched without calling `function`.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_right(5).bind(lambda x: AsyncEither.from_right(x + 1)))
+        Right(6)
+        >>> asyncio.run(AsyncEither.from_left("error").bind(lambda x: AsyncEither.from_right(x + 1)))
+        Left(error)
         """
 
         async def run() -> Either[TypeLeft, TypeResult]:
@@ -271,6 +359,14 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         async_either: AsyncEither[TypeResult, TypeRight]
             Returns a new AsyncEither with the function result if Left, otherwise the original
             Right untouched without calling `function`.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_left("error").bind_left(lambda e: AsyncEither.from_right(0)))
+        Right(0)
+        >>> asyncio.run(AsyncEither.from_right(10).bind_left(lambda e: AsyncEither.from_right(0)))
+        Right(10)
         """
 
         async def run() -> Either[TypeResult, TypeRight]:
@@ -303,6 +399,14 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         async_either: AsyncEither[TypeLeft, TypeResult]
             Applies an AsyncEither containing a value of type TypeRight to an AsyncEither
             containing a function.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> val = AsyncEither.from_right(10)
+        >>> func = AsyncEither.from_right(lambda x: x * 2)
+        >>> asyncio.run(val.apply(func))
+        Right(20)
         """
 
         def binder(
@@ -329,6 +433,14 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         async_either: AsyncEither[TypeLeft, TypeResult]
             Applies an AsyncEither containing a function to an AsyncEither of type TypePure
             (value or function).
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func = AsyncEither.from_right(lambda x: x * 2)
+        >>> val = AsyncEither.from_right(10)
+        >>> asyncio.run(func.apply2(val))
+        Right(20)
         """
 
         def binder(
@@ -352,6 +464,14 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Returns
         -------
         async_either: AsyncEither[TypeLeft, TypeResult]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_right(1).and_(AsyncEither.from_right(2)))
+        Right(2)
+        >>> asyncio.run(AsyncEither.from_left("error").and_(AsyncEither.from_right(2)))
+        Left(error)
         """
         return self.bind(lambda _: other)
 
@@ -366,6 +486,14 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Returns
         -------
         async_either: AsyncEither[Any, TypeRight]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_right(1).or_(AsyncEither.from_right(2)))
+        Right(1)
+        >>> asyncio.run(AsyncEither.from_left("error").or_(AsyncEither.from_right(2)))
+        Right(2)
         """
 
         async def run() -> Either[Any, TypeRight]:
@@ -390,6 +518,14 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Returns
         -------
         async_either: AsyncEither[TypeLeft, Tuple[TypeRight, TypePure]]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_right(1).zip(AsyncEither.from_right(2)))
+        Right((1, 2))
+        >>> asyncio.run(AsyncEither.from_left("error").zip(AsyncEither.from_right(2)))
+        Left(error)
         """
 
         async def run() -> Either[TypeLeft, Tuple[TypeRight, TypePure]]:
@@ -412,6 +548,13 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         async_either: AsyncEither[TypeLeft, TypeResult]
             Returns the nested AsyncEither's eventual result, or the original Left without
             awaiting it if this AsyncEither resolves to Left.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> nested = AsyncEither.from_right(AsyncEither.from_right(1))
+        >>> asyncio.run(nested.flatten())
+        Right(1)
         """
 
         async def run() -> Either[TypeLeft, TypeResult]:
@@ -436,6 +579,13 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Returns
         -------
         async_either: AsyncEither[TypeLeft, TypeRight]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_right(10).inspect(lambda x: print(f"Value: {x}")))
+        Value: 10
+        Right(10)
         """
 
         async def run() -> Either[TypeLeft, TypeRight]:
@@ -460,6 +610,13 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Returns
         -------
         async_either: AsyncEither[TypeLeft, TypeRight]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_left("error").inspect_left(lambda e: print(f"Left: {e}")))
+        Left: error
+        Left(error)
         """
 
         async def run() -> Either[TypeLeft, TypeRight]:
@@ -475,9 +632,21 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         return AsyncEither(run)
 
     def __str__(self) -> str:
-        """Returns the string representation of the AsyncEither."""
+        """Returns the string representation of the AsyncEither.
+
+        Examples
+        --------
+        >>> str(AsyncEither.from_right(10))  # doctest: +ELLIPSIS
+        'AsyncEither(<function...>)'
+        """
         return f"AsyncEither({self._run})"
 
     def __repr__(self) -> str:
-        """Returns the string representation of the AsyncEither (same as __str__)."""
+        """Returns the string representation of the AsyncEither (same as __str__).
+
+        Examples
+        --------
+        >>> repr(AsyncEither.from_right(10))  # doctest: +ELLIPSIS
+        'AsyncEither(<function...>)'
+        """
         return str(self)

@@ -1,3 +1,73 @@
+"""
+# Try Monad
+
+The Try Monad is a container used to represent computations that either succeed with a value or
+fail by raising an exception. It encapsulates the outcome of code that might raise, allowing for a
+functional approach to exception handling by chaining operations without wrapping every step in
+its own `try`/`except` block. Unlike `Result`, whose `Ok`/`Err` values are constructed explicitly
+by the caller, `Try`'s `map`/`bind` automatically catch any `Exception` raised by the function they
+are given and turn it into a `Failure`.
+
+* Scala: [Try](https://www.scala-lang.org/api/current/scala/util/Try.html)
+
+This implementation is heavily inspired by Scala's `Try` type.
+
+The `Try` type is a sum type that can be either `Success` or `Failure`.
+In this implementation, it is represented as a Union type in Python.
+
+```python
+Try = Success[TypeSource] | Failure
+```
+
+## Practical Examples and Benefits:
+
+The Try Monad is particularly useful in scenarios where a chain of operations might each raise an
+exception (e.g. parsing a string, calling out to a library that isn't exception-free, or performing
+several arithmetic operations that could divide by zero), and you want the first exception to short
+-circuit the rest of the chain without a `try`/`except` around each step.
+
+### Benefits:
+1. Declarative Code: `map`/`bind` chain operations together while automatically catching any
+   exception the passed function raises, rather than requiring a `try`/`except` per step.
+2. Error Propagation: If any step in a chain of operations produces a `Failure`, the subsequent
+   operations are skipped automatically, and the final result stays a `Failure`.
+3. Type Safety: It forces the developer to acknowledge the possibility of failure explicitly in the
+   return type, rather than having exceptions propagate implicitly and invisibly through the call
+   stack.
+
+#### Example: Parsing and transforming a value that might raise.
+
+```python
+# Without Try (Imperative)
+try:
+    parsed = int(raw_value)
+    doubled = parsed * 2
+    print(doubled)
+except ValueError as e:
+    print(f"Error: {e}")
+
+# With Try (Functional)
+(safe(lambda: int(raw_value))
+    .map(lambda parsed: parsed * 2)
+    .match(lambda e: print(f"Error: {e}"), print))
+```
+
+Structural pattern matching provides a clean, declarative way to handle the contents of a `Try`
+monad. Because the `Success` and `Failure` classes are designed to be compatible with Python's
+`match` statement, you can easily branch your logic based on whether the computation succeeded or
+raised, without manually checking `is_success()`/`is_failure()`.
+
+```python
+match try_value:
+    case Success(x):
+        # This block executes if the computation succeeded
+        print(f"Success value: {x}")
+    case Failure(e):
+        # This block executes if the computation raised
+        print(f"Exception encountered: {e}")
+```
+"""
+
 from __future__ import annotations
 
 from typing import Any, Callable, Generic, Tuple, TypeAlias, TypeVar, cast, overload
@@ -12,13 +82,11 @@ TypePure = TypeVar("TypePure")
 
 
 class Success(Generic[TypeSource]):
-    """Try monad interface
+    """The Success variant of the Try Monad.
 
-    Subclasses of try monad should handle exceptions by returning either the success monad or the failure monad.
-
-    Try implementations:
-    * Success: represents the correct way which contains the success result
-    * Failure: represents the failure way which contains the actual exception
+    Represents a computation that completed without raising. It wraps a value of type
+    `TypeSource` and provides a functional interface for chaining operations, catching any
+    exception the chained function raises and turning it into a `Failure`.
     """
 
     __slots__ = ("_success_value",)
@@ -31,11 +99,17 @@ class Success(Generic[TypeSource]):
         ----------
         value: TypeSource
             Value to be stored in the Success Monad.
+
+        Examples
+        --------
+        >>> success = Success(42)
+        >>> print(success)
+        Success(42)
         """
         self._success_value = value
 
     def map(self, function: Callable[[TypeSource], TypeResult]) -> Try[TypeResult]:
-        """Calls function to the Success value if not an Failure, otherwise leaving the Failure value untouched.
+        """Calls function to the a wrapped Success value if not an Failure, otherwise leaving the Failure value untouched.
         The map function will execute the function by checking for any exception.
 
         Parameters
@@ -47,6 +121,16 @@ class Success(Generic[TypeSource]):
         -------
         try: Try[TypeResult]
             Returns an Success with the function result or otherwise Failure.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(5)
+        >>> val.map(lambda x: x + 1)
+        Success(6)
+        >>> def risky(x: int) -> int:
+        ...     raise ValueError("boom")
+        >>> val.map(risky)
+        Failure(boom)
         """
         try:
             return Success(function(self._success_value))
@@ -68,6 +152,12 @@ class Success(Generic[TypeSource]):
         -------
         result: Try[TypeSource]
             Returns an Failure with the function result or otherwise Success.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(5)
+        >>> val.map_failure(lambda e: ValueError("wrapped"))
+        Success(5)
         """
         return self
 
@@ -86,6 +176,16 @@ class Success(Generic[TypeSource]):
         -------
         result: Try[TypeResult]
             Returns a Try Monad from the function result if Success, otherwise an Failure.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(5)
+        >>> def get_next(x: int) -> Try[int]:
+        ...     return Success(x + 1) if x < 10 else Failure(ValueError("too big"))
+        >>> val.bind(get_next)
+        Success(6)
+        >>> Success(10).bind(get_next)
+        Failure(too big)
         """
         try:
             return function(self._success_value)
@@ -107,6 +207,12 @@ class Success(Generic[TypeSource]):
         -------
         result: Try[TypeResult]
             Returns a Try Monad from the function result if Failure, otherwise an Success.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(5)
+        >>> val.bind_failure(lambda e: Success(0))
+        Success(5)
         """
         return self
 
@@ -122,6 +228,13 @@ class Success(Generic[TypeSource]):
         -------
         result: Try[TypeResult]
             Returns a Try Monad from the applied function if Success, otherwise an Failure.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(10)
+        >>> func: Try[Callable[[int], int]] = Success(lambda x: x * 2)
+        >>> val.apply(func)
+        Success(20)
         """
 
         def binder(
@@ -148,6 +261,13 @@ class Success(Generic[TypeSource]):
         -------
         try: Try[TypeResult]:
             Returns a Try Monad from the applied function if Success, otherwise an Failure.
+
+        Examples
+        --------
+        >>> func: Try[Callable[[int], int]] = Success(lambda x: x * 2)
+        >>> val: Try[int] = Success(10)
+        >>> func.apply2(val)
+        Success(20)
         """
 
         def binder(
@@ -170,6 +290,12 @@ class Success(Generic[TypeSource]):
         -------
         result: bool
             Returns the predicate result.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(10)
+        >>> val.is_success_and(lambda x: x > 5)
+        True
         """
         return function(self._success_value)
 
@@ -185,6 +311,12 @@ class Success(Generic[TypeSource]):
         -------
         result: bool
             Returns False.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(10)
+        >>> val.is_failure_and(lambda e: True)
+        False
         """
         return False
 
@@ -204,6 +336,12 @@ class Success(Generic[TypeSource]):
         -------
         result: TypeResult
             Returns the function result.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(10)
+        >>> val.map_or(0, lambda x: x * 2)
+        20
         """
         return function(self._success_value)
 
@@ -219,6 +357,13 @@ class Success(Generic[TypeSource]):
         -------
         result: Try[TypeResult]
             Returns `other`.
+
+        Examples
+        --------
+        >>> val1: Try[int] = Success(1)
+        >>> val2: Try[int] = Success(2)
+        >>> val1.and_(val2)
+        Success(2)
         """
         return other
 
@@ -234,6 +379,13 @@ class Success(Generic[TypeSource]):
         -------
         result: Try[TypeSource]
             Returns this Success.
+
+        Examples
+        --------
+        >>> val1: Try[int] = Success(1)
+        >>> val2: Try[int] = Success(2)
+        >>> val1.or_(val2)
+        Success(1)
         """
         return self
 
@@ -249,6 +401,13 @@ class Success(Generic[TypeSource]):
         -------
         result: Try[Tuple[TypeSource, TypePure]]
             Returns Success of a tuple of both values, or Failure.
+
+        Examples
+        --------
+        >>> val1: Try[int] = Success(1)
+        >>> val2: Try[int] = Success(2)
+        >>> val1.zip(val2)
+        Success((1, 2))
         """
         return other.map(lambda o: (self._success_value, o))
 
@@ -265,6 +424,12 @@ class Success(Generic[TypeSource]):
         -------
         result: Try[TypeResult]
             Returns the nested Try Monad.
+
+        Examples
+        --------
+        >>> val: Try[Try[int]] = Success(Success(1))
+        >>> val.flatten()
+        Success(1)
         """
         return cast(Try[Any], self._success_value)
 
@@ -275,6 +440,12 @@ class Success(Generic[TypeSource]):
         -------
         result: TypeRight
             Returns the Success value or raises the Failure Exception.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(1)
+        >>> val.unwrap()
+        1
         """
         return self._success_value
 
@@ -290,6 +461,12 @@ class Success(Generic[TypeSource]):
         -------
         result: TypeOk
             Returns the Ok value or a default value.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(1)
+        >>> val.unwrap_or(0)
+        1
         """
         return self._success_value
 
@@ -307,6 +484,12 @@ class Success(Generic[TypeSource]):
         -------
         result: TypeRight
             Returns the Success value or value from the function call.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(1)
+        >>> val.unwrap_or_else(lambda e: 0)
+        1
         """
         return self._success_value
 
@@ -322,6 +505,12 @@ class Success(Generic[TypeSource]):
         -------
         result: Exception
             Returns the Err value or a default value.
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(1)
+        >>> val.unwrap_failure_or(ValueError("default"))
+        ValueError('default')
         """
         return default_value
 
@@ -336,6 +525,13 @@ class Success(Generic[TypeSource]):
         Returns
         -------
         try: Try[TypeSource]
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(42)
+        >>> val.inspect(lambda x: print(f"Value is: {x}"))
+        Value is: 42
+        Success(42)
         """
         function(self._success_value)
         return self
@@ -351,6 +547,12 @@ class Success(Generic[TypeSource]):
         Returns
         -------
         try: Try[TypeSource]
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(42)
+        >>> val.inspect_failure(lambda e: print(f"Exception: {e}"))
+        Success(42)
         """
         return self
 
@@ -367,6 +569,12 @@ class Success(Generic[TypeSource]):
             Callback function for either monads of type Failure
         success_function: Callable[[TypeSource], TypeResult]
             Callback function for either monads of type Success
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(10)
+        >>> val.match(lambda e: "Error", lambda x: f"Success: {x}")
+        'Success: 10'
         """
         return success_function(self._success_value)
 
@@ -377,6 +585,12 @@ class Success(Generic[TypeSource]):
         -------
         either: Either[Exception, TypeSource]
             Returns the Try Monad as Either Monad
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(10)
+        >>> val.to_either()
+        Right(10)
         """
         return Right(self._success_value)
 
@@ -387,6 +601,12 @@ class Success(Generic[TypeSource]):
         -------
         either: Either[Exception, TypeSource]
             Returns the Try Monad as Either Monad
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(10)
+        >>> val.to_result()
+        Ok(10)
         """
         return Ok(self._success_value)
 
@@ -397,6 +617,12 @@ class Success(Generic[TypeSource]):
         -------
         result: bool
             True: if try monad is of type success, False: if try monad is of type failure
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(5)
+        >>> val.is_success()
+        True
         """
         return True
 
@@ -407,15 +633,35 @@ class Success(Generic[TypeSource]):
         -------
         result: bool
             True: if try monad is of type failure, False: if try monad is of type success
+
+        Examples
+        --------
+        >>> val: Try[int] = Success(5)
+        >>> val.is_failure()
+        False
         """
         return False
 
     def __str__(self) -> str:
-        """Returns the string representation of the Success Monad."""
+        """Returns the string representation of the Success Monad.
+
+        Examples
+        --------
+        >>> str(Success(42))
+        'Success(42)'
+        """
         return f"Success({self._success_value})"
 
     def __eq__(self, other: object) -> bool:
-        """Returns True if `other` is a Success wrapping a value of the same type and string representation."""
+        """Returns True if `other` is a Success wrapping a value of the same type and string representation.
+
+        Examples
+        --------
+        >>> Success(1) == Success(1)
+        True
+        >>> Success(1) == Success(2)
+        False
+        """
         if isinstance(other, Success):
             other_success = cast(Success[Any], other)
             return str(self) == str(other_success) and type(
@@ -424,11 +670,24 @@ class Success(Generic[TypeSource]):
         return False
 
     def __repr__(self) -> str:
-        """Returns the string representation of the Success Monad (same as __str__)."""
+        """Returns the string representation of the Success Monad (same as __str__).
+
+        Examples
+        --------
+        >>> repr(Success(10))
+        'Success(10)'
+        """
         return str(self)
 
 
 class Failure:
+    """The Failure variant of the Try Monad.
+
+    Represents a computation that raised an exception. It wraps the raised `Exception` and, like
+    `Success`, provides a functional interface for chaining operations, though `map`/`bind` on a
+    `Failure` are no-ops since there is no success value to transform.
+    """
+
     __slots__ = ("_failure_value",)
     __match_args__ = ("_failure_value",)
 
@@ -439,6 +698,12 @@ class Failure:
         ----------
         value: Exception
             Exception to be stored in the Failure Monad. Must be an instance of Exception.
+
+        Examples
+        --------
+        >>> failure = Failure(ValueError("boom"))
+        >>> print(failure)
+        Failure(boom)
         """
         assert isinstance(value, Exception), "Failure value must be of type Exception"
         self._failure_value = value
@@ -455,6 +720,12 @@ class Failure:
         -------
         result: Try[TypeResult]
             Returns this Failure unchanged.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.map(lambda x: x + 1)
+        Failure(boom)
         """
         return self
 
@@ -470,6 +741,12 @@ class Failure:
         -------
         result: Try[Any]
             Returns a Failure with the function result, or a Failure of the raised exception.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.map_failure(lambda e: TypeError(f"wrapped: {e}"))
+        Failure(wrapped: boom)
         """
         try:
             return Failure(function(self._failure_value))
@@ -488,6 +765,12 @@ class Failure:
         -------
         result: Try[TypeResult]
             Returns this Failure unchanged.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.bind(lambda x: Success(x + 1))
+        Failure(boom)
         """
         return self
 
@@ -505,6 +788,12 @@ class Failure:
         -------
         result: Try[TypeSource]
             Returns the Try Monad from the function result, or a Failure if it raised an exception.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.bind_failure(lambda e: Success(0))
+        Success(0)
         """
         try:
             return function(self._failure_value)
@@ -523,6 +812,13 @@ class Failure:
         -------
         result: Try[TypeResult]
             Returns this Failure unchanged.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> func: Try[Callable[[int], int]] = Success(lambda x: x * 2)
+        >>> val.apply(func)
+        Failure(boom)
         """
         return self
 
@@ -538,6 +834,13 @@ class Failure:
         -------
         result: Try[Any]
             Returns this Failure unchanged.
+
+        Examples
+        --------
+        >>> val: Try[Callable[[int], int]] = Failure(ValueError("boom"))
+        >>> other: Try[int] = Success(5)
+        >>> val.apply2(other)
+        Failure(boom)
         """
         return self
 
@@ -553,6 +856,12 @@ class Failure:
         -------
         result: bool
             Returns False.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.is_success_and(lambda x: x > 5)
+        False
         """
         return False
 
@@ -568,6 +877,12 @@ class Failure:
         -------
         result: bool
             Returns the predicate result.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.is_failure_and(lambda e: isinstance(e, ValueError))
+        True
         """
         return function(self._failure_value)
 
@@ -587,6 +902,12 @@ class Failure:
         -------
         result: TypeResult
             Returns the default value.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.map_or("Fallback", lambda x: x)
+        'Fallback'
         """
         return default_value
 
@@ -602,6 +923,13 @@ class Failure:
         -------
         result: Try[Any]
             Returns this Failure.
+
+        Examples
+        --------
+        >>> val1: Try[int] = Failure(ValueError("boom"))
+        >>> val2: Try[int] = Success(2)
+        >>> val1.and_(val2)
+        Failure(boom)
         """
         return self
 
@@ -617,6 +945,13 @@ class Failure:
         -------
         result: Try[TypeSource]
             Returns `other`.
+
+        Examples
+        --------
+        >>> val1: Try[int] = Failure(ValueError("boom"))
+        >>> val2: Try[int] = Success(2)
+        >>> val1.or_(val2)
+        Success(2)
         """
         return other
 
@@ -632,6 +967,13 @@ class Failure:
         -------
         result: Try[Any]
             Returns this Failure.
+
+        Examples
+        --------
+        >>> val1: Try[int] = Failure(ValueError("boom"))
+        >>> val2: Try[int] = Success(2)
+        >>> val1.zip(val2)
+        Failure(boom)
         """
         return self
 
@@ -642,6 +984,12 @@ class Failure:
         -------
         result: Try[Any]
             Returns this Failure.
+
+        Examples
+        --------
+        >>> val: Try[Try[int]] = Failure(ValueError("boom"))
+        >>> val.flatten()
+        Failure(boom)
         """
         return self
 
@@ -652,6 +1000,14 @@ class Failure:
         -------
         result: Any
             Never returns, always raises the stored Exception.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.unwrap()
+        Traceback (most recent call last):
+            ...
+        ValueError: boom
         """
         raise self._failure_value
 
@@ -667,6 +1023,12 @@ class Failure:
         -------
         result: TypeSource
             Returns the default value.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.unwrap_or(0)
+        0
         """
         return default_value
 
@@ -684,6 +1046,12 @@ class Failure:
         -------
         result: TypeSource
             Returns the result of the function call.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.unwrap_or_else(lambda e: 0)
+        0
         """
         return failure_function(self._failure_value)
 
@@ -699,6 +1067,12 @@ class Failure:
         -------
         result: Exception
             Returns the Failure value.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.unwrap_failure_or(TypeError("default"))
+        ValueError('boom')
         """
         return self._failure_value
 
@@ -714,6 +1088,12 @@ class Failure:
         -------
         result: Try[Any]
             Returns this Failure unchanged.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.inspect(lambda x: print(f"Value: {x}"))
+        Failure(boom)
         """
         return self
 
@@ -729,6 +1109,13 @@ class Failure:
         -------
         result: Try[Any]
             Returns this Failure unchanged.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.inspect_failure(lambda e: print(f"Exception: {e}"))
+        Exception: boom
+        Failure(boom)
         """
         function(self._failure_value)
         return self
@@ -751,6 +1138,12 @@ class Failure:
         -------
         result: TypeResult
             Returns the result of calling failure_function with the Failure value.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.match(lambda e: f"Error: {e}", lambda x: "Success")
+        'Error: boom'
         """
         return failure_function(self._failure_value)
 
@@ -761,6 +1154,12 @@ class Failure:
         -------
         either: Either[Exception, Any]
             Returns the Try Monad as a Left Either Monad.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.to_either()
+        Left(boom)
         """
         return Left(self._failure_value)
 
@@ -771,6 +1170,12 @@ class Failure:
         -------
         result: Result[Any, Exception]
             Returns the Try Monad as an Err Result Monad.
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.to_result()
+        Err(boom)
         """
         return Err(self._failure_value)
 
@@ -781,6 +1186,12 @@ class Failure:
         -------
         result: bool
             True: if try monad is of type success, False: if try monad is of type failure
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.is_success()
+        False
         """
         return False
 
@@ -791,15 +1202,35 @@ class Failure:
         -------
         result: bool
             True: if try monad is of type failure, False: if try monad is of type success
+
+        Examples
+        --------
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.is_failure()
+        True
         """
         return True
 
     def __str__(self) -> str:
-        """Returns the string representation of the Failure Monad."""
+        """Returns the string representation of the Failure Monad.
+
+        Examples
+        --------
+        >>> str(Failure(ValueError("boom")))
+        'Failure(boom)'
+        """
         return f"Failure({self._failure_value})"
 
     def __eq__(self, other: object) -> bool:
-        """Returns True if `other` is a Failure wrapping an exception of the same type and string representation."""
+        """Returns True if `other` is a Failure wrapping an exception of the same type and string representation.
+
+        Examples
+        --------
+        >>> Failure(ValueError("boom")) == Failure(ValueError("boom"))
+        True
+        >>> Failure(ValueError("boom")) == Failure(TypeError("boom"))
+        False
+        """
         if isinstance(other, Failure):
             return str(self) == str(other) and type(self._failure_value) is type(
                 other._failure_value
@@ -807,7 +1238,13 @@ class Failure:
         return False
 
     def __repr__(self) -> str:
-        """Returns the string representation of the Failure Monad (same as __str__)."""
+        """Returns the string representation of the Failure Monad (same as __str__).
+
+        Examples
+        --------
+        >>> repr(Failure(ValueError("boom")))
+        'Failure(boom)'
+        """
         return str(self)
 
 
@@ -826,6 +1263,17 @@ def safe(function: Callable[[], TypeResult]) -> Try[TypeResult]:
     -------
     either: Either[Exception, TypeResult]
         Returns an Either Monad which contains either the function result or an Exception with a message added.
+
+    Examples
+    --------
+    >>> def risky_call():
+    ...     raise ValueError("Boom")
+    >>> safe(risky_call)
+    Failure(Boom)
+    >>> def safe_call():
+    ...     return 42
+    >>> safe(safe_call)
+    Success(42)
     """
     try:
         return Success(function())

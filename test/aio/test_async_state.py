@@ -1,6 +1,6 @@
 import unittest
 
-from pymoliath import AsyncState
+from pymoliath.aio import AsyncState
 from pymoliath.state import State
 
 

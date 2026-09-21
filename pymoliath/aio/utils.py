@@ -1,5 +1,3 @@
-"""Internal helpers shared by the Async* monads. Not part of the public API."""
-
 import inspect
 from typing import Awaitable, TypeVar, Union, cast
 

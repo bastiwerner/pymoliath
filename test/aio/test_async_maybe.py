@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, Mock
 
-from pymoliath import AsyncMaybe
+from pymoliath.aio import AsyncMaybe
 from pymoliath.maybe import Just, Nothing
 
 

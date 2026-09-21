@@ -1,3 +1,80 @@
+"""
+# Result Monad
+
+The Result Monad is a container used to represent computations that can result in one of two
+values: a success value or an error value. It encapsulates values that could be `Ok` (the
+successful result) or `Err` (typically representing an error), allowing for a functional approach
+to error handling by chaining operations without constant explicit error checks.
+
+* Rust: [Result](https://doc.rust-lang.org/std/result/)
+* Haskell: [Either](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data-Either.html)
+
+This implementation is heavily inspired by the Rust `Result` type - see `pymoliath.either` for the
+sibling implementation using Haskell's `Left`/`Right` naming.
+
+The `Result` type is a sum type that can be either `Ok` or `Err`.
+In this implementation, it is represented as a Union type in Python.
+
+```python
+Result = Ok[TypeOk] | Err[TypeErr]
+```
+
+## Practical Examples and Benefits:
+
+The Result Monad is particularly useful in scenarios where a function might fail and return an
+error (e.g., looking up a key in a dictionary that doesn't exist, fetching a record from a database
+that has been deleted, or parsing a string that doesn't match a specific format).
+
+### Benefits:
+1. Declarative Code: It allows you to chain operations together (using `map` and `bind`) without
+   checking `if error` at every single step.
+2. Error Propagation: If any step in a chain of operations returns `Err`, the subsequent operations
+   are skipped automatically, and the final result will be `Err`.
+3. Type Safety: It forces the developer to acknowledge the possibility of failure explicitly,
+   making the code more robust against unhandled exceptions and making the flow of data more
+   transparent.
+
+#### Example: Fetching a user's profile and then their specific permission.
+
+This approach turns "nested if"/try-except logic into a linear pipeline of transformations.
+
+```python
+# Without Result (Imperative)
+try:
+    user = get_user(user_id)
+    profile = get_profile(user)
+    permission = get_permission(profile)
+    print(permission)
+except UserNotFoundError:
+    print("User not found")
+except ProfileNotFoundError:
+    print("Profile not found")
+except PermissionDeniedError:
+    print("Access denied")
+
+# With Result (Functional)
+(get_user(user_id)
+    .map(get_profile)
+    .map(get_permission)
+    .unwrap_or_else(lambda error: f"Error: {error}"))
+```
+
+Structural pattern matching provides a clean, declarative way to handle the contents of a `Result`
+monad. Because the `Ok` and `Err` classes are designed to be compatible with Python's `match`
+statement, you can easily branch your logic based on whether the operation succeeded or failed
+without manually checking `is_ok()`/`is_err()`.
+
+```python
+match result_value:
+    case Ok(x):
+        # This block executes if the operation was successful
+        print(f"Success value: {x}")
+    case Err(y):
+        # This block executes if the operation failed
+        print(f"Error encountered: {y}")
+```
+"""
+
 from __future__ import annotations
 
 from typing import (
@@ -26,7 +103,11 @@ TypeErr = TypeVar("TypeErr")
 
 
 class Ok(Generic[TypeOk]):
-    """Result is a Monad that represents either success (Ok) or failure (Err)."""
+    """The Ok variant of the Result Monad.
+
+    Result is a Monad that represents either success (Ok) or failure (Err). `Ok` represents the
+    successful path of the computation and wraps the resulting value.
+    """
 
     __slots__ = ("_ok_value",)
     __match_args__ = ("_ok_value",)
@@ -38,6 +119,12 @@ class Ok(Generic[TypeOk]):
         ----------
         value: TypeOk
             Value to be stored in the Ok Monad.
+
+        Examples
+        --------
+        >>> ok = Ok(42)
+        >>> print(ok)
+        Ok(42)
         """
         self._ok_value = value
 
@@ -54,6 +141,15 @@ class Ok(Generic[TypeOk]):
         -------
         result: Result[TypeReturn, TypeErr]:
             Returns an Ok with the function result or otherwise Err.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(5)
+        >>> val.map(lambda x: x + 1)
+        Ok(6)
+        >>> names: Result[str, str] = Ok("alice")
+        >>> names.map(str.upper)
+        Ok(ALICE)
         """
         return Ok(function(self._ok_value))
 
@@ -72,6 +168,12 @@ class Ok(Generic[TypeOk]):
         -------
         result: Result[TypeOk, TypeReturn]
             Returns an Err with the function result or otherwise Ok.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(5)
+        >>> val.map_err(lambda e: e.upper())
+        Ok(5)
         """
         return self
 
@@ -90,6 +192,16 @@ class Ok(Generic[TypeOk]):
         -------
         result: Result[TypeReturn, TypeErr]
             Returns a Result Monad from the function result if Ok, otherwise an Err.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(5)
+        >>> def get_next(x: int) -> Result[int, str]:
+        ...     return Ok(x + 1) if x < 10 else Err("too big")
+        >>> val.bind(get_next)
+        Ok(6)
+        >>> Ok(10).bind(get_next)
+        Err(too big)
         """
         return function(self._ok_value)
 
@@ -108,6 +220,12 @@ class Ok(Generic[TypeOk]):
         -------
         result: Result[TypeOk, TypeReturn]
             Returns a Result Monad from the function result if Err, otherwise an Ok.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(5)
+        >>> val.bind_err(lambda e: Ok(0))
+        Ok(5)
         """
         return self
 
@@ -125,6 +243,13 @@ class Ok(Generic[TypeOk]):
         -------
         result: Result[TypeReturn, TypeErr]
             Returns a Result Monad from the applied function if Ok, otherwise an Err.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(10)
+        >>> func: Result[Callable[[int], int], str] = Ok(lambda x: x * 2)
+        >>> val.apply(func)
+        Ok(20)
         """
 
         def binder(
@@ -151,6 +276,13 @@ class Ok(Generic[TypeOk]):
         -------
         result: Result[TypeReturn, TypeErr]
             Returns a Result Monad from the applied function if Ok, otherwise an Err.
+
+        Examples
+        --------
+        >>> func: Result[Callable[[int], int], str] = Ok(lambda y: 10 + y)
+        >>> val: Result[int, str] = Ok(5)
+        >>> func.apply2(val)
+        Ok(15)
         """
 
         def binder(
@@ -173,6 +305,12 @@ class Ok(Generic[TypeOk]):
         -------
         result: bool
             Returns the predicate result.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(10)
+        >>> val.is_ok_and(lambda x: x > 5)
+        True
         """
         return function(self._ok_value)
 
@@ -188,6 +326,12 @@ class Ok(Generic[TypeOk]):
         -------
         result: bool
             Returns False.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(10)
+        >>> val.is_err_and(lambda e: True)
+        False
         """
         return False
 
@@ -207,6 +351,12 @@ class Ok(Generic[TypeOk]):
         -------
         result: TypeReturn
             Returns the function result.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(10)
+        >>> val.map_or(0, lambda x: x * 2)
+        20
         """
         return function(self._ok_value)
 
@@ -222,6 +372,13 @@ class Ok(Generic[TypeOk]):
         -------
         result: Result[TypeReturn, TypeErr]
             Returns `other`.
+
+        Examples
+        --------
+        >>> val1: Result[int, str] = Ok(1)
+        >>> val2: Result[int, str] = Ok(2)
+        >>> val1.and_(val2)
+        Ok(2)
         """
         return other
 
@@ -237,6 +394,13 @@ class Ok(Generic[TypeOk]):
         -------
         result: Result[TypeOk, TypeErr]
             Returns this Ok.
+
+        Examples
+        --------
+        >>> val1: Result[int, str] = Ok(1)
+        >>> val2: Result[int, str] = Ok(2)
+        >>> val1.or_(val2)
+        Ok(1)
         """
         return self
 
@@ -252,6 +416,13 @@ class Ok(Generic[TypeOk]):
         -------
         result: Result[Tuple[TypeOk, TypePure], TypeErr]
             Returns Ok of a tuple of both values, or Err.
+
+        Examples
+        --------
+        >>> val1: Result[int, str] = Ok(1)
+        >>> val2: Result[int, str] = Ok(2)
+        >>> val1.zip(val2)
+        Ok((1, 2))
         """
         return other.map(lambda o: (self._ok_value, o))
 
@@ -268,6 +439,12 @@ class Ok(Generic[TypeOk]):
         -------
         result: Result[TypeReturn, TypeErr]
             Returns the nested Result Monad.
+
+        Examples
+        --------
+        >>> val: Result[Result[int, str], str] = Ok(Ok(1))
+        >>> val.flatten()
+        Ok(1)
         """
         return cast(Result[Any, Any], self._ok_value)
 
@@ -278,6 +455,12 @@ class Ok(Generic[TypeOk]):
         -------
         option: Option[TypeOk]
             Returns Some with the Ok value.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(1)
+        >>> val.ok()
+        Some(1)
         """
         from pymoliath.option import Some
 
@@ -290,6 +473,12 @@ class Ok(Generic[TypeOk]):
         -------
         option: Option[TypeErr]
             Returns Nil, since this Result Monad is Ok.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(1)
+        >>> val.err()
+        Nil()
         """
         from pymoliath.option import Nil
 
@@ -302,6 +491,12 @@ class Ok(Generic[TypeOk]):
         -------
         result: TypeOk
             Returns the Ok value or a default value.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(1)
+        >>> val.unwrap()
+        1
         """
         return self._ok_value
 
@@ -317,6 +512,12 @@ class Ok(Generic[TypeOk]):
         -------
         result: TypeOk
             Returns the Ok value or a default value.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(1)
+        >>> val.unwrap_or(0)
+        1
         """
         return self._ok_value
 
@@ -332,6 +533,12 @@ class Ok(Generic[TypeOk]):
         -------
         result: TypeOk
             Returns the Ok value or a default value.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(1)
+        >>> val.unwrap_or_else(lambda e: 0)
+        1
         """
         return self._ok_value
 
@@ -347,6 +554,12 @@ class Ok(Generic[TypeOk]):
         -------
         result: TypeErr
             Returns the Err value or a default value.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(1)
+        >>> val.unwrap_err_or("default")
+        'default'
         """
         return default_value
 
@@ -361,6 +574,13 @@ class Ok(Generic[TypeOk]):
         Returns
         -------
         result: Result[TypeOk, TypeErr]
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(42)
+        >>> val.inspect(lambda x: print(f"Value is: {x}"))
+        Value is: 42
+        Ok(42)
         """
         function(self._ok_value)
         return self
@@ -376,6 +596,12 @@ class Ok(Generic[TypeOk]):
         Returns
         -------
         result: Result[TypeOk, TypeErr]
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(42)
+        >>> val.inspect_err(lambda e: print(f"Error: {e}"))
+        Ok(42)
         """
         return self
 
@@ -392,6 +618,12 @@ class Ok(Generic[TypeOk]):
             Callback function for either monads of type Err
         ok_function: Callable[[TypeOk], TypeReturn]
             Callback function for either monads of type Ok
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(10)
+        >>> val.match(lambda e: "Error", lambda x: f"Ok: {x}")
+        'Ok: 10'
         """
         return ok_function(self._ok_value)
 
@@ -402,25 +634,51 @@ class Ok(Generic[TypeOk]):
         -------
         result: bool
             True: if Result Monad is Ok, False: if Result Monad is Err.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(5)
+        >>> val.is_ok()
+        True
         """
         return True
 
     def is_err(self) -> bool:
-        """Try monad is Err function
+        """Result monad is Err function
 
         Returns
         -------
         result: bool
             True: if Result Monad is Err, False: if Result Monad is Ok.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Ok(5)
+        >>> val.is_err()
+        False
         """
         return False
 
     def __str__(self) -> str:
-        """Returns the string representation of the Ok Monad."""
+        """Returns the string representation of the Ok Monad.
+
+        Examples
+        --------
+        >>> str(Ok(42))
+        'Ok(42)'
+        """
         return f"Ok({self._ok_value})"
 
     def __eq__(self, other: object) -> bool:
-        """Returns True if `other` is an equal Ok Monad (same wrapped value string and type)."""
+        """Returns True if `other` is an equal Ok Monad (same wrapped value string and type).
+
+        Examples
+        --------
+        >>> Ok(1) == Ok(1)
+        True
+        >>> Ok(1) == Ok(2)
+        False
+        """
         if isinstance(other, Ok):
             other_ok = cast(Ok[Any], other)
             return str(self) == str(other_ok) and type(self._ok_value) is type(
@@ -429,11 +687,23 @@ class Ok(Generic[TypeOk]):
         return False
 
     def __repr__(self) -> str:
-        """Returns the string representation of the Ok Monad (same as __str__)."""
+        """Returns the string representation of the Ok Monad (same as __str__).
+
+        Examples
+        --------
+        >>> repr(Ok(10))
+        'Ok(10)'
+        """
         return str(self)
 
 
 class Err(Generic[TypeErr]):
+    """The Err variant of the Result Monad.
+
+    Result is a Monad that represents either success (Ok) or failure (Err). `Err` represents the
+    failed path of the computation and wraps the error value.
+    """
+
     __slots__ = ("_err_value",)
     __match_args__ = ("_err_value",)
 
@@ -444,6 +714,12 @@ class Err(Generic[TypeErr]):
         ----------
         value: TypeErr
             Value to be stored in the Err Monad.
+
+        Examples
+        --------
+        >>> err = Err("Error Message")
+        >>> print(err)
+        Err(Error Message)
         """
         self._err_value = value
 
@@ -459,6 +735,12 @@ class Err(Generic[TypeErr]):
         -------
         result: Result[TypeReturn, TypeErr]
             Returns this Err.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.map(lambda x: x + 1)
+        Err(Error)
         """
         return self
 
@@ -476,6 +758,12 @@ class Err(Generic[TypeErr]):
         -------
         result: Result[TypeOk, TypeReturn]
             Returns a new Err with the function result.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("error")
+        >>> val.map_err(str.upper)
+        Err(ERROR)
         """
         return Err(function(self._err_value))
 
@@ -493,6 +781,12 @@ class Err(Generic[TypeErr]):
         -------
         result: Result[TypeReturn, TypeErr]
             Returns this Err.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.bind(lambda x: Ok(x + 1))
+        Err(Error)
         """
         return self
 
@@ -510,6 +804,12 @@ class Err(Generic[TypeErr]):
         -------
         result: Result[TypeOk, TypeReturn]
             Returns the Result Monad from the function call.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.bind_err(lambda e: Ok(0))
+        Ok(0)
         """
         return function(self._err_value)
 
@@ -527,6 +827,13 @@ class Err(Generic[TypeErr]):
         -------
         result: Result[TypeReturn, TypeErr]
             Returns this Err.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> func: Result[Callable[[int], int], str] = Ok(lambda x: x * 2)
+        >>> val.apply(func)
+        Err(Error)
         """
         return self
 
@@ -542,6 +849,13 @@ class Err(Generic[TypeErr]):
         -------
         result: Result[TypeReturn, TypeErr]
             Returns this Err.
+
+        Examples
+        --------
+        >>> val: Result[Callable[[int], int], str] = Err("Error")
+        >>> other: Result[int, str] = Ok(5)
+        >>> val.apply2(other)
+        Err(Error)
         """
         return self
 
@@ -557,6 +871,12 @@ class Err(Generic[TypeErr]):
         -------
         result: bool
             Returns False.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.is_ok_and(lambda x: x > 5)
+        False
         """
         return False
 
@@ -572,6 +892,12 @@ class Err(Generic[TypeErr]):
         -------
         result: bool
             Returns the predicate result.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.is_err_and(lambda e: e == "Error")
+        True
         """
         return function(self._err_value)
 
@@ -591,6 +917,12 @@ class Err(Generic[TypeErr]):
         -------
         result: TypeReturn
             Returns the default value.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.map_or("Fallback", lambda x: x)
+        'Fallback'
         """
         return default_value
 
@@ -606,6 +938,13 @@ class Err(Generic[TypeErr]):
         -------
         result: Result[TypeReturn, TypeErr]
             Returns this Err.
+
+        Examples
+        --------
+        >>> val1: Result[int, str] = Err("Error")
+        >>> val2: Result[int, str] = Err("Other Error")
+        >>> val1.and_(val2)
+        Err(Error)
         """
         return self
 
@@ -621,6 +960,13 @@ class Err(Generic[TypeErr]):
         -------
         result: Result[TypeOk, TypeErr]
             Returns `other`.
+
+        Examples
+        --------
+        >>> val1: Result[int, str] = Err("Error")
+        >>> val2: Result[int, str] = Ok(10)
+        >>> val1.or_(val2)
+        Ok(10)
         """
         return other
 
@@ -636,6 +982,13 @@ class Err(Generic[TypeErr]):
         -------
         result: Result[Tuple[TypeOk, TypePure], TypeErr]
             Returns this Err.
+
+        Examples
+        --------
+        >>> val1: Result[int, str] = Err("Error")
+        >>> val2: Result[int, str] = Ok(10)
+        >>> val1.zip(val2)
+        Err(Error)
         """
         return self
 
@@ -646,6 +999,12 @@ class Err(Generic[TypeErr]):
         -------
         result: Result[TypeReturn, TypeErr]
             Returns this Err.
+
+        Examples
+        --------
+        >>> val: Result[Result[int, str], str] = Err("Error")
+        >>> val.flatten()
+        Err(Error)
         """
         return self
 
@@ -656,6 +1015,12 @@ class Err(Generic[TypeErr]):
         -------
         option: Option[TypeOk]
             Returns Nil, since this Result Monad is Err.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.ok()
+        Nil()
         """
         from pymoliath.option import Nil
 
@@ -668,6 +1033,12 @@ class Err(Generic[TypeErr]):
         -------
         option: Option[TypeErr]
             Returns Some with the Err value.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.err()
+        Some(Error)
         """
         from pymoliath.option import Some
 
@@ -680,6 +1051,14 @@ class Err(Generic[TypeErr]):
         -------
         result: Any
             Never returns; always raises an Exception.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.unwrap()
+        Traceback (most recent call last):
+            ...
+        Exception: Error
         """
         raise Exception(self._err_value)
 
@@ -695,6 +1074,12 @@ class Err(Generic[TypeErr]):
         -------
         result: TypeOk
             Returns the default value.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.unwrap_or(10)
+        10
         """
         return default_value
 
@@ -710,6 +1095,12 @@ class Err(Generic[TypeErr]):
         -------
         result: TypeOk
             Returns the result of calling err_function with the Err value.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.unwrap_or_else(lambda e: 0)
+        0
         """
         return err_function(self._err_value)
 
@@ -719,12 +1110,18 @@ class Err(Generic[TypeErr]):
         Parameters
         ----------
         default_value: TypeErr
-            Default value of TypeErr which is ignored since this Result Monad is Err.
+            Default value of type TypeErr which is ignored since this Result Monad is Err.
 
         Returns
         -------
         result: TypeErr
             Returns the Err value.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.unwrap_err_or("default")
+        'Error'
         """
         return self._err_value
 
@@ -739,6 +1136,12 @@ class Err(Generic[TypeErr]):
         Returns
         -------
         result: Result[TypeOk, TypeErr]
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.inspect(lambda x: print(f"Value: {x}"))
+        Err(Error)
         """
         return self
 
@@ -753,6 +1156,13 @@ class Err(Generic[TypeErr]):
         Returns
         -------
         result: Result[TypeOk, TypeErr]
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.inspect_err(lambda e: print(f"Error: {e}"))
+        Error: Error
+        Err(Error)
         """
         function(self._err_value)
         return self
@@ -770,6 +1180,12 @@ class Err(Generic[TypeErr]):
             Callback function for either monads of type Err
         ok_function: Callable[[TypeOk], TypeReturn]
             Callback function for either monads of type Ok
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.match(lambda e: f"Error: {e}", lambda x: "Ok")
+        'Error: Error'
         """
         return err_function(self._err_value)
 
@@ -780,6 +1196,12 @@ class Err(Generic[TypeErr]):
         -------
         result: bool
             True: if Result Monad is Ok, False: if Result Monad is Err.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.is_ok()
+        False
         """
         return False
 
@@ -790,15 +1212,35 @@ class Err(Generic[TypeErr]):
         -------
         result: bool
             True: if Result Monad is Err, False: if Result Monad is Ok.
+
+        Examples
+        --------
+        >>> val: Result[int, str] = Err("Error")
+        >>> val.is_err()
+        True
         """
         return True
 
     def __str__(self) -> str:
-        """Returns the string representation of the Err Monad."""
+        """Returns the string representation of the Err Monad.
+
+        Examples
+        --------
+        >>> str(Err("Error"))
+        'Err(Error)'
+        """
         return f"Err({self._err_value})"
 
     def __eq__(self, other: object) -> bool:
-        """Returns True if `other` is an equal Err Monad (same wrapped exception message and type)."""
+        """Returns True if `other` is an equal Err Monad (same wrapped exception message and type).
+
+        Examples
+        --------
+        >>> Err("Error") == Err("Error")
+        True
+        >>> Err("Error") == Err("Other")
+        False
+        """
         if isinstance(other, Err):
             other_err = cast(Err[Any], other)
             return str(self) == str(other_err) and type(self._err_value) is type(
@@ -807,7 +1249,13 @@ class Err(Generic[TypeErr]):
         return False
 
     def __repr__(self) -> str:
-        """Returns the string representation of the Err Monad (same as __str__)."""
+        """Returns the string representation of the Err Monad (same as __str__).
+
+        Examples
+        --------
+        >>> repr(Err("Error"))
+        'Err(Error)'
+        """
         return str(self)
 
 
@@ -826,6 +1274,17 @@ def result_safe(function: Callable[[], TypeReturn]) -> Result[TypeReturn, Except
     -------
     result: Result[TypeReturn]
         Returns Ok containing the function result or otherwise Err containing the Excpetion.
+
+    Examples
+    --------
+    >>> def risky_call():
+    ...     raise ValueError("Boom")
+    >>> result_safe(risky_call)
+    Err(Boom)
+    >>> def safe_call():
+    ...     return 42
+    >>> result_safe(safe_call)
+    Ok(42)
     """
     try:
         return Ok(function())

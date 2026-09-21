@@ -1,6 +1,6 @@
 import unittest
 
-from pymoliath import AsyncIO
+from pymoliath.aio import AsyncIO
 from pymoliath.io import IO
 
 

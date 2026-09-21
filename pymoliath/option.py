@@ -1,3 +1,66 @@
+"""
+# Option Monad
+
+The Option Monad is a container used to represent computations that may fail or return nothing.
+It encapsulates values that could be `None`, allowing for a functional approach to handling optionality by
+chaining operations without constant explicit null checks.
+
+* Rust: [Option](https://doc.rust-lang.org/std/option/)
+* Haskell: [Data.Maybe](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data-Maybe.html)
+
+This implementation is heavily inspired by the Rust `Option` type and the Haskell `Maybe` monad -
+see `pymoliath.maybe` for the sibling implementation using `Just`/`Nothing` naming.
+
+The `Option` type is a sum type that can be either `Some` or `Nil`.
+In this implementation, it is represented as a Union type in Python.
+
+```python
+Option = Some[TypeSource] | Nil[TypeSource]
+```
+
+## Practical Examples and Benefits:
+
+The Option Monad is particularly useful in scenarios where a function might not return a value (e.g., looking up a key in a dictionary that doesn't exist, fetching a record from a database that has been deleted, or parsing a string that doesn't match a specific format).
+
+### Benefits:
+1. Declarative Code: It allows you to chain operations together (using `map` and `bind`) without checking `if result is None` at every single step.
+2. Error Propagation: If any step in a chain of operations returns `Nil`, the subsequent operations are skipped automatically, and the final result will be `Nil`.
+3. Type Safety: It forces the developer to acknowledge the possibility of "nothingness" explicitly, making the code more robust against `AttributeError: 'NoneType' object has no attribute...`.
+
+#### Example: Fetching a user's profile and then their specific permission.
+
+This approach turns "nested if" logic into a linear pipeline of transformations.
+
+```python
+# Without Option (Imperative)
+user = get_user(user_id)
+if user:
+    profile = get_profile(user)
+    if profile:
+        permission = get_permission(profile)
+        if permission:
+            print(permission)
+
+# With Option (Functional)
+(get_user(user_id)
+    .map(get_profile)
+    .map(get_permission)
+    .unwrap_or("Default Permission"))
+```
+
+Structural pattern matching provides a clean, declarative way to handle the contents of an `Option` monad. Because the `Some` and `Nil` classes are designed to be compatible with Python's `match` statement, you can easily branch your logic based on whether a value exists without manually checking for `None` or using complex `if-is_some()` logic.
+
+```python
+match option_value:
+    case Some(x):
+        # This block executes if the monad contains a value
+        print(f"Some value: {x}")
+    case Nil():
+        # This block executes if the monad is Nil
+        print("No value present")
+```
+"""
+
 from __future__ import annotations
 
 from typing import (
@@ -25,7 +88,10 @@ TypeErr = TypeVar("TypeErr")
 
 
 class Some(Generic[TypeSource]):
-    """Some Option Monad class
+    """The Some variant of the Option Monad.
+
+    Represents a computation that successfully yielded a value. It wraps a value of type
+    `TypeSource` and provides a functional interface for chaining operations.
 
     Parameters
     ----------
@@ -43,6 +109,12 @@ class Some(Generic[TypeSource]):
         ----------
         value: TypeSource
             Value to be stored in the Some Monad.
+
+        Examples
+        --------
+        >>> some = Some(42)
+        >>> print(some._value)
+        42
         """
         self._value = value
 
@@ -60,6 +132,18 @@ class Some(Generic[TypeSource]):
         -------
         option: Option[TypeResult]
             Returns a Option Monad with the function result if Monad is a Some or otherwise a Nothing.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(5)
+        >>> val.map(lambda x: x + 1)
+        Some(6)
+        >>> empty: Option[int] = Nil()
+        >>> empty.map(lambda x: x + 1)
+        Nil()
+        >>> names: Option[str] = Some("alice")
+        >>> names.map(str.upper)
+        Some(ALICE)
         """
         return Some(function(self._value))
 
@@ -77,6 +161,17 @@ class Some(Generic[TypeSource]):
         -------
         option: Option[TypeResult]
             Returns a Option Monad with the function result if the Monad is a Some or otherwise a Nothing
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(5)
+        >>> def get_next(x: int) -> Option[int]:
+        ...     return Some(x + 1) if x < 10 else Nil()
+        >>> val.bind(get_next)
+        Some(6)
+        >>> val_large: Option[int] = Some(10)
+        >>> val_large.bind(get_next)
+        Nil()
         """
         return function(self._value)
 
@@ -95,6 +190,16 @@ class Some(Generic[TypeSource]):
         -------
         option: Option[TypeResult]
             Applies a option monad containing a value of type TypeSource to a option monad containing a function.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(10)
+        >>> func: Option[Callable[[int], int]] = Some(lambda x: x * 2)
+        >>> val.apply(func)
+        Some(20)
+        >>> empty: Option[int] = Nil()
+        >>> val.apply(empty)
+        Nil()
         """
 
         def binder(
@@ -120,6 +225,16 @@ class Some(Generic[TypeSource]):
         -------
         option: Option[TypeResult]
             Applies a option monad containing a function to a option monad of type TypeSource (value or function).
+
+        Examples
+        --------
+        >>> func_monad: Option[Callable[[int], int]] = Some(lambda y: 10 + y)
+        >>> val_monad: Option[int] = Some(5)
+        >>> func_monad.apply2(val_monad)
+        Some(15)
+        >>> empty_val: Option[int] = Nil()
+        >>> func_monad.apply2(empty_val)
+        Nil()
         """
 
         def binder(
@@ -144,6 +259,17 @@ class Some(Generic[TypeSource]):
         -------
         result: Option[TypeSource]
             Returns Some if the Option Monad is of type Some and filter function returns True otherwise Nothing.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(10)
+        >>> val.filter(lambda x: x > 5)
+        Some(10)
+        >>> val.filter(lambda x: x < 5)
+        Nil()
+        >>> empty: Option[int] = Nil()
+        >>> empty.filter(lambda x: x > 5)
+        Nil()
         """
         if filter_function(self._value):
             return self
@@ -161,6 +287,14 @@ class Some(Generic[TypeSource]):
         -------
         result: bool
             Returns the predicate result.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(10)
+        >>> val.is_some_and(lambda x: x > 5)
+        True
+        >>> val.is_some_and(lambda x: x < 5)
+        False
         """
         return function(self._value)
 
@@ -180,6 +314,15 @@ class Some(Generic[TypeSource]):
         -------
         result: TypeResult
             Returns the function result.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(10)
+        >>> val.map_or(0, lambda x: x * 2)
+        20
+        >>> empty: Option[int] = Nil()
+        >>> empty.map_or(0, lambda x: x * 2)
+        0
         """
         return function(self._value)
 
@@ -195,6 +338,16 @@ class Some(Generic[TypeSource]):
         -------
         result: Option[TypeResult]
             Returns `other`.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(1)
+        >>> other: Option[int] = Some(2)
+        >>> val.and_(other)
+        Some(2)
+        >>> empty: Option[int] = Nil()
+        >>> empty.and_(other)
+        Nil()
         """
         return other
 
@@ -210,6 +363,16 @@ class Some(Generic[TypeSource]):
         -------
         result: Option[TypeSource]
             Returns this Some.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(1)
+        >>> other: Option[int] = Some(2)
+        >>> val.or_(other)
+        Some(1)
+        >>> empty: Option[int] = Nil()
+        >>> empty.or_(other)
+        Some(2)
         """
         return self
 
@@ -225,6 +388,16 @@ class Some(Generic[TypeSource]):
         -------
         result: Option[Tuple[TypeSource, TypePure]]
             Returns Some of a tuple of both values, or Nil.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(1)
+        >>> other: Option[int] = Some(2)
+        >>> val.zip(other)
+        Some((1, 2))
+        >>> empty: Option[int] = Nil()
+        >>> val.zip(empty)
+        Nil()
         """
         return other.map(lambda o: (self._value, o))
 
@@ -241,6 +414,15 @@ class Some(Generic[TypeSource]):
         -------
         result: Option[TypeResult]
             Returns the nested Option Monad.
+
+        Examples
+        --------
+        >>> val: Option[Option[int]] = Some(Some(1))
+        >>> val.flatten()
+        Some(1)
+        >>> empty_inner: Option[Option[int]] = Some(Nil())
+        >>> empty_inner.flatten()
+        Nil()
         """
         return cast(Option[Any], self._value)
 
@@ -256,6 +438,12 @@ class Some(Generic[TypeSource]):
         -------
         result: Result[TypeSource, TypeErr]
             Returns Ok with the Some value.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(1)
+        >>> val.ok_or("Error")
+        Ok(1)
         """
         from pymoliath.result import Ok
 
@@ -275,6 +463,12 @@ class Some(Generic[TypeSource]):
         -------
         result: Result[TypeSource, TypeErr]
             Returns Ok with the Some value.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(1)
+        >>> val.ok_or_else(lambda: "Error")
+        Ok(1)
         """
         from pymoliath.result import Ok
 
@@ -287,6 +481,17 @@ class Some(Generic[TypeSource]):
         -------
         value: TypeSource
             Returns the Option value or a default value.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(1)
+        >>> val.unwrap()
+        1
+        >>> empty: Option[int] = Nil()
+        >>> empty.unwrap()
+        Traceback (most recent call last):
+            ...
+        Exception: Unwrap error on Option monad
         """
         return self._value
 
@@ -302,6 +507,15 @@ class Some(Generic[TypeSource]):
         -------
         value: TypeSource
             Returns the Option value or a default value.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(1)
+        >>> val.unwrap_or(0)
+        1
+        >>> empty: Option[int] = Nil()
+        >>> empty.unwrap_or(0)
+        0
         """
         return self._value
 
@@ -317,6 +531,15 @@ class Some(Generic[TypeSource]):
         -------
         value: TypeSource
             Returns the Option value or calls the nothing function.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(1)
+        >>> val.unwrap_or_else(lambda: 0)
+        1
+        >>> empty: Option[int] = Nil()
+        >>> empty.unwrap_or_else(lambda: 0)
+        0
         """
         return self._value
 
@@ -331,6 +554,16 @@ class Some(Generic[TypeSource]):
         Returns
         -------
         option: Option[TypeSource]
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(42)
+        >>> val.inspect(lambda x: print(f"Value is: {x}"))
+        Value is: 42
+        Some(42)
+        >>> empty: Option[int] = Nil()
+        >>> empty.inspect(lambda x: print(f"Value is: {x}"))
+        Nil()
         """
         function(self._value)
         return self
@@ -353,6 +586,15 @@ class Some(Generic[TypeSource]):
         Returns
         -------
         result: TypeSource
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(10)
+        >>> val.match(lambda x: x * 2, lambda: 0)
+        20
+        >>> empty: Option[int] = Nil()
+        >>> empty.match(lambda x: x * 2, lambda: 0)
+        0
         """
         return some_function(self._value)
 
@@ -363,6 +605,12 @@ class Some(Generic[TypeSource]):
         -------
         result: bool
             Returns False.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(5)
+        >>> val.is_nothing()
+        False
         """
         return False
 
@@ -373,6 +621,12 @@ class Some(Generic[TypeSource]):
         -------
         result: bool
             Returns True.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(5)
+        >>> val.is_some()
+        True
         """
         return True
 
@@ -383,6 +637,15 @@ class Some(Generic[TypeSource]):
         -------
         value: TypeSource | None
             Returns the Some value.
+
+        Examples
+        --------
+        >>> val: Option[int] = Some(10)
+        >>> val.to_optional()
+        10
+        >>> empty: Option[int] = Nil()
+        >>> print(empty.to_optional())
+        None
         """
         return self._value
 
@@ -399,28 +662,61 @@ class Some(Generic[TypeSource]):
         -------
         option: Option[TypeSource]
             Returns Some if `value` is not None, otherwise Nil.
+
+        Examples
+        --------
+        >>> Some(5) == Some.from_optional(5)
+        True
+        >>> Nil() == Some.from_optional(None)
+        True
         """
         return from_optional(value)
 
     def __str__(self) -> str:
-        """Returns the string representation of the Some Monad."""
+        """Returns the string representation of the Some Monad.
+
+        Examples
+        --------
+        >>> str(Some(42))
+        'Some(42)'
+        """
         return f"Some({self._value})"
 
     def __eq__(self, __o: object) -> bool:
-        """Returns True if `other` is also a Some Monad with an equal string representation."""
+        """Returns True if `other` is also a Some Monad with an equal string representation.
+
+        Examples
+        --------
+        >>> Some(1) == Some(1)
+        True
+        >>> Some(1) == Some(2)
+        False
+        """
         return isinstance(__o, Some) and str(self) == str(__o)
 
     def __repr__(self) -> str:
-        """Returns the string representation of the Some Monad (same as __str__)."""
+        """Returns the string representation of the Some Monad (same as __str__).
+
+        Examples
+        --------
+        >>> repr(Some(10))
+        'Some(10)'
+        """
         return str(self)
 
 
 class Nil(Generic[TypeSource]):
-    """Nothing Option Monad class
+    """The Nil variant of the Option Monad.
 
-    Generic over TypeSource even though it stores no value: a phantom type
-    parameter (like Rust's Option<T>::None) that lets map/bind/apply/filter/
-    inspect propagate real types instead of collapsing to Any.
+    Nil holds no data and is generic over `TypeSource` even though it does not store any internal
+    value: a phantom type parameter (like Rust's `Option<T>::None`) that lets `map`/`bind`/`apply`/
+    `filter`/`inspect` propagate real types instead of collapsing to `Any`.
+
+    Examples
+    -------
+    >>> empty = Nil()
+    >>> print(type(empty))
+    <class 'pymoliath.option.Nil'>
     """
 
     __slots__ = ()
@@ -428,10 +724,24 @@ class Nil(Generic[TypeSource]):
     _instance: ClassVar[Nil[Any] | None] = None
 
     def __new__(cls) -> Nil[TypeSource]:
-        """Returns the single shared Nil instance, creating it on first call.
+        """
+        Returns the single shared Nil instance, creating it on first call.
 
-        Nil holds no data and is always equal to any other Nil, so every call can safely
-        share one instance instead of allocating a new one.
+        Since `Nil` holds no data and is conceptually equivalent to any other `Nil` of the same
+        type, this implementation uses a singleton pattern to optimize memory and performance by
+        sharing a single instance.
+
+        Returns
+        -------
+        Nil[TypeSource]
+            The singleton instance of the Nil monad.
+
+        Examples
+        -------
+        >>> n1 = Nil()
+        >>> n2 = Nil()
+        >>> n1 is n2
+        True
         """
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -449,6 +759,14 @@ class Nil(Generic[TypeSource]):
         -------
         option: Option[TypeResult]
             Returns Nil, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.map(lambda x: x + 1)
+        Nil()
+        >>> empty.map(str.upper)
+        Nil()
         """
         return Nil()
 
@@ -464,6 +782,14 @@ class Nil(Generic[TypeSource]):
         -------
         option: Option[TypeResult]
             Returns Nil, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> def get_next(x: int) -> Option[int]:
+        ...     return Some(x + 1) if x < 10 else Nil()
+        >>> empty.bind(get_next)
+        Nil()
         """
         return Nil()
 
@@ -481,6 +807,13 @@ class Nil(Generic[TypeSource]):
         -------
         option: Option[TypeResult]
             Returns Nil, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> func: Option[Callable[[int], int]] = Some(lambda x: x * 2)
+        >>> empty.apply(func)
+        Nil()
         """
         return Nil()
 
@@ -496,6 +829,13 @@ class Nil(Generic[TypeSource]):
         -------
         option: Option[Any]
             Returns this Nil, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> val: Option[int] = Some(5)
+        >>> empty.apply2(val)
+        Nil()
         """
         return self
 
@@ -511,6 +851,12 @@ class Nil(Generic[TypeSource]):
         -------
         result: Option[TypeSource]
             Returns this Nil, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.filter(lambda x: x > 5)
+        Nil()
         """
         return self
 
@@ -526,6 +872,12 @@ class Nil(Generic[TypeSource]):
         -------
         result: bool
             Returns False, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.is_some_and(lambda x: x > 5)
+        False
         """
         return False
 
@@ -545,6 +897,12 @@ class Nil(Generic[TypeSource]):
         -------
         result: TypeResult
             Returns `default_value`, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.map_or(0, lambda x: x * 2)
+        0
         """
         return default_value
 
@@ -560,6 +918,13 @@ class Nil(Generic[TypeSource]):
         -------
         result: Option[TypeSource]
             Returns this Nil, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> other: Option[int] = Some(2)
+        >>> empty.and_(other)
+        Nil()
         """
         return self
 
@@ -575,6 +940,13 @@ class Nil(Generic[TypeSource]):
         -------
         result: Option[TypeSource]
             Returns `other`.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> other: Option[int] = Some(2)
+        >>> empty.or_(other)
+        Some(2)
         """
         return other
 
@@ -590,6 +962,13 @@ class Nil(Generic[TypeSource]):
         -------
         result: Option[Any]
             Returns this Nil, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> other: Option[int] = Some(2)
+        >>> empty.zip(other)
+        Nil()
         """
         return self
 
@@ -600,6 +979,12 @@ class Nil(Generic[TypeSource]):
         -------
         result: Option[TypeSource]
             Returns this Nil, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[Option[int]] = Nil()
+        >>> empty.flatten()
+        Nil()
         """
         return self
 
@@ -615,6 +1000,12 @@ class Nil(Generic[TypeSource]):
         -------
         result: Result[TypeSource, TypeErr]
             Returns Err with `err_value`, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.ok_or("Error")
+        Err(Error)
         """
         from pymoliath.result import Err
 
@@ -632,6 +1023,12 @@ class Nil(Generic[TypeSource]):
         -------
         result: Result[TypeSource, TypeErr]
             Returns Err with the result of `err_function`, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.ok_or_else(lambda: "Error")
+        Err(Error)
         """
         from pymoliath.result import Err
 
@@ -644,6 +1041,14 @@ class Nil(Generic[TypeSource]):
         -------
         value: TypeSource
             Never returns; always raises an Exception.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.unwrap()
+        Traceback (most recent call last):
+            ...
+        Exception: Unwrap error on Option monad
         """
         raise Exception("Unwrap error on Option monad")
 
@@ -659,6 +1064,12 @@ class Nil(Generic[TypeSource]):
         -------
         value: TypeSource
             Returns `default_value`, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.unwrap_or(0)
+        0
         """
         return default_value
 
@@ -674,6 +1085,12 @@ class Nil(Generic[TypeSource]):
         -------
         value: TypeSource
             Returns the result of calling `nothing_function`, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.unwrap_or_else(lambda: 0)
+        0
         """
         return nothing_function()
 
@@ -689,6 +1106,12 @@ class Nil(Generic[TypeSource]):
         -------
         option: Option[TypeSource]
             Returns this Nil, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.inspect(lambda x: print(f"Value is: {x}"))
+        Nil()
         """
         return self
 
@@ -711,6 +1134,12 @@ class Nil(Generic[TypeSource]):
         -------
         result: TypeSource
             Returns the result of calling `nothing_function`, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.match(lambda x: x * 2, lambda: 0)
+        0
         """
         return nothing_function()
 
@@ -721,6 +1150,12 @@ class Nil(Generic[TypeSource]):
         -------
         result: bool
             Returns True.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.is_nothing()
+        True
         """
         return True
 
@@ -731,6 +1166,12 @@ class Nil(Generic[TypeSource]):
         -------
         result: bool
             Returns False.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> empty.is_some()
+        False
         """
         return False
 
@@ -741,6 +1182,12 @@ class Nil(Generic[TypeSource]):
         -------
         value: TypeSource | None
             Returns None, since this Option Monad is Nil.
+
+        Examples
+        --------
+        >>> empty: Option[int] = Nil()
+        >>> print(empty.to_optional())
+        None
         """
         return None
 
@@ -757,19 +1204,46 @@ class Nil(Generic[TypeSource]):
         -------
         option: Option[TypeSource]
             Returns Some if `value` is not None, otherwise Nil.
+
+        Examples
+        --------
+        >>> Some(5) == Nil.from_optional(5)
+        True
+        >>> Nil() == Nil.from_optional(None)
+        True
         """
         return from_optional(value)
 
     def __str__(self) -> str:
-        """Returns the string representation of the Nil Monad."""
+        """Returns the string representation of the Nil Monad.
+
+        Examples
+        --------
+        >>> str(Nil())
+        'Nil()'
+        """
         return "Nil()"
 
     def __eq__(self, __o: object) -> bool:
-        """Returns True if `other` is also a Nil Monad."""
+        """Returns True if `other` is also a Nil Monad.
+
+        Examples
+        --------
+        >>> Nil() == Nil()
+        True
+        >>> Nil() == Some(1)
+        False
+        """
         return isinstance(__o, Nil)
 
     def __repr__(self) -> str:
-        """Returns the string representation of the Nil Monad (same as __str__)."""
+        """Returns the string representation of the Nil Monad (same as __str__).
+
+        Examples
+        --------
+        >>> repr(Nil())
+        'Nil()'
+        """
         return str(self)
 
 
@@ -788,6 +1262,13 @@ def from_optional(value: TypeSource | None) -> Option[TypeSource]:
     -------
     option: Option[TypeSource]
         Returns Some containing `value`, or Nil if `value` is None.
+
+    Examples
+    --------
+    >>> from_optional("hello")
+    Some(hello)
+    >>> from_optional(None)
+    Nil()
     """
     if value is None:
         return Nil()
@@ -806,6 +1287,17 @@ def safe(function: Callable[[], TypeResult]) -> Option[TypeResult]:
     -------
     option: Option[TypeResult]
         Returns Some containing the function result, or Nil if an exception was raised.
+
+    Examples
+    --------
+    >>> def risky_call():
+    ...     raise ValueError("Boom")
+    >>> safe(risky_call)
+    Nil()
+    >>> def safe_call():
+    ...     return 42
+    >>> safe(safe_call)
+    Some(42)
     """
     try:
         return Some(function())

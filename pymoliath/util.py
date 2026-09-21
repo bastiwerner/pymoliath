@@ -1,6 +1,18 @@
-from functools import partial
-from functools import reduce
-from typing import Callable, Any, TypeVar, Union
+"""
+# Utilities
+
+Small, dependency-free functional helpers used throughout pymoliath (and useful on their own):
+function composition (`compose`, `pipe`), auto-currying (`curry`), and the classic combinators
+`identity`, `const`, and `flip` from Haskell's `Prelude`.
+
+```python
+pipe(str.strip, str.upper)(" hello ")  # "HELLO"
+curry(lambda x, y: x + y)(1)(2)  # 3
+```
+"""
+
+from functools import partial, reduce
+from typing import Any, Callable, TypeVar, Union
 
 TypeSource = TypeVar("TypeSource")
 TypeResult = TypeVar("TypeResult")

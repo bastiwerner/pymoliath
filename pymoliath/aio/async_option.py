@@ -1,6 +1,30 @@
 """
-.. include:: ../docs/option/README.md
-   :start-after: ## AsyncOption
+# AsyncOption
+
+`AsyncOption` is the directly-awaitable counterpart of `pymoliath.option.Option` - see
+`pymoliath.aio` for the general design shared by all `Async*` monads.
+
+```python
+import asyncio
+
+asyncio.run(AsyncOption.from_value(10).map(lambda x: x + 1))  # Some(11)
+asyncio.run(AsyncOption.from_option(Nil()).map(lambda x: x + 1))  # Nil(), map is never called
+
+
+async def fetch(x: int) -> int: ...
+
+
+asyncio.run(AsyncOption.from_value(10).map(fetch))  # async callback, auto-detected
+asyncio.run(AsyncOption.from_value(10).bind(lambda x: AsyncOption.from_value(x + 1)))  # Some(11)
+asyncio.run(AsyncOption.from_value(10).filter(lambda x: x > 5))  # Some(10)
+
+
+async def fetch_ten() -> int:
+    return 10
+
+
+asyncio.run(AsyncOption.from_coroutine(fetch_ten))  # Some(10)
+```
 """
 
 from __future__ import annotations
@@ -49,11 +73,25 @@ class AsyncOption(Generic[TypeSource]):
             To stay re-awaitable, `run` must produce a *new* awaitable every call rather than
             handing back an already-created (and possibly already-consumed) coroutine object -
             the same caveat Sequence's docstring makes about raw generators/iterators.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def run(): return Some(10)
+        >>> asyncio.run(AsyncOption(run))
+        Some(10)
         """
         self._run = run
 
     def __await__(self) -> Generator[Any, None, Option[TypeSource]]:
-        """Runs the pipeline and resolves to the final Option[TypeSource]."""
+        """Runs the pipeline and resolves to the final Option[TypeSource].
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_value(10))
+        Some(10)
+        """
         return self._run().__await__()
 
     @staticmethod
@@ -68,6 +106,12 @@ class AsyncOption(Generic[TypeSource]):
         Returns
         -------
         async_option: AsyncOption[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_value(10))
+        Some(10)
         """
 
         async def run() -> Option[TypeSource]:
@@ -88,6 +132,14 @@ class AsyncOption(Generic[TypeSource]):
         Returns
         -------
         async_option: AsyncOption[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_option(Some(10)))
+        Some(10)
+        >>> asyncio.run(AsyncOption.from_option(Nil()))
+        Nil()
         """
 
         async def run() -> Option[TypeSource]:
@@ -112,6 +164,13 @@ class AsyncOption(Generic[TypeSource]):
         Returns
         -------
         async_option: AsyncOption[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def fetch_ten() -> int: return 10
+        >>> asyncio.run(AsyncOption.from_coroutine(fetch_ten))
+        Some(10)
         """
 
         async def run() -> Option[TypeSource]:
@@ -135,6 +194,14 @@ class AsyncOption(Generic[TypeSource]):
         async_option: AsyncOption[TypeResult]
             Returns a new AsyncOption which resolves to Some with the function result, or Nil
             without calling `function`, if this AsyncOption resolves to Nil.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_value(5).map(lambda x: x + 1))
+        Some(6)
+        >>> asyncio.run(AsyncOption.from_option(Nil()).map(lambda x: x + 1))
+        Nil()
         """
 
         async def run() -> Option[TypeResult]:
@@ -171,6 +238,14 @@ class AsyncOption(Generic[TypeSource]):
         async_option: AsyncOption[TypeResult]
             Returns a new AsyncOption with the function result if Some, otherwise Nil without
             calling `function`.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_value(5).bind(lambda x: AsyncOption.from_value(x + 1)))
+        Some(6)
+        >>> asyncio.run(AsyncOption.from_option(Nil()).bind(lambda x: AsyncOption.from_value(x + 1)))
+        Nil()
         """
 
         async def run() -> Option[TypeResult]:
@@ -201,6 +276,14 @@ class AsyncOption(Generic[TypeSource]):
         async_option: AsyncOption[TypeResult]
             Applies an AsyncOption containing a value of type TypeSource to an AsyncOption containing
             a function.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> val = AsyncOption.from_value(10)
+        >>> func = AsyncOption.from_value(lambda x: x * 2)
+        >>> asyncio.run(val.apply(func))
+        Some(20)
         """
 
         def binder(
@@ -227,6 +310,14 @@ class AsyncOption(Generic[TypeSource]):
         async_option: AsyncOption[TypeResult]
             Applies an AsyncOption containing a function to an AsyncOption of type TypePure (value or
             function).
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func = AsyncOption.from_value(lambda x: x * 2)
+        >>> val = AsyncOption.from_value(10)
+        >>> asyncio.run(func.apply2(val))
+        Some(20)
         """
 
         def binder(
@@ -252,6 +343,14 @@ class AsyncOption(Generic[TypeSource]):
         async_option: AsyncOption[TypeSource]
             Returns an AsyncOption resolving to Some if this AsyncOption resolves to Some and
             `filter_function` returns True, otherwise Nil.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_value(10).filter(lambda x: x > 5))
+        Some(10)
+        >>> asyncio.run(AsyncOption.from_value(10).filter(lambda x: x < 5))
+        Nil()
         """
 
         async def run() -> Option[TypeSource]:
@@ -276,6 +375,14 @@ class AsyncOption(Generic[TypeSource]):
         Returns
         -------
         async_option: AsyncOption[TypeResult]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_value(1).and_(AsyncOption.from_value(2)))
+        Some(2)
+        >>> asyncio.run(AsyncOption.from_option(Nil()).and_(AsyncOption.from_value(2)))
+        Nil()
         """
         return self.bind(lambda _: other)
 
@@ -290,6 +397,14 @@ class AsyncOption(Generic[TypeSource]):
         Returns
         -------
         async_option: AsyncOption[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_value(1).or_(AsyncOption.from_value(2)))
+        Some(1)
+        >>> asyncio.run(AsyncOption.from_option(Nil()).or_(AsyncOption.from_value(2)))
+        Some(2)
         """
 
         async def run() -> Option[TypeSource]:
@@ -314,6 +429,14 @@ class AsyncOption(Generic[TypeSource]):
         Returns
         -------
         async_option: AsyncOption[Tuple[TypeSource, TypePure]]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_value(1).zip(AsyncOption.from_value(2)))
+        Some((1, 2))
+        >>> asyncio.run(AsyncOption.from_option(Nil()).zip(AsyncOption.from_value(2)))
+        Nil()
         """
 
         async def run() -> Option[Tuple[TypeSource, TypePure]]:
@@ -334,6 +457,13 @@ class AsyncOption(Generic[TypeSource]):
         async_option: AsyncOption[TypeResult]
             Returns the nested AsyncOption's eventual result, or Nil without awaiting it if this
             AsyncOption resolves to Nil.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> nested = AsyncOption.from_value(AsyncOption.from_value(1))
+        >>> asyncio.run(nested.flatten())
+        Some(1)
         """
 
         async def run() -> Option[TypeResult]:
@@ -358,6 +488,13 @@ class AsyncOption(Generic[TypeSource]):
         Returns
         -------
         async_option: AsyncOption[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_value(42).inspect(lambda x: print(f"Value is: {x}")))
+        Value is: 42
+        Some(42)
         """
 
         async def run() -> Option[TypeSource]:
@@ -370,9 +507,21 @@ class AsyncOption(Generic[TypeSource]):
         return AsyncOption(run)
 
     def __str__(self) -> str:
-        """Returns the string representation of the AsyncOption."""
+        """Returns the string representation of the AsyncOption.
+
+        Examples
+        --------
+        >>> str(AsyncOption.from_value(10))  # doctest: +ELLIPSIS
+        'AsyncOption(<function...>)'
+        """
         return f"AsyncOption({self._run})"
 
     def __repr__(self) -> str:
-        """Returns the string representation of the AsyncOption (same as __str__)."""
+        """Returns the string representation of the AsyncOption (same as __str__).
+
+        Examples
+        --------
+        >>> repr(AsyncOption.from_value(10))  # doctest: +ELLIPSIS
+        'AsyncOption(<function...>)'
+        """
         return str(self)

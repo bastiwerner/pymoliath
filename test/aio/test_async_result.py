@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, Mock
 
-from pymoliath import AsyncResult
+from pymoliath.aio import AsyncResult
 from pymoliath.result import Err, Ok
 
 

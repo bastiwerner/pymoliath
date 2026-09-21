@@ -1,6 +1,29 @@
 """
-.. include:: ../docs/result/README.md
-   :start-after: ## AsyncResult
+# AsyncResult
+
+`AsyncResult` is the directly-awaitable counterpart of `pymoliath.result.Result` - see
+`pymoliath.aio` for the general design shared by all `Async*` monads.
+
+```python
+import asyncio
+
+asyncio.run(AsyncResult.from_ok(10).map(lambda x: x + 1))  # Ok(11)
+asyncio.run(AsyncResult.from_err("error").map(lambda x: x + 1))  # Err(error), map is never called
+
+
+async def fetch(x: int) -> int: ...
+
+
+asyncio.run(AsyncResult.from_ok(10).map(fetch))  # async callback, auto-detected
+asyncio.run(AsyncResult.from_ok(10).bind(lambda x: AsyncResult.from_ok(x + 1)))  # Ok(11)
+
+
+async def fetch_ten() -> int:
+    return 10
+
+
+asyncio.run(AsyncResult.from_coroutine(fetch_ten))  # Ok(10)
+```
 """
 
 from __future__ import annotations
@@ -52,11 +75,25 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
             To stay re-awaitable, `run` must produce a *new* awaitable every call rather than
             handing back an already-created (and possibly already-consumed) coroutine object -
             the same caveat Sequence's docstring makes about raw generators/iterators.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def run(): return Ok(10)
+        >>> asyncio.run(AsyncResult(run))
+        Ok(10)
         """
         self._run = run
 
     def __await__(self) -> Generator[Any, None, Result[TypeOk, TypeErr]]:
-        """Runs the pipeline and resolves to the final Result[TypeOk, TypeErr]."""
+        """Runs the pipeline and resolves to the final Result[TypeOk, TypeErr].
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_ok(10))
+        Ok(10)
+        """
         return self._run().__await__()
 
     @staticmethod
@@ -71,6 +108,12 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Returns
         -------
         async_result: AsyncResult[TypeOk, TypeErr]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_ok(10))
+        Ok(10)
         """
 
         async def run() -> Result[TypeOk, Any]:
@@ -91,6 +134,12 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Returns
         -------
         async_result: AsyncResult[TypeOk, TypeErr]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_err("error"))
+        Err(error)
         """
 
         async def run() -> Result[Any, TypeErr]:
@@ -111,6 +160,14 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Returns
         -------
         async_result: AsyncResult[TypeOk, TypeErr]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_result(Ok(10)))
+        Ok(10)
+        >>> asyncio.run(AsyncResult.from_result(Err("error")))
+        Err(error)
         """
 
         async def run() -> Result[TypeOk, TypeErr]:
@@ -135,6 +192,13 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Returns
         -------
         async_result: AsyncResult[TypeOk, TypeErr]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def fetch_ten() -> int: return 10
+        >>> asyncio.run(AsyncResult.from_coroutine(fetch_ten))
+        Ok(10)
         """
 
         async def run() -> Result[TypeOk, Any]:
@@ -158,6 +222,14 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         async_result: AsyncResult[TypeReturn, TypeErr]
             Returns a new AsyncResult which resolves to Ok with the function result, or Err
             without calling `function`, if this AsyncResult resolves to Err.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_ok(5).map(lambda x: x + 1))
+        Ok(6)
+        >>> asyncio.run(AsyncResult.from_err("error").map(lambda x: x + 1))
+        Err(error)
         """
 
         async def run() -> Result[TypeReturn, TypeErr]:
@@ -184,6 +256,14 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         async_result: AsyncResult[TypeOk, TypeReturn]
             Returns a new AsyncResult which resolves to Err with the function result, or Ok
             without calling `function`, if this AsyncResult resolves to Ok.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_err("error").map_err(str.upper))
+        Err(ERROR)
+        >>> asyncio.run(AsyncResult.from_ok(10).map_err(str.upper))
+        Ok(10)
         """
 
         async def run() -> Result[TypeOk, TypeReturn]:
@@ -222,6 +302,14 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         async_result: AsyncResult[TypeReturn, TypeErr]
             Returns a new AsyncResult with the function result if Ok, otherwise Err without
             calling `function`.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_ok(5).bind(lambda x: AsyncResult.from_ok(x + 1)))
+        Ok(6)
+        >>> asyncio.run(AsyncResult.from_err("error").bind(lambda x: AsyncResult.from_ok(x + 1)))
+        Err(error)
         """
 
         async def run() -> Result[TypeReturn, TypeErr]:
@@ -261,6 +349,14 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         async_result: AsyncResult[TypeOk, TypeReturn]
             Returns a new AsyncResult with the function result if Err, otherwise Ok without
             calling `function`.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_err("error").bind_err(lambda e: AsyncResult.from_ok(0)))
+        Ok(0)
+        >>> asyncio.run(AsyncResult.from_ok(10).bind_err(lambda e: AsyncResult.from_ok(0)))
+        Ok(10)
         """
 
         async def run() -> Result[TypeOk, TypeReturn]:
@@ -293,6 +389,14 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         async_result: AsyncResult[TypeReturn, TypeErr]
             Applies an AsyncResult containing a value of type TypeOk to an AsyncResult containing
             a function.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> val = AsyncResult.from_ok(10)
+        >>> func = AsyncResult.from_ok(lambda x: x * 2)
+        >>> asyncio.run(val.apply(func))
+        Ok(20)
         """
 
         def binder(
@@ -319,6 +423,14 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         async_result: AsyncResult[TypeReturn, TypeErr]
             Applies an AsyncResult containing a function to an AsyncResult of type TypePure (value
             or function).
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func = AsyncResult.from_ok(lambda x: x * 2)
+        >>> val = AsyncResult.from_ok(10)
+        >>> asyncio.run(func.apply2(val))
+        Ok(20)
         """
 
         def binder(
@@ -342,6 +454,14 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Returns
         -------
         async_result: AsyncResult[TypeReturn, TypeErr]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_ok(1).and_(AsyncResult.from_ok(2)))
+        Ok(2)
+        >>> asyncio.run(AsyncResult.from_err("error").and_(AsyncResult.from_ok(2)))
+        Err(error)
         """
         return self.bind(lambda _: other)
 
@@ -356,6 +476,14 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Returns
         -------
         async_result: AsyncResult[TypeOk, TypeErr]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_ok(1).or_(AsyncResult.from_ok(2)))
+        Ok(1)
+        >>> asyncio.run(AsyncResult.from_err("error").or_(AsyncResult.from_ok(2)))
+        Ok(2)
         """
 
         async def run() -> Result[TypeOk, TypeErr]:
@@ -380,6 +508,14 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Returns
         -------
         async_result: AsyncResult[Tuple[TypeOk, TypePure], TypeErr]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_ok(1).zip(AsyncResult.from_ok(2)))
+        Ok((1, 2))
+        >>> asyncio.run(AsyncResult.from_err("error").zip(AsyncResult.from_ok(2)))
+        Err(error)
         """
 
         async def run() -> Result[Tuple[TypeOk, TypePure], TypeErr]:
@@ -402,6 +538,13 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         async_result: AsyncResult[TypeReturn, TypeErr]
             Returns the nested AsyncResult's eventual result, or Err without awaiting it if this
             AsyncResult resolves to Err.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> nested = AsyncResult.from_ok(AsyncResult.from_ok(1))
+        >>> asyncio.run(nested.flatten())
+        Ok(1)
         """
 
         async def run() -> Result[TypeReturn, TypeErr]:
@@ -426,6 +569,13 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Returns
         -------
         async_result: AsyncResult[TypeOk, TypeErr]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_ok(10).inspect(lambda x: print(f"Value: {x}")))
+        Value: 10
+        Ok(10)
         """
 
         async def run() -> Result[TypeOk, TypeErr]:
@@ -450,6 +600,13 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Returns
         -------
         async_result: AsyncResult[TypeOk, TypeErr]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_err("error").inspect_err(lambda e: print(f"Error: {e}")))
+        Error: error
+        Err(error)
         """
 
         async def run() -> Result[TypeOk, TypeErr]:
@@ -465,9 +622,21 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         return AsyncResult(run)
 
     def __str__(self) -> str:
-        """Returns the string representation of the AsyncResult."""
+        """Returns the string representation of the AsyncResult.
+
+        Examples
+        --------
+        >>> str(AsyncResult.from_ok(10))  # doctest: +ELLIPSIS
+        'AsyncResult(<function...>)'
+        """
         return f"AsyncResult({self._run})"
 
     def __repr__(self) -> str:
-        """Returns the string representation of the AsyncResult (same as __str__)."""
+        """Returns the string representation of the AsyncResult (same as __str__).
+
+        Examples
+        --------
+        >>> repr(AsyncResult.from_ok(10))  # doctest: +ELLIPSIS
+        'AsyncResult(<function...>)'
+        """
         return str(self)

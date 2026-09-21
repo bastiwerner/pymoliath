@@ -1,28 +1,29 @@
 """
-## AsyncMaybe
+# AsyncMaybe
 
-`AsyncMaybe` is the directly-awaitable counterpart of `Maybe` - see the top-level README's Async
-Monads section for the general design.
+`AsyncMaybe` is the directly-awaitable counterpart of `pymoliath.maybe.Maybe` - see
+`pymoliath.aio` for the general design shared by all `Async*` monads.
 
 ```python
-# AsyncMaybe[TypeSource]
-await AsyncMaybe.from_value(10).map(lambda x: x + 1)  # Just(11)
-await AsyncMaybe.from_maybe(Nothing()).map(lambda x: x + 1)  # Nothing(), map is never called
+import asyncio
+
+asyncio.run(AsyncMaybe.from_value(10).map(lambda x: x + 1))  # Just(11)
+asyncio.run(AsyncMaybe.from_maybe(Nothing()).map(lambda x: x + 1))  # Nothing(), map is never called
 
 
 async def fetch(x: int) -> int: ...
 
 
-await AsyncMaybe.from_value(10).map(fetch)  # async callback, auto-detected
-await AsyncMaybe.from_value(10).bind(lambda x: AsyncMaybe.from_value(x + 1))  # Just(11)
-await AsyncMaybe.from_value(10).filter(lambda x: x > 5)  # Just(10)
+asyncio.run(AsyncMaybe.from_value(10).map(fetch))  # async callback, auto-detected
+asyncio.run(AsyncMaybe.from_value(10).bind(lambda x: AsyncMaybe.from_value(x + 1)))  # Just(11)
+asyncio.run(AsyncMaybe.from_value(10).filter(lambda x: x > 5))  # Just(10)
 
 
 async def fetch_ten() -> int:
     return 10
 
 
-await AsyncMaybe.from_coroutine(fetch_ten)  # Just(10)
+asyncio.run(AsyncMaybe.from_coroutine(fetch_ten))  # Just(10)
 ```
 """
 
@@ -72,11 +73,25 @@ class AsyncMaybe(Generic[TypeSource]):
             To stay re-awaitable, `run` must produce a *new* awaitable every call rather than
             handing back an already-created (and possibly already-consumed) coroutine object -
             the same caveat Sequence's docstring makes about raw generators/iterators.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def run(): return Just(10)
+        >>> asyncio.run(AsyncMaybe(run))
+        Just(10)
         """
         self._run = run
 
     def __await__(self) -> Generator[Any, None, Maybe[TypeSource]]:
-        """Runs the pipeline and resolves to the final Maybe[TypeSource]."""
+        """Runs the pipeline and resolves to the final Maybe[TypeSource].
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_value(10))
+        Just(10)
+        """
         return self._run().__await__()
 
     @staticmethod
@@ -91,6 +106,12 @@ class AsyncMaybe(Generic[TypeSource]):
         Returns
         -------
         async_maybe: AsyncMaybe[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_value(10))
+        Just(10)
         """
 
         async def run() -> Maybe[TypeSource]:
@@ -111,6 +132,14 @@ class AsyncMaybe(Generic[TypeSource]):
         Returns
         -------
         async_maybe: AsyncMaybe[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_maybe(Just(10)))
+        Just(10)
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()))
+        Nothing()
         """
 
         async def run() -> Maybe[TypeSource]:
@@ -135,6 +164,13 @@ class AsyncMaybe(Generic[TypeSource]):
         Returns
         -------
         async_maybe: AsyncMaybe[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def fetch_ten() -> int: return 10
+        >>> asyncio.run(AsyncMaybe.from_coroutine(fetch_ten))
+        Just(10)
         """
 
         async def run() -> Maybe[TypeSource]:
@@ -158,6 +194,14 @@ class AsyncMaybe(Generic[TypeSource]):
         async_maybe: AsyncMaybe[TypeResult]
             Returns a new AsyncMaybe which resolves to Just with the function result, or Nothing
             without calling `function`, if this AsyncMaybe resolves to Nothing.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_value(5).map(lambda x: x + 1))
+        Just(6)
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).map(lambda x: x + 1))
+        Nothing()
         """
 
         async def run() -> Maybe[TypeResult]:
@@ -192,6 +236,14 @@ class AsyncMaybe(Generic[TypeSource]):
         async_maybe: AsyncMaybe[TypeResult]
             Returns a new AsyncMaybe with the function result if Just, otherwise Nothing without
             calling `function`.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_value(5).bind(lambda x: AsyncMaybe.from_value(x + 1)))
+        Just(6)
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).bind(lambda x: AsyncMaybe.from_value(x + 1)))
+        Nothing()
         """
 
         async def run() -> Maybe[TypeResult]:
@@ -222,6 +274,14 @@ class AsyncMaybe(Generic[TypeSource]):
         async_maybe: AsyncMaybe[TypeResult]
             Applies an AsyncMaybe containing a value of type TypeSource to an AsyncMaybe containing
             a function.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> val = AsyncMaybe.from_value(10)
+        >>> func = AsyncMaybe.from_value(lambda x: x * 2)
+        >>> asyncio.run(val.apply(func))
+        Just(20)
         """
 
         def binder(
@@ -248,6 +308,14 @@ class AsyncMaybe(Generic[TypeSource]):
         async_maybe: AsyncMaybe[TypeResult]
             Applies an AsyncMaybe containing a function to an AsyncMaybe of type TypePure (value or
             function).
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func = AsyncMaybe.from_value(lambda x: x * 2)
+        >>> val = AsyncMaybe.from_value(10)
+        >>> asyncio.run(func.apply2(val))
+        Just(20)
         """
 
         def binder(
@@ -273,6 +341,14 @@ class AsyncMaybe(Generic[TypeSource]):
         async_maybe: AsyncMaybe[TypeSource]
             Returns an AsyncMaybe resolving to Just if this AsyncMaybe resolves to Just and
             `filter_function` returns True, otherwise Nothing.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_value(10).filter(lambda x: x > 5))
+        Just(10)
+        >>> asyncio.run(AsyncMaybe.from_value(10).filter(lambda x: x < 5))
+        Nothing()
         """
 
         async def run() -> Maybe[TypeSource]:
@@ -297,6 +373,14 @@ class AsyncMaybe(Generic[TypeSource]):
         Returns
         -------
         async_maybe: AsyncMaybe[TypeResult]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_value(1).and_(AsyncMaybe.from_value(2)))
+        Just(2)
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).and_(AsyncMaybe.from_value(2)))
+        Nothing()
         """
         return self.bind(lambda _: other)
 
@@ -311,6 +395,14 @@ class AsyncMaybe(Generic[TypeSource]):
         Returns
         -------
         async_maybe: AsyncMaybe[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_value(1).or_(AsyncMaybe.from_value(2)))
+        Just(1)
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).or_(AsyncMaybe.from_value(2)))
+        Just(2)
         """
 
         async def run() -> Maybe[TypeSource]:
@@ -335,6 +427,14 @@ class AsyncMaybe(Generic[TypeSource]):
         Returns
         -------
         async_maybe: AsyncMaybe[Tuple[TypeSource, TypePure]]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_value(1).zip(AsyncMaybe.from_value(2)))
+        Just((1, 2))
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).zip(AsyncMaybe.from_value(2)))
+        Nothing()
         """
 
         async def run() -> Maybe[Tuple[TypeSource, TypePure]]:
@@ -355,6 +455,13 @@ class AsyncMaybe(Generic[TypeSource]):
         async_maybe: AsyncMaybe[TypeResult]
             Returns the nested AsyncMaybe's eventual result, or Nothing without awaiting it if this
             AsyncMaybe resolves to Nothing.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> nested = AsyncMaybe.from_value(AsyncMaybe.from_value(1))
+        >>> asyncio.run(nested.flatten())
+        Just(1)
         """
 
         async def run() -> Maybe[TypeResult]:
@@ -379,6 +486,13 @@ class AsyncMaybe(Generic[TypeSource]):
         Returns
         -------
         async_maybe: AsyncMaybe[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_value(42).inspect(lambda x: print(f"Value is: {x}")))
+        Value is: 42
+        Just(42)
         """
 
         async def run() -> Maybe[TypeSource]:
@@ -391,9 +505,21 @@ class AsyncMaybe(Generic[TypeSource]):
         return AsyncMaybe(run)
 
     def __str__(self) -> str:
-        """Returns the string representation of the AsyncMaybe."""
+        """Returns the string representation of the AsyncMaybe.
+
+        Examples
+        --------
+        >>> str(AsyncMaybe.from_value(10))  # doctest: +ELLIPSIS
+        'AsyncMaybe(<function...>)'
+        """
         return f"AsyncMaybe({self._run})"
 
     def __repr__(self) -> str:
-        """Returns the string representation of the AsyncMaybe (same as __str__)."""
+        """Returns the string representation of the AsyncMaybe (same as __str__).
+
+        Examples
+        --------
+        >>> repr(AsyncMaybe.from_value(10))  # doctest: +ELLIPSIS
+        'AsyncMaybe(<function...>)'
+        """
         return str(self)

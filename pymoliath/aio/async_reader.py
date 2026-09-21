@@ -1,6 +1,24 @@
 """
-.. include:: ../docs/reader/README.md
-   :start-after: ## AsyncReader
+# AsyncReader
+
+`AsyncReader` is the directly-runnable-with-an-environment counterpart of `pymoliath.reader.Reader`
+- see `pymoliath.aio` for the general design shared by all `Async*` monads.
+
+Unlike the other `Async*` monads, `AsyncReader` is not bare-`await`-able: it needs an environment
+value to run, so call `await an_async_reader.run(env)` instead of `await an_async_reader`.
+
+```python
+import asyncio
+
+asyncio.run(AsyncReader(lambda env: env["value"]).run({"value": 10}))  # 10
+
+
+async def fetch(env: dict) -> int: ...
+
+
+asyncio.run(AsyncReader.from_coroutine(fetch).run({"value": 10}))  # async callable, ran directly
+asyncio.run(AsyncReader.from_value(10).map(lambda x: x + 1).run({}))  # 11
+```
 """
 
 from __future__ import annotations
@@ -51,6 +69,13 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
             to the reader's value. To stay re-runnable, `run` must produce a *new* awaitable every
             call rather than handing back an already-created (and possibly already-consumed)
             coroutine object.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def run(env): return env["value"]
+        >>> asyncio.run(AsyncReader(run).run({"value": 10}))
+        10
         """
         self._run = run
 
@@ -67,6 +92,13 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         Returns
         -------
         result: TypeSource
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> reader: AsyncReader[dict, int] = AsyncReader.from_reader(Reader(lambda env: env["value"]))
+        >>> asyncio.run(reader.run({"value": 10}))
+        10
         """
         return await self._run(env)
 
@@ -82,6 +114,12 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         Returns
         -------
         async_reader: AsyncReader[Any, TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncReader.from_value(10).run({}))
+        10
         """
 
         async def run(env: Any) -> TypeSource:
@@ -104,6 +142,13 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         Returns
         -------
         async_reader: AsyncReader[TypeEnv, TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> reader: Reader[dict, int] = Reader(lambda env: env["value"])
+        >>> asyncio.run(AsyncReader.from_reader(reader).run({"value": 10}))
+        10
         """
 
         async def run(env: TypeEnv) -> TypeSource:
@@ -128,6 +173,13 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         Returns
         -------
         async_reader: AsyncReader[TypeEnv, TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def fetch(env: dict) -> int: return env["value"]
+        >>> asyncio.run(AsyncReader.from_coroutine(fetch).run({"value": 10}))
+        10
         """
         return AsyncReader(coroutine_function)
 
@@ -147,6 +199,13 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         -------
         async_reader: AsyncReader[TypeEnv, TypeResult]
             Returns a new AsyncReader with the function result as value.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> reader: AsyncReader[dict, int] = AsyncReader.from_value(10)
+        >>> asyncio.run(reader.map(lambda x: x + 1).run({}))
+        11
         """
 
         async def run(env: TypeEnv) -> TypeResult:
@@ -181,6 +240,14 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         -------
         async_reader: AsyncReader[TypeEnv, TypeResult]
             Returns a new AsyncReader with the function result.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> reader: AsyncReader[dict, int] = AsyncReader.from_reader(Reader(lambda env: env["value"]))
+        >>> chained = reader.bind(lambda x: AsyncReader.from_value(x + 1))
+        >>> asyncio.run(chained.run({"value": 10}))
+        11
         """
 
         async def run(env: TypeEnv) -> TypeResult:
@@ -211,6 +278,14 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         -------
         async_reader: AsyncReader[TypeEnv, TypeResult]
             Applies an AsyncReader containing a value to an AsyncReader containing a function.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> val: AsyncReader[dict, int] = AsyncReader.from_value(10)
+        >>> func: AsyncReader[dict, Callable[[int], int]] = AsyncReader.from_value(lambda x: x * 2)
+        >>> asyncio.run(val.apply(func).run({}))
+        20
         """
 
         def binder(
@@ -239,6 +314,14 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         async_reader: AsyncReader[TypeEnv, TypeResult]
             Applies an AsyncReader containing a function to an AsyncReader with a value or
             function.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func: AsyncReader[dict, Callable[[int], int]] = AsyncReader.from_value(lambda x: x * 2)
+        >>> val: AsyncReader[dict, int] = AsyncReader.from_value(10)
+        >>> asyncio.run(func.apply2(val).run({}))
+        20
         """
 
         def binder(
@@ -258,6 +341,12 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         Returns
         -------
         async_reader: AsyncReader[TypeEnv, TypeEnv]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncReader[dict, dict].ask().run({"value": 10}))
+        {'value': 10}
         """
 
         async def run(env: TypeEnv) -> TypeEnv:
@@ -280,6 +369,14 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         -------
         async_reader: AsyncReader[TypeEnv, TypeSource]
             Returns a new AsyncReader which runs this one with the modified environment.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> reader: AsyncReader[dict, int] = AsyncReader.from_reader(Reader(lambda env: env["value"]))
+        >>> localized = reader.local(lambda env: {**env, "value": env["value"] + 1})
+        >>> asyncio.run(localized.run({"value": 10}))
+        11
         """
 
         async def run(env: TypeEnv) -> TypeSource:
@@ -289,9 +386,21 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         return AsyncReader(run)
 
     def __str__(self) -> str:
-        """Returns the string representation of the AsyncReader."""
+        """Returns the string representation of the AsyncReader.
+
+        Examples
+        --------
+        >>> str(AsyncReader.from_value(10))  # doctest: +ELLIPSIS
+        'AsyncReader(<function...>)'
+        """
         return f"AsyncReader({self._run})"
 
     def __repr__(self) -> str:
-        """Returns the string representation of the AsyncReader (same as __str__)."""
+        """Returns the string representation of the AsyncReader (same as __str__).
+
+        Examples
+        --------
+        >>> repr(AsyncReader.from_value(10))  # doctest: +ELLIPSIS
+        'AsyncReader(<function...>)'
+        """
         return str(self)

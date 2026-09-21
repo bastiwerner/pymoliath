@@ -1,6 +1,29 @@
 """
-.. include:: ../docs/io/README.md
-   :start-after: ## AsyncIO
+# AsyncIO
+
+`AsyncIO` is the directly-awaitable counterpart of `pymoliath.io.IO` - see `pymoliath.aio` for the
+general design shared by all `Async*` monads. Since `IO` has no failure state, `AsyncIO` resolves
+directly to the plain value once awaited, rather than to a wrapper like `Just`/`Ok`.
+
+```python
+import asyncio
+
+asyncio.run(AsyncIO(lambda: 10).map(lambda x: x + 1))  # 11
+
+
+async def fetch(x: int) -> int: ...
+
+
+asyncio.run(AsyncIO.from_value(10).map(fetch))  # async callback, auto-detected
+asyncio.run(AsyncIO.from_value(10).bind(lambda x: AsyncIO.from_value(x + 1)))  # 11
+
+
+async def fetch_ten() -> int:
+    return 10
+
+
+asyncio.run(AsyncIO.from_coroutine(fetch_ten))  # 10
+```
 """
 
 from __future__ import annotations
@@ -49,11 +72,25 @@ class AsyncIO(Generic[TypeSource]):
             To stay re-awaitable, `run` must produce a *new* awaitable every call rather than
             handing back an already-created (and possibly already-consumed) coroutine object -
             the same caveat Sequence's docstring makes about raw generators/iterators.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def run(): return 10
+        >>> asyncio.run(AsyncIO(run))
+        10
         """
         self._run = run
 
     def __await__(self) -> Generator[Any, None, TypeSource]:
-        """Runs the pipeline and resolves to the final TypeSource value."""
+        """Runs the pipeline and resolves to the final TypeSource value.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncIO.from_value(10))
+        10
+        """
         return self._run().__await__()
 
     @staticmethod
@@ -68,6 +105,12 @@ class AsyncIO(Generic[TypeSource]):
         Returns
         -------
         async_io: AsyncIO[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncIO.from_value(10))
+        10
         """
 
         async def run() -> TypeSource:
@@ -88,6 +131,12 @@ class AsyncIO(Generic[TypeSource]):
         Returns
         -------
         async_io: AsyncIO[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncIO.from_io(IO(lambda: 10)))
+        10
         """
 
         async def run() -> TypeSource:
@@ -111,6 +160,13 @@ class AsyncIO(Generic[TypeSource]):
         Returns
         -------
         async_io: AsyncIO[TypeSource]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def fetch_ten() -> int: return 10
+        >>> asyncio.run(AsyncIO.from_coroutine(fetch_ten))
+        10
         """
 
         async def run() -> TypeSource:
@@ -133,6 +189,12 @@ class AsyncIO(Generic[TypeSource]):
         -------
         async_io: AsyncIO[TypeResult]
             Returns a new AsyncIO which resolves to the function result.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncIO.from_value(5).map(lambda x: x + 1))
+        6
         """
 
         async def run() -> TypeResult:
@@ -160,6 +222,12 @@ class AsyncIO(Generic[TypeSource]):
         -------
         async_io: AsyncIO[TypeResult]
             Returns a new AsyncIO with the function result.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncIO.from_value(5).bind(lambda x: AsyncIO.from_value(x + 1)))
+        6
         """
 
         async def run() -> TypeResult:
@@ -190,6 +258,14 @@ class AsyncIO(Generic[TypeSource]):
         async_io: AsyncIO[TypeResult]
             Applies an AsyncIO containing a value of type TypeSource to an AsyncIO containing a
             function.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> val = AsyncIO.from_value(10)
+        >>> func = AsyncIO.from_value(lambda x: x * 2)
+        >>> asyncio.run(val.apply(func))
+        20
         """
 
         def binder(
@@ -215,6 +291,14 @@ class AsyncIO(Generic[TypeSource]):
         async_io: AsyncIO[TypeResult]
             Applies an AsyncIO containing a function to an AsyncIO of type TypePure (value or
             function).
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func = AsyncIO.from_value(lambda x: x * 2)
+        >>> val = AsyncIO.from_value(10)
+        >>> asyncio.run(func.apply2(val))
+        20
         """
 
         def binder(
@@ -226,9 +310,21 @@ class AsyncIO(Generic[TypeSource]):
         return self.bind(binder)
 
     def __str__(self) -> str:
-        """Returns the string representation of the AsyncIO."""
+        """Returns the string representation of the AsyncIO.
+
+        Examples
+        --------
+        >>> str(AsyncIO.from_value(10))  # doctest: +ELLIPSIS
+        'AsyncIO(<function...>)'
+        """
         return f"AsyncIO({self._run})"
 
     def __repr__(self) -> str:
-        """Returns the string representation of the AsyncIO (same as __str__)."""
+        """Returns the string representation of the AsyncIO (same as __str__).
+
+        Examples
+        --------
+        >>> repr(AsyncIO.from_value(10))  # doctest: +ELLIPSIS
+        'AsyncIO(<function...>)'
+        """
         return str(self)

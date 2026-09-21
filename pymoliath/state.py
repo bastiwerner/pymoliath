@@ -1,6 +1,57 @@
+"""
+# State Monad
+
+The State Monad represents a computation that threads a piece of mutable-looking state through a
+series of function calls without any actual mutation. It wraps a
+`Callable[[TypeState], Tuple[TypeState, TypeSource]]`: given the current state, it produces a new
+state alongside a result value, letting stateful-looking code be written in a purely functional
+style, with `bind` handling the plumbing of passing the updated state from one step to the next.
+
+* Haskell: [Control.Monad.State](https://hackage.haskell.org/package/mtl/docs/Control-Monad-State.html)
+
+This implementation is heavily inspired by Haskell's `State` monad.
+
+The `State[TypeState, TypeSource]` type wraps a `Callable[[TypeState], Tuple[TypeState, TypeSource]]`:
+a computation which, given the current state, returns the new state and a result value.
+
+```python
+State[TypeState, TypeSource]
+```
+
+## Practical Examples and Benefits:
+
+The State Monad is particularly useful for simulating mutable state (a counter, an accumulator, a
+random-number generator's seed) in a purely functional way, without global variables or explicit
+threading of a state parameter through every function signature.
+
+### Benefits:
+1. Implicit State Threading: `bind` passes the updated state from one step to the next
+   automatically, so intermediate functions don't need an explicit state parameter.
+2. No Hidden Mutation: The "state" is just a value passed along and returned, never mutated in
+   place, making the data flow explicit and easy to reason about.
+3. Composability: `get`/`put` combined with `map`/`bind` let you build up a whole stateful
+   computation as a value, only actually run once `run(initial_state)` is called.
+
+#### Example: Threading a counter through several steps without a mutable variable.
+
+```python
+# Without State (Imperative, mutable)
+counter = 0
+counter += 1
+first = counter
+counter += 1
+second = counter
+
+# With State (Functional)
+increment = State(lambda n: (n + 1, n + 1))
+program = increment.bind(lambda first: increment.map(lambda second: (first, second)))
+result_state, (first, second) = program.run(0)
+```
+"""
+
 from __future__ import annotations
 
-from typing import Any, TypeVar, Generic, Callable, Tuple, Type
+from typing import Any, Callable, Generic, Tuple, Type, TypeVar
 
 from pymoliath.util import curry
 
@@ -32,6 +83,12 @@ class State(Generic[TypeState, TypeSource]):
         ----------
         value: Callable[[TypeState], Tuple[TypeState, TypeSource]]
             Callable to be stored in the State Monad, invoked with the current state when `run` is called.
+
+        Examples
+        --------
+        >>> state: State[int, int] = State(lambda n: (n + 1, n))
+        >>> state.run(0)
+        (1, 0)
         """
         if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
             raise TypeError("State Monad value must be of type Callable")
@@ -53,6 +110,12 @@ class State(Generic[TypeState, TypeSource]):
         -------
         state: State[TypeState, TypeResult]
             Returns a new state monad with the result of the map function and the internal state.
+
+        Examples
+        --------
+        >>> state: State[int, int] = State(lambda n: (n + 1, n))
+        >>> state.map(lambda x: x * 2).run(0)
+        (1, 0)
         """
 
         def mapper(state: TypeState) -> Tuple[TypeState, TypeResult]:
@@ -79,6 +142,12 @@ class State(Generic[TypeState, TypeSource]):
         -------
         state: State[TypeState, TypeResult]
             Returns a new state monad with the result of the bind function and the internal state.
+
+        Examples
+        --------
+        >>> state: State[int, int] = State(lambda n: (n + 1, n))
+        >>> state.bind(lambda x: State(lambda n: (n + 1, x + n))).run(0)
+        (2, 1)
         """
 
         def mapper(state: TypeState):
@@ -106,6 +175,13 @@ class State(Generic[TypeState, TypeSource]):
         -------
         state: State[TypeState, TypeResult
             Applies a state monad containing a value to a state monad containing a function.
+
+        Examples
+        --------
+        >>> val: State[int, int] = State(lambda n: (n, 10))
+        >>> func: State[int, Callable[[int], int]] = State(lambda n: (n, lambda x: x * 2))
+        >>> val.apply(func).run(0)
+        (0, 20)
         """
 
         def binder(
@@ -120,19 +196,26 @@ class State(Generic[TypeState, TypeSource]):
         self: State[TypeState, Callable[..., TypeResult]],
         applicative_value: State[TypeState, Any],
     ) -> State[TypeState, TypeResult]:
-        """Reader monad applicative interface for state monads containing a function (<*>).
+        """State monad applicative interface for state monads containing a function (<*>).
 
         Definition: State(f: e -> f: a -> b) <*> State(f: e -> a) => State(f: e -> b)
 
         Parameters
         ----------
         applicative_value: State[TypeState, TypeSource]
-            Reader monad value which will be applied to the state monad containing a function
+            State monad value which will be applied to the state monad containing a function
 
         Returns
         -------
         state: State[TypeState, TypeResult
             Applies a state monad containing a function to a state monad with a value or function.
+
+        Examples
+        --------
+        >>> func: State[int, Callable[[int], int]] = State(lambda n: (n, lambda x: x * 2))
+        >>> val: State[int, int] = State(lambda n: (n, 10))
+        >>> func.apply2(val).run(0)
+        (0, 20)
         """
 
         def binder(
@@ -147,10 +230,17 @@ class State(Generic[TypeState, TypeSource]):
     def get(cls: Type[State[TypeState, TypeSource]]) -> State[TypeState, TypeState]:
         """State monad specific get function.
 
+        Returns the current state as the value, leaving the state itself unchanged.
+
         Returns
         -------
         state: State[TypeState, TypeState]
             Return the state from the internals of the monad.
+
+        Examples
+        --------
+        >>> State[int, Any].get().run(10)
+        (10, 10)
         """
         return State(lambda state: (state, state))
 
@@ -158,12 +248,24 @@ class State(Generic[TypeState, TypeSource]):
     def put(
         cls: Type[State[TypeState, TypeSource]], new_state: TypeState
     ) -> State[TypeState, Tuple[TypeState, Any]]:
-        """State monad specific get function.
+        """State monad specific put function.
+
+        Replaces the state inside the monad with `new_state`, and the value with an empty tuple.
+
+        Parameters
+        ----------
+        new_state: TypeState
+            The new state to replace the current state with.
 
         Returns
         -------
         state: State[TypeState, TypeState]
             Replace the state inside the monad and the value with a tuple.
+
+        Examples
+        --------
+        >>> State[int, Any].put(42).run(10)
+        (42, ())
         """
 
         def mapper(_: TypeState) -> Tuple[TypeState, Any]:
@@ -183,14 +285,32 @@ class State(Generic[TypeState, TypeSource]):
         -------
         result: TypeSource
             Calls the state monad function by passing the state value and returns wrapped result in state and the value.
+
+        Examples
+        --------
+        >>> state: State[int, int] = State(lambda n: (n + 1, n))
+        >>> state.run(0)
+        (1, 0)
         """
         new_state, value = self._value(state)
         return new_state, value
 
     def __str__(self: State[TypeState, TypeSource]) -> str:
-        """Returns the string representation of the State Monad."""
+        """Returns the string representation of the State Monad.
+
+        Examples
+        --------
+        >>> str(State(lambda n: (n, n)))  # doctest: +ELLIPSIS
+        'State(<function...>)'
+        """
         return f"State({self._value})"
 
     def __repr__(self: State[TypeState, TypeSource]) -> str:
-        """Returns the string representation of the State Monad (same as __str__)."""
+        """Returns the string representation of the State Monad (same as __str__).
+
+        Examples
+        --------
+        >>> repr(State(lambda n: (n, n)))  # doctest: +ELLIPSIS
+        'State(<function...>)'
+        """
         return str(self)

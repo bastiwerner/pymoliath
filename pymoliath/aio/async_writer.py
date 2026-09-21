@@ -1,6 +1,23 @@
 """
-.. include:: ../docs/writer/README.md
-   :start-after: ## AsyncWriter
+# AsyncWriter
+
+`AsyncWriter` is the directly-awaitable counterpart of `pymoliath.writer.Writer` - see
+`pymoliath.aio` for the general design shared by all `Async*` monads. Since `Writer` has no
+failure state, `AsyncWriter` resolves directly to the raw `(value, monoid)` tuple once awaited,
+exactly what sync `Writer.run()` already returns.
+
+```python
+import asyncio
+
+asyncio.run(AsyncWriter.from_value(10, ["created"]))  # (10, ['created'])
+asyncio.run(AsyncWriter.from_value(10, ["created"]).map(lambda x: x + 1))  # (11, ['created'])
+
+
+async def fetch(x: int) -> int: ...
+
+
+asyncio.run(AsyncWriter.from_value(10, []).map(fetch))  # async callback, auto-detected
+```
 """
 
 from __future__ import annotations
@@ -72,11 +89,25 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
             (value, monoid) pair. To stay re-awaitable, `run` must produce a *new* awaitable every
             call rather than handing back an already-created (and possibly already-consumed)
             coroutine object.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def run(): return (10, ["created"])
+        >>> asyncio.run(AsyncWriter(run))
+        (10, ['created'])
         """
         self._run = run
 
     def __await__(self) -> Generator[Any, None, Tuple[TypeSource, TypeMonoid]]:
-        """Runs the pipeline and resolves to the final Tuple[TypeSource, TypeMonoid]."""
+        """Runs the pipeline and resolves to the final Tuple[TypeSource, TypeMonoid].
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncWriter.from_value(10, ["created"]))
+        (10, ['created'])
+        """
         return self._run().__await__()
 
     @staticmethod
@@ -95,6 +126,12 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         Returns
         -------
         async_writer: AsyncWriter[TypeSource, TypeMonoid]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncWriter.from_value(10, ["created"]))
+        (10, ['created'])
         """
 
         async def run() -> Tuple[TypeSource, TypeMonoid]:
@@ -117,6 +154,12 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         Returns
         -------
         async_writer: AsyncWriter[TypeSource, TypeMonoid]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncWriter.from_writer(Writer(10, ["created"])))
+        (10, ['created'])
         """
 
         async def run() -> Tuple[TypeSource, TypeMonoid]:
@@ -141,6 +184,13 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         Returns
         -------
         async_writer: AsyncWriter[TypeSource, TypeMonoid]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> async def fetch() -> tuple: return (10, ["created"])
+        >>> asyncio.run(AsyncWriter.from_coroutine(fetch))
+        (10, ['created'])
         """
 
         async def run() -> Tuple[TypeSource, TypeMonoid]:
@@ -165,6 +215,12 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         -------
         async_writer: AsyncWriter[TypeResult, TypeMonoid]
             Returns a new AsyncWriter with the function result as value and the monoid unchanged.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncWriter.from_value(10, ["created"]).map(lambda x: x + 1))
+        (11, ['created'])
         """
 
         async def run() -> Tuple[TypeResult, TypeMonoid]:
@@ -198,6 +254,14 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         -------
         async_writer: AsyncWriter[TypeResult, TypeMonoid]
             Returns a new AsyncWriter with the function result and the closure of the monoids (+).
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> writer: AsyncWriter[int, list] = AsyncWriter.from_value(10, ["created"])
+        >>> chained = writer.bind(lambda x: AsyncWriter.from_value(x + 1, ["incremented"]))
+        >>> asyncio.run(chained)
+        (11, ['created', 'incremented'])
         """
 
         async def run() -> Tuple[TypeResult, TypeMonoid]:
@@ -229,6 +293,14 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         async_writer: AsyncWriter[TypeResult, TypeMonoid]
             Applies an AsyncWriter containing a value of type TypeSource to an AsyncWriter
             containing a function of type Callable[[TypeSource], TypeResult].
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> val: AsyncWriter[int, list] = AsyncWriter.from_value(10, ["value"])
+        >>> func: AsyncWriter[Callable[[int], int], list] = AsyncWriter.from_value(lambda x: x * 2, ["func"])
+        >>> asyncio.run(val.apply(func))
+        (20, ['value', 'func'])
         """
 
         async def run() -> Tuple[TypeResult, TypeMonoid]:
@@ -258,6 +330,14 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         async_writer: AsyncWriter[TypeResult, TypeMonoid]
             Applies an AsyncWriter containing a function of type Callable[[TypeSource], TypeResult]
             to an AsyncWriter of type TypeSource (value or function).
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func: AsyncWriter[Callable[[int], int], list] = AsyncWriter.from_value(lambda x: x * 2, ["func"])
+        >>> val: AsyncWriter[int, list] = AsyncWriter.from_value(10, ["value"])
+        >>> asyncio.run(func.apply2(val))
+        (20, ['func', 'value'])
         """
 
         async def run() -> Tuple[TypeResult, TypeMonoid]:
@@ -283,6 +363,13 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         -------
         async_writer: AsyncWriter[TypeSource, TypeMonoid]
            Returns an AsyncWriter containing the closure (+) of the passed monoid value.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> writer: AsyncWriter[int, list] = AsyncWriter.from_value(10, ["created"])
+        >>> asyncio.run(writer.tell(["logged"]))
+        (10, ['created', 'logged'])
         """
 
         async def run() -> Tuple[TypeSource, TypeMonoid]:
@@ -305,6 +392,13 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         Returns
         -------
         async_writer: AsyncWriter[Tuple[TypeSource, TypeMonoid], TypeMonoid]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> writer: AsyncWriter[int, list] = AsyncWriter.from_value(10, ["created"])
+        >>> asyncio.run(writer.listen())
+        ((10, ['created']), ['created'])
         """
 
         async def run() -> Tuple[Tuple[TypeSource, TypeMonoid], TypeMonoid]:
@@ -331,6 +425,15 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         Returns
         -------
         async_writer: AsyncWriter[TypeInner, TypeMonoid]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> writer: AsyncWriter[Tuple[int, Callable[[list], list]], list] = AsyncWriter.from_value(
+        ...     (10, lambda log: [entry.upper() for entry in log]), ["created"]
+        ... )
+        >>> asyncio.run(writer.pass_())
+        (10, ['CREATED'])
         """
 
         async def run() -> Tuple[TypeInner, TypeMonoid]:
@@ -342,9 +445,21 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         return AsyncWriter(run)
 
     def __str__(self) -> str:
-        """Returns the string representation of the AsyncWriter."""
+        """Returns the string representation of the AsyncWriter.
+
+        Examples
+        --------
+        >>> str(AsyncWriter.from_value(10, ["created"]))  # doctest: +ELLIPSIS
+        'AsyncWriter(<function...>)'
+        """
         return f"AsyncWriter({self._run})"
 
     def __repr__(self) -> str:
-        """Returns the string representation of the AsyncWriter (same as __str__)."""
+        """Returns the string representation of the AsyncWriter (same as __str__).
+
+        Examples
+        --------
+        >>> repr(AsyncWriter.from_value(10, ["created"]))  # doctest: +ELLIPSIS
+        'AsyncWriter(<function...>)'
+        """
         return str(self)
