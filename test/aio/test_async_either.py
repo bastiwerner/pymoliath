@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, Mock
 
-from pymoliath.async_either import AsyncEither
+from pymoliath.aio import AsyncEither
 from pymoliath.either import Left, Right
 
 

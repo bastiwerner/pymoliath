@@ -1,3 +1,8 @@
+"""
+.. include:: ../docs/reader/README.md
+   :start-after: ## AsyncReader
+"""
+
 from __future__ import annotations
 
 from typing import (
@@ -10,7 +15,7 @@ from typing import (
     Union,
 )
 
-from pymoliath._async import resolve as _resolve
+from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.reader import Reader
 from pymoliath.util import curry
 
@@ -86,7 +91,9 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
         return AsyncReader(run)
 
     @staticmethod
-    def from_reader(reader: Reader[TypeEnv, TypeSource]) -> AsyncReader[TypeEnv, TypeSource]:
+    def from_reader(
+        reader: Reader[TypeEnv, TypeSource],
+    ) -> AsyncReader[TypeEnv, TypeSource]:
         """Lifts an existing sync Reader into an AsyncReader.
 
         Parameters
@@ -259,7 +266,9 @@ class AsyncReader(Generic[TypeEnv, TypeSource]):
 
         return cls(run)
 
-    def local(self, function: Callable[[TypeEnv], TypeEnv]) -> AsyncReader[TypeEnv, TypeSource]:
+    def local(
+        self, function: Callable[[TypeEnv], TypeEnv]
+    ) -> AsyncReader[TypeEnv, TypeSource]:
         """AsyncReader specific function local. Modifies the environment before it reaches this reader.
 
         Parameters

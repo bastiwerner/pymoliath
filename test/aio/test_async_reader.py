@@ -1,6 +1,6 @@
 import unittest
 
-from pymoliath.async_reader import AsyncReader
+from pymoliath import AsyncReader
 from pymoliath.reader import Reader
 
 
@@ -82,7 +82,9 @@ class TestAsyncReader(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("the-env", await reader.run("the-env"))
 
     async def test_local(self):
-        reader = AsyncReader.from_coroutine(async_identity_env).local(lambda env: env + 1)
+        reader = AsyncReader.from_coroutine(async_identity_env).local(
+            lambda env: env + 1
+        )
         self.assertEqual(6, await reader.run(5))
 
     async def test_reader_specific_run_with_different_envs(self):

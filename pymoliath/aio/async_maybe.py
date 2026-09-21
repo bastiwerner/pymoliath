@@ -1,3 +1,31 @@
+"""
+## AsyncMaybe
+
+`AsyncMaybe` is the directly-awaitable counterpart of `Maybe` - see the top-level README's Async
+Monads section for the general design.
+
+```python
+# AsyncMaybe[TypeSource]
+await AsyncMaybe.from_value(10).map(lambda x: x + 1)  # Just(11)
+await AsyncMaybe.from_maybe(Nothing()).map(lambda x: x + 1)  # Nothing(), map is never called
+
+
+async def fetch(x: int) -> int: ...
+
+
+await AsyncMaybe.from_value(10).map(fetch)  # async callback, auto-detected
+await AsyncMaybe.from_value(10).bind(lambda x: AsyncMaybe.from_value(x + 1))  # Just(11)
+await AsyncMaybe.from_value(10).filter(lambda x: x > 5)  # Just(10)
+
+
+async def fetch_ten() -> int:
+    return 10
+
+
+await AsyncMaybe.from_coroutine(fetch_ten)  # Just(10)
+```
+"""
+
 from __future__ import annotations
 
 from typing import (
@@ -11,7 +39,7 @@ from typing import (
     Union,
 )
 
-from pymoliath._async import resolve as _resolve
+from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.maybe import Just, Maybe, Nothing
 from pymoliath.util import curry
 
@@ -145,7 +173,9 @@ class AsyncMaybe(Generic[TypeSource]):
         self,
         function: Callable[
             [TypeSource],
-            Union[AsyncMaybe[TypeResult], Maybe[TypeResult], Awaitable[Maybe[TypeResult]]],
+            Union[
+                AsyncMaybe[TypeResult], Maybe[TypeResult], Awaitable[Maybe[TypeResult]]
+            ],
         ],
     ) -> AsyncMaybe[TypeResult]:
         """AsyncMaybe bind interface (>>=, bind, flatMap).
@@ -292,7 +322,9 @@ class AsyncMaybe(Generic[TypeSource]):
 
         return AsyncMaybe(run)
 
-    def zip(self, other: AsyncMaybe[TypePure]) -> AsyncMaybe[Tuple[TypeSource, TypePure]]:
+    def zip(
+        self, other: AsyncMaybe[TypePure]
+    ) -> AsyncMaybe[Tuple[TypeSource, TypePure]]:
         """Combines this AsyncMaybe with another into an AsyncMaybe of a tuple, or Nothing if either is Nothing.
 
         Parameters

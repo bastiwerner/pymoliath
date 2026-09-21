@@ -1,3 +1,8 @@
+"""
+.. include:: ../docs/writer/README.md
+   :start-after: ## AsyncWriter
+"""
+
 from __future__ import annotations
 
 from typing import (
@@ -11,7 +16,7 @@ from typing import (
     Union,
 )
 
-from pymoliath._async import resolve as _resolve
+from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.util import curry
 from pymoliath.writer import TypeMonoid, Writer
 
@@ -54,7 +59,9 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
 
     __slots__ = ("_run",)
 
-    def __init__(self, run: Callable[[], Awaitable[Tuple[TypeSource, TypeMonoid]]]) -> None:
+    def __init__(
+        self, run: Callable[[], Awaitable[Tuple[TypeSource, TypeMonoid]]]
+    ) -> None:
         """AsyncWriter constructor which takes a zero-argument async callable resolving to a
         Tuple[TypeSource, TypeMonoid].
 
@@ -73,7 +80,9 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         return self._run().__await__()
 
     @staticmethod
-    def from_value(value: TypeSource, monoid: TypeMonoid) -> AsyncWriter[TypeSource, TypeMonoid]:
+    def from_value(
+        value: TypeSource, monoid: TypeMonoid
+    ) -> AsyncWriter[TypeSource, TypeMonoid]:
         """Lifts an already-resolved value and monoid into an AsyncWriter.
 
         Parameters
@@ -95,7 +104,9 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         return AsyncWriter(run)
 
     @staticmethod
-    def from_writer(writer: Writer[TypeSource, TypeMonoid]) -> AsyncWriter[TypeSource, TypeMonoid]:
+    def from_writer(
+        writer: Writer[TypeSource, TypeMonoid],
+    ) -> AsyncWriter[TypeSource, TypeMonoid]:
         """Lifts an existing sync Writer into an AsyncWriter.
 
         Parameters

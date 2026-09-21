@@ -1,3 +1,8 @@
+"""
+.. include:: ../docs/state/README.md
+   :start-after: ## AsyncState
+"""
+
 from __future__ import annotations
 
 from typing import (
@@ -11,7 +16,7 @@ from typing import (
     Union,
 )
 
-from pymoliath._async import resolve as _resolve
+from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.state import State
 from pymoliath.util import curry
 
@@ -112,7 +117,9 @@ class AsyncState(Generic[TypeState, TypeSource]):
 
     @staticmethod
     def from_coroutine(
-        coroutine_function: Callable[[TypeState], Awaitable[Tuple[TypeState, TypeSource]]],
+        coroutine_function: Callable[
+            [TypeState], Awaitable[Tuple[TypeState, TypeSource]]
+        ],
     ) -> AsyncState[TypeState, TypeSource]:
         """Wraps a state-accepting async callable as an AsyncState.
 

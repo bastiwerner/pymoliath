@@ -1,3 +1,8 @@
+"""
+.. include:: ../docs/result/README.md
+   :start-after: ## AsyncResult
+"""
+
 from __future__ import annotations
 
 from typing import (
@@ -11,7 +16,7 @@ from typing import (
     Union,
 )
 
-from pymoliath._async import resolve as _resolve
+from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.result import Err, Ok, Result
 from pymoliath.util import curry
 

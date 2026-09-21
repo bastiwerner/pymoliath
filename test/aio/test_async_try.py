@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, Mock
 
-from pymoliath.async_try import AsyncTry
+from pymoliath import AsyncTry
 from pymoliath.exception import Failure, Success
 
 
@@ -48,8 +48,10 @@ class TestAsyncTry(unittest.IsolatedAsyncioTestCase):
             return value
 
         exc = ValueError("error")
-        result = await AsyncTry.from_failure(exc).map(track).bind(
-            lambda v: AsyncTry.from_success(track(v))
+        result = (
+            await AsyncTry.from_failure(exc)
+            .map(track)
+            .bind(lambda v: AsyncTry.from_success(track(v)))
         )
 
         self.assertEqual([], calls)
@@ -62,8 +64,10 @@ class TestAsyncTry(unittest.IsolatedAsyncioTestCase):
             calls.append(exc)
             return exc
 
-        result = await AsyncTry.from_success(10).map_failure(track).bind_failure(
-            lambda e: AsyncTry.from_failure(track(e))
+        result = (
+            await AsyncTry.from_success(10)
+            .map_failure(track)
+            .bind_failure(lambda e: AsyncTry.from_failure(track(e)))
         )
 
         self.assertEqual([], calls)

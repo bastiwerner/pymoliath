@@ -1,6 +1,6 @@
 import unittest
 
-from pymoliath.async_writer import AsyncWriter
+from pymoliath import AsyncWriter
 from pymoliath.writer import Writer
 
 
@@ -100,9 +100,7 @@ class TestAsyncWriter(unittest.IsolatedAsyncioTestCase):
             .map(lambda x: x / 2)
             .tell("divide by 2")
         )
-        self.assertEqual(
-            (6.0, "initial value add 1 multiply by 2 divide by 2"), result
-        )
+        self.assertEqual((6.0, "initial value add 1 multiply by 2 divide by 2"), result)
 
     async def test_reawaitable(self):
         """Awaiting the same AsyncWriter more than once re-runs the pipeline each time."""

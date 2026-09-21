@@ -1,3 +1,8 @@
+"""
+.. include:: ../docs/io/README.md
+   :start-after: ## AsyncIO
+"""
+
 from __future__ import annotations
 
 from typing import (
@@ -10,7 +15,7 @@ from typing import (
     Union,
 )
 
-from pymoliath._async import resolve as _resolve
+from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.io import IO
 from pymoliath.util import curry
 
@@ -139,7 +144,8 @@ class AsyncIO(Generic[TypeSource]):
     def bind(
         self,
         function: Callable[
-            [TypeSource], Union[AsyncIO[TypeResult], IO[TypeResult], Awaitable[TypeResult]]
+            [TypeSource],
+            Union[AsyncIO[TypeResult], IO[TypeResult], Awaitable[TypeResult]],
         ],
     ) -> AsyncIO[TypeResult]:
         """AsyncIO bind interface (>>=, bind, flatMap).
@@ -168,7 +174,9 @@ class AsyncIO(Generic[TypeSource]):
 
         return AsyncIO(run)
 
-    def apply(self, applicative: AsyncIO[Callable[..., TypeResult]]) -> AsyncIO[TypeResult]:
+    def apply(
+        self, applicative: AsyncIO[Callable[..., TypeResult]]
+    ) -> AsyncIO[TypeResult]:
         """AsyncIO applicative interface for AsyncIOs containing a value (<*>).
 
         Parameters

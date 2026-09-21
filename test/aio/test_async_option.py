@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, Mock
 
-from pymoliath.async_option import AsyncOption
+from pymoliath import AsyncOption
 from pymoliath.option import Nil, Some
 
 
@@ -42,8 +42,10 @@ class TestAsyncOption(unittest.IsolatedAsyncioTestCase):
             calls.append(value)
             return value
 
-        result = await AsyncOption.from_option(Nil()).map(track).bind(
-            lambda v: AsyncOption.from_value(track(v))
+        result = (
+            await AsyncOption.from_option(Nil())
+            .map(track)
+            .bind(lambda v: AsyncOption.from_value(track(v)))
         )
 
         self.assertEqual([], calls)
@@ -102,12 +104,8 @@ class TestAsyncOption(unittest.IsolatedAsyncioTestCase):
         async def is_positive(x: int) -> bool:
             return x > 0
 
-        self.assertEqual(
-            Some(10), await AsyncOption.from_value(10).filter(is_positive)
-        )
-        self.assertEqual(
-            Nil(), await AsyncOption.from_value(-10).filter(is_positive)
-        )
+        self.assertEqual(Some(10), await AsyncOption.from_value(10).filter(is_positive))
+        self.assertEqual(Nil(), await AsyncOption.from_value(-10).filter(is_positive))
 
     async def test_filter_on_nil(self):
         result = await AsyncOption.from_option(Nil()).filter(lambda x: True)

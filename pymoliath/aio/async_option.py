@@ -1,3 +1,8 @@
+"""
+.. include:: ../docs/option/README.md
+   :start-after: ## AsyncOption
+"""
+
 from __future__ import annotations
 
 from typing import (
@@ -11,7 +16,7 @@ from typing import (
     Union,
 )
 
-from pymoliath._async import resolve as _resolve
+from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.option import Nil, Option, Some
 from pymoliath.util import curry
 
@@ -145,7 +150,11 @@ class AsyncOption(Generic[TypeSource]):
         self,
         function: Callable[
             [TypeSource],
-            Union[AsyncOption[TypeResult], Option[TypeResult], Awaitable[Option[TypeResult]]],
+            Union[
+                AsyncOption[TypeResult],
+                Option[TypeResult],
+                Awaitable[Option[TypeResult]],
+            ],
         ],
     ) -> AsyncOption[TypeResult]:
         """AsyncOption bind interface (>>=, bind, flatMap).
@@ -292,7 +301,9 @@ class AsyncOption(Generic[TypeSource]):
 
         return AsyncOption(run)
 
-    def zip(self, other: AsyncOption[TypePure]) -> AsyncOption[Tuple[TypeSource, TypePure]]:
+    def zip(
+        self, other: AsyncOption[TypePure]
+    ) -> AsyncOption[Tuple[TypeSource, TypePure]]:
         """Combines this AsyncOption with another into an AsyncOption of a tuple, or Nil if either is Nil.
 
         Parameters

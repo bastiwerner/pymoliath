@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, Mock
 
-from pymoliath.async_maybe import AsyncMaybe
+from pymoliath import AsyncMaybe
 from pymoliath.maybe import Just, Nothing
 
 
@@ -42,8 +42,10 @@ class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
             calls.append(value)
             return value
 
-        result = await AsyncMaybe.from_maybe(Nothing()).map(track).bind(
-            lambda v: AsyncMaybe.from_value(track(v))
+        result = (
+            await AsyncMaybe.from_maybe(Nothing())
+            .map(track)
+            .bind(lambda v: AsyncMaybe.from_value(track(v)))
         )
 
         self.assertEqual([], calls)

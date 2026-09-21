@@ -1,3 +1,8 @@
+"""
+.. include:: ../docs/either/README.md
+   :start-after: ## AsyncEither
+"""
+
 from __future__ import annotations
 
 from typing import (
@@ -11,7 +16,7 @@ from typing import (
     Union,
 )
 
-from pymoliath._async import resolve as _resolve
+from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.either import Either, Left, Right
 from pymoliath.util import curry
 
@@ -41,7 +46,9 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
 
     __slots__ = ("_run",)
 
-    def __init__(self, run: Callable[[], Awaitable[Either[TypeLeft, TypeRight]]]) -> None:
+    def __init__(
+        self, run: Callable[[], Awaitable[Either[TypeLeft, TypeRight]]]
+    ) -> None:
         """AsyncEither constructor which takes a zero-argument async callable resolving to an Either.
 
         Parameters
@@ -99,7 +106,9 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         return AsyncEither(run)
 
     @staticmethod
-    def from_either(either: Either[TypeLeft, TypeRight]) -> AsyncEither[TypeLeft, TypeRight]:
+    def from_either(
+        either: Either[TypeLeft, TypeRight],
+    ) -> AsyncEither[TypeLeft, TypeRight]:
         """Lifts an existing sync Either (Left or Right) into an AsyncEither.
 
         Parameters
@@ -330,7 +339,9 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
 
         return self.bind(binder)
 
-    def and_(self, other: AsyncEither[TypeLeft, TypeResult]) -> AsyncEither[TypeLeft, TypeResult]:
+    def and_(
+        self, other: AsyncEither[TypeLeft, TypeResult]
+    ) -> AsyncEither[TypeLeft, TypeResult]:
         """Returns `other` if this AsyncEither resolves to Right, otherwise the original Left.
 
         Parameters
