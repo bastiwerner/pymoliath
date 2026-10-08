@@ -71,8 +71,8 @@ per-variant implementation, and a uniform API. It contains many breaking changes
 **util**
 
 - `curry` is fully curried (`curry(f)(1)(2)(3)`); previously it only applied one level.
-- `compose` unpacks a tuple only into functions that take two or more positional parameters and fit
-  the tuple; one-parameter and `*args` functions receive the tuple as one argument.
+- `compose` unpacks a tuple into functions that take two or more positional parameters; one-parameter
+  and `*args` functions receive the tuple as one argument.
 
 ### New features
 
@@ -126,7 +126,8 @@ Benchmarks (`bench/bench_result.py`, pyperf, Python 3.14) against 2.0.0:
 - `Nil()` / `Nothing()` are cached singletons on the hot paths.
 - The variants set their field directly in a hand-written `__init__` instead of the frozen
   dataclass one (about 30% faster construction; still frozen).
-- `curry` and `compose` read a function's arity once, from its code object where possible.
+- `compose` reads each function's signature once, when composing; `curry` reads a plain function's
+  arity straight from its code object.
 - Instance size is unchanged (40 bytes, no `__dict__`).
 
 ### Tooling
