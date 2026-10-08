@@ -7,22 +7,22 @@
 ```python
 import asyncio
 
-asyncio.run(AsyncTry.from_success(10).map(lambda x: x + 1))  # Success(11)
-asyncio.run(AsyncTry.from_success(10).map(lambda x: 1 / 0))  # Failure(...), exception caught
+asyncio.run(AsyncTry.from_success(10).map(lambda x: x + 1).run())  # Success(11)
+asyncio.run(AsyncTry.from_success(10).map(lambda x: 1 / 0).run())  # Failure(...), exception caught
 
 
 async def fetch(x: int) -> int: ...
 
 
-asyncio.run(AsyncTry.from_success(10).map(fetch))  # async callback, auto-detected
-asyncio.run(AsyncTry.from_success(10).bind(lambda x: AsyncTry.from_success(x + 1)))  # Success(11)
+asyncio.run(AsyncTry.from_success(10).map(fetch).run())  # async callback, auto-detected
+asyncio.run(AsyncTry.from_success(10).bind(lambda x: AsyncTry.from_success(x + 1)).run())  # Success(11)
 
 
 async def fetch_ten() -> int:
     return 10
 
 
-asyncio.run(AsyncTry.from_coroutine(fetch_ten))  # Success(10)
+asyncio.run(AsyncTry.from_coroutine(fetch_ten).run())  # Success(10)
 ```
 """
 
@@ -40,10 +40,6 @@ U = TypeVar("U")
 # Function-scoped TypeVar for the static constructors: the class-scoped T would be Unknown when
 # called on the unspecialized class (`AsyncTry.from_success(1)`).
 V = TypeVar("V")
-# Function-scoped TypeVars for `map2`.
-A = TypeVar("A")
-B = TypeVar("B")
-C = TypeVar("C")
 
 
 class AsyncTry(Generic[T]):
@@ -59,12 +55,17 @@ class AsyncTry(Generic[T]):
     a Failure, same as Success.map/Success.bind/Failure.map_failure/Failure.bind_failure do in
     pymoliath/exception.py. from_coroutine does not: like AsyncMaybe.from_coroutine, it only
     wraps the awaited result as Success, mirroring how the sync Success(value) constructor itself
-    doesn't catch either - only the map/bind-family methods and the module-level `safe()` do.
+    doesn't catch either - only the map/bind-family methods and `Success.safe()` do.
 
     Callbacks passed to map/bind/map_failure/bind_failure/inspect/inspect_failure may be plain
     sync functions or `async def` functions - whichever is returned is auto-detected at the point
     it's called (awaited only if it actually is an awaitable), so real async I/O can be mixed
     freely with plain transforms in the same chain.
+
+    `from_failure` leaves the success type open, like a bare `Failure`: it is solved from context,
+    but the two type checkers disagree on it without any (pyright: Unknown, mypy: Never). Annotate
+    the target where there is no context, e.g.
+    `failed: AsyncTry[int] = AsyncTry.from_failure(ValueError("e"))`.
     """
 
     __slots__ = ("_run",)
@@ -84,7 +85,7 @@ class AsyncTry(Generic[T]):
         --------
         >>> import asyncio
         >>> async def run(): return Success(10)
-        >>> asyncio.run(AsyncTry(run))
+        >>> asyncio.run(AsyncTry(run).run())
         Success(10)
         """
         self._run = run
@@ -95,10 +96,30 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_success(10))
+        >>> async def main():
+        ...     return await AsyncTry.from_success(10)
+        >>> asyncio.run(main())
         Success(10)
         """
         return self._run().__await__()
+
+    async def run(self) -> Try[T]:
+        """Runs the pipeline and resolves to its result, as a coroutine.
+
+        Equivalent to awaiting it directly. Use `run()` where a coroutine is required, e.g.
+        `asyncio.run(value.run())` (before Python 3.14 `asyncio.run` only accepts coroutines).
+
+        Returns
+        -------
+        result: Try[T]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncTry.from_success(10).run())
+        Success(10)
+        """
+        return await self
 
     @staticmethod
     def from_success(value: V) -> AsyncTry[V]:
@@ -116,7 +137,7 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_success(10))
+        >>> asyncio.run(AsyncTry.from_success(10).run())
         Success(10)
         """
 
@@ -144,7 +165,7 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")))
+        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).run())
         Failure(ValueError('boom'))
         """
 
@@ -170,9 +191,9 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_try(Success(10)))
+        >>> asyncio.run(AsyncTry.from_try(Success(10)).run())
         Success(10)
-        >>> asyncio.run(AsyncTry.from_try(Failure(ValueError("boom"))))
+        >>> asyncio.run(AsyncTry.from_try(Failure(ValueError("boom"))).run())
         Failure(ValueError('boom'))
         """
 
@@ -206,7 +227,7 @@ class AsyncTry(Generic[T]):
         --------
         >>> import asyncio
         >>> async def fetch_ten() -> int: return 10
-        >>> asyncio.run(AsyncTry.from_coroutine(fetch_ten))
+        >>> asyncio.run(AsyncTry.from_coroutine(fetch_ten).run())
         Success(10)
         """
 
@@ -234,19 +255,20 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_success(5).map(lambda x: x + 1))
+        >>> asyncio.run(AsyncTry.from_success(5).map(lambda x: x + 1).run())
         Success(6)
         >>> def boom(x: int) -> int:
         ...     raise ValueError("boom")
-        >>> asyncio.run(AsyncTry.from_success(5).map(boom))
+        >>> asyncio.run(AsyncTry.from_success(5).map(boom).run())
         Failure(ValueError('boom'))
         """
 
         async def run() -> Try[U]:
             """Awaits self, then applies `function`, short-circuiting on Failure."""
             match outcome := await self:
-                case Failure(exception):
-                    return Failure(exception)
+                case Failure():
+                    failed: Failure[Any] = outcome
+                    return failed
                 case Success(value):
                     try:
                         return Success(await _resolve(function(value)))
@@ -278,17 +300,17 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).map_failure(lambda e: TypeError(str(e))))
+        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).map_failure(lambda e: TypeError(str(e))).run())
         Failure(TypeError('boom'))
-        >>> asyncio.run(AsyncTry.from_success(10).map_failure(lambda e: TypeError(str(e))))
+        >>> asyncio.run(AsyncTry.from_success(10).map_failure(lambda e: TypeError(str(e))).run())
         Success(10)
         """
 
         async def run() -> Try[T]:
             """Awaits self, then applies `function` to the exception, short-circuiting on Success."""
             match outcome := await self:
-                case Success(value):
-                    return Success(value)
+                case Success():
+                    return outcome
                 case Failure(exc):
                     try:
                         return Failure(await _resolve(function(exc)))
@@ -324,17 +346,18 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_success(5).bind(lambda x: AsyncTry.from_success(x + 1)))
+        >>> asyncio.run(AsyncTry.from_success(5).bind(lambda x: AsyncTry.from_success(x + 1)).run())
         Success(6)
-        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).bind(lambda x: AsyncTry.from_success(x + 1)))
+        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).bind(lambda x: AsyncTry.from_success(x + 1)).run())
         Failure(ValueError('boom'))
         """
 
         async def run() -> Try[U]:
             """Awaits self, then chains into `function`'s result, short-circuiting on Failure."""
             match outcome := await self:
-                case Failure(exception):
-                    return Failure(exception)
+                case Failure():
+                    failed: Failure[Any] = outcome
+                    return failed
                 case Success(value):
                     try:
                         result = function(value)
@@ -347,6 +370,29 @@ class AsyncTry(Generic[T]):
                     assert_never(outcome)
 
         return AsyncTry(run)
+
+    def and_then(
+        self,
+        function: Callable[[T], AsyncTry[U] | Try[U] | Awaitable[Try[U]]],
+    ) -> AsyncTry[U]:
+        """Alias of `bind`, named like in Rust.
+
+        Parameters
+        ----------
+        function: Callable[[T], AsyncTry[U] | Try[U] | Awaitable[Try[U]]]
+            Function applied to the resolved value, as for `bind`.
+
+        Returns
+        -------
+        async_try: AsyncTry[U]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncTry.from_success(5).and_then(lambda x: AsyncTry.from_success(x + 1)).run())
+        Success(6)
+        """
+        return self.bind(function)
 
     def bind_failure(
         self,
@@ -373,17 +419,17 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).bind_failure(lambda e: AsyncTry.from_success(0)))
+        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).bind_failure(lambda e: AsyncTry.from_success(0)).run())
         Success(0)
-        >>> asyncio.run(AsyncTry.from_success(10).bind_failure(lambda e: AsyncTry.from_success(0)))
+        >>> asyncio.run(AsyncTry.from_success(10).bind_failure(lambda e: AsyncTry.from_success(0)).run())
         Success(10)
         """
 
         async def run() -> Try[T]:
             """Awaits self, then chains into `function`'s result, short-circuiting on Success."""
             match outcome := await self:
-                case Success(value):
-                    return Success(value)
+                case Success():
+                    return outcome
                 case Failure(exc):
                     try:
                         result = function(exc)
@@ -397,11 +443,34 @@ class AsyncTry(Generic[T]):
 
         return AsyncTry(run)
 
+    def or_else(
+        self,
+        function: Callable[[Exception], AsyncTry[T] | Try[T] | Awaitable[Try[T]]],
+    ) -> AsyncTry[T]:
+        """Alias of `bind_failure`, named like in Rust.
+
+        Parameters
+        ----------
+        function: Callable[[Exception], AsyncTry[T] | Try[T] | Awaitable[Try[T]]]
+            Function applied to the resolved error, as for `bind_failure`.
+
+        Returns
+        -------
+        async_try: AsyncTry[T]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncTry.from_failure(ValueError("e")).or_else(lambda e: AsyncTry.from_success(0)).run())
+        Success(0)
+        """
+        return self.bind_failure(function)
+
     def apply(self, function: AsyncTry[Callable[[T], U]]) -> AsyncTry[U]:
         """Applies the function wrapped in `function` to this AsyncTry's value (<*>).
 
         If both fail, the Failure of `function` takes precedence, as in `Try.apply`. For functions of
-        several arguments, use the module-level `map2`.
+        several arguments, curry them and use `apply2`.
 
         Parameters
         ----------
@@ -418,7 +487,7 @@ class AsyncTry(Generic[T]):
         >>> import asyncio
         >>> val = AsyncTry.from_success(10)
         >>> func = AsyncTry.from_success(lambda x: x * 2)
-        >>> asyncio.run(val.apply(func))
+        >>> asyncio.run(val.apply(func).run())
         Success(20)
         """
         return function.bind(lambda inner: self.map(inner))
@@ -428,7 +497,7 @@ class AsyncTry(Generic[T]):
 
         The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both fail, the
         Failure of this (the function side) takes precedence. Curried functions of several arguments
-        can be applied one argument at a time; `map2` takes them uncurried.
+        can be applied one argument at a time.
 
         Parameters
         ----------
@@ -443,10 +512,50 @@ class AsyncTry(Generic[T]):
         --------
         >>> import asyncio
         >>> func = AsyncTry.from_success(lambda y: 10 + y)
-        >>> asyncio.run(func.apply2(AsyncTry.from_success(5)))
+        >>> asyncio.run(func.apply2(AsyncTry.from_success(5)).run())
         Success(15)
         """
         return self.bind(lambda inner: value.map(inner))
+
+    def filter(self, predicate: Callable[[T], bool | Awaitable[bool]]) -> AsyncTry[T]:
+        """Keeps the Success value if the predicate holds for it, like Scala's `Try.filter`.
+
+        A Success whose value fails the predicate resolves to
+        `Failure(ValueError("predicate does not hold for <value>"))`, and a predicate that raises
+        resolves to a Failure of that exception. A Failure stays unchanged.
+
+        Parameters
+        ----------
+        predicate: Callable[[T], bool | Awaitable[bool]]
+            Sync or async predicate applied to the resolved value if Success.
+
+        Returns
+        -------
+        async_try: AsyncTry[T]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncTry.from_success(1).filter(lambda x: x > 0).run())
+        Success(1)
+        >>> asyncio.run(AsyncTry.from_success(-1).filter(lambda x: x > 0).run())
+        Failure(ValueError('predicate does not hold for -1'))
+        """
+
+        async def run() -> Try[T]:
+            """Awaits self, then keeps the Success value only if `predicate` holds."""
+            outcome = await self
+            if isinstance(outcome, Success):
+                try:
+                    holds = await _resolve(predicate(outcome.value))
+                except Exception as e:
+                    return Failure(e)
+                if not holds:
+                    message = f"predicate does not hold for {outcome.value!r}"
+                    return Failure(ValueError(message))
+            return outcome
+
+        return AsyncTry(run)
 
     def and_(self, other: AsyncTry[U]) -> AsyncTry[U]:
         """Returns `other` if this AsyncTry resolves to Success, otherwise the original Failure.
@@ -463,9 +572,9 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_success(1).and_(AsyncTry.from_success(2)))
+        >>> asyncio.run(AsyncTry.from_success(1).and_(AsyncTry.from_success(2)).run())
         Success(2)
-        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).and_(AsyncTry.from_success(2)))
+        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).and_(AsyncTry.from_success(2)).run())
         Failure(ValueError('boom'))
         """
         return self.bind(lambda _: other)
@@ -485,17 +594,17 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_success(1).or_(AsyncTry.from_success(2)))
+        >>> asyncio.run(AsyncTry.from_success(1).or_(AsyncTry.from_success(2)).run())
         Success(1)
-        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).or_(AsyncTry.from_success(2)))
+        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).or_(AsyncTry.from_success(2)).run())
         Success(2)
         """
 
         async def run() -> Try[T]:
             """Awaits self, falling back to `other` if this AsyncTry resolves to Failure."""
             match outcome := await self:
-                case Success(value):
-                    return Success(value)
+                case Success():
+                    return outcome
                 case Failure():
                     return await other
                 case _:
@@ -518,17 +627,18 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_success(1).zip(AsyncTry.from_success(2)))
+        >>> asyncio.run(AsyncTry.from_success(1).zip(AsyncTry.from_success(2)).run())
         Success((1, 2))
-        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).zip(AsyncTry.from_success(2)))
+        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).zip(AsyncTry.from_success(2)).run())
         Failure(ValueError('boom'))
         """
 
         async def run() -> Try[tuple[T, U]]:
             """Awaits both self and `other`, combining their values if both are Success."""
             match outcome := await self:
-                case Failure(exception):
-                    return Failure(exception)
+                case Failure():
+                    failed: Failure[Any] = outcome
+                    return failed
                 case Success(value):
                     other_outcome = await other
                     return other_outcome.map(lambda o: (value, o))
@@ -550,15 +660,16 @@ class AsyncTry(Generic[T]):
         --------
         >>> import asyncio
         >>> nested = AsyncTry.from_success(AsyncTry.from_success(1))
-        >>> asyncio.run(nested.flatten())
+        >>> asyncio.run(nested.flatten().run())
         Success(1)
         """
 
         async def run() -> Try[U]:
             """Awaits self, then awaits the nested AsyncTry if Success."""
             match outcome := await self:
-                case Failure(exception):
-                    return Failure(exception)
+                case Failure():
+                    failed: Failure[Any] = outcome
+                    return failed
                 case Success(inner):
                     return await inner
                 case _:
@@ -581,7 +692,7 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_success(42).inspect(lambda x: print(f"Value is: {x}")))
+        >>> asyncio.run(AsyncTry.from_success(42).inspect(lambda x: print(f"Value is: {x}")).run())
         Value is: 42
         Success(42)
         """
@@ -616,7 +727,7 @@ class AsyncTry(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).inspect_failure(lambda e: print(f"Exception: {e}")))
+        >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).inspect_failure(lambda e: print(f"Exception: {e}")).run())
         Exception: boom
         Failure(ValueError('boom'))
         """
@@ -653,21 +764,3 @@ class AsyncTry(Generic[T]):
         'AsyncTry(<function...>)'
         """
         return str(self)
-
-
-def map2(
-    first: AsyncTry[A], second: AsyncTry[B], function: Callable[[A, B], C]
-) -> AsyncTry[C]:
-    """Combines the values of two AsyncTrys with a two-argument function once both are awaited.
-
-    The first Failure wins: if `first` fails, `second` is not awaited.
-
-    Examples
-    --------
-    >>> import asyncio
-    >>> asyncio.run(map2(AsyncTry.from_success(1), AsyncTry.from_success(2), lambda a, b: a + b))
-    Success(3)
-    >>> asyncio.run(map2(AsyncTry.from_failure(ValueError("first")), AsyncTry.from_failure(ValueError("second")), lambda a, b: a + b))
-    Failure(ValueError('first'))
-    """
-    return first.bind(lambda a: second.map(lambda b: function(a, b)))

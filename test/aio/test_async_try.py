@@ -3,7 +3,6 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from pymoliath.aio import AsyncTry
-from pymoliath.aio.async_try import map2
 from pymoliath.exception import Failure, Success
 
 
@@ -228,22 +227,6 @@ class TestAsyncTry(unittest.IsolatedAsyncioTestCase):
         result = await AsyncTry.from_success(10).apply(AsyncTry.from_success(f))
         self.assertEqual(Success(20), result)
 
-    async def test_map2(self):
-        def add(a: int, b: int) -> int:
-            return a + b
-
-        self.assertEqual(
-            Success(3),
-            await map2(AsyncTry.from_success(1), AsyncTry.from_success(2), add),
-        )
-        first: AsyncTry[int] = AsyncTry.from_failure(ValueError("first"))
-        second: AsyncTry[int] = AsyncTry.from_failure(ValueError("second"))
-        self.assertEqual(Failure(ValueError("first")), await map2(first, second, add))
-        self.assertEqual(
-            Failure(ValueError("second")),
-            await map2(AsyncTry.from_success(1), second, add),
-        )
-
     async def test_apply_function_side_wins(self):
         def f(x: int) -> int:
             return x * 2
@@ -315,3 +298,43 @@ class TestAsyncTry(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Success(2), await function.apply2(value))
         self.assertEqual(Failure(ValueError("value")), await function.apply2(error))
         self.assertEqual(Failure(ValueError("function")), await failed.apply2(error))
+
+    async def test_from_failure_and_run(self):
+        self.assertEqual(
+            Failure(ValueError("e")), await AsyncTry.from_failure(ValueError("e"))
+        )
+        self.assertEqual(Success(1), await AsyncTry.from_success(1).run())
+
+    async def test_and_then_is_bind(self):
+        self.assertEqual(
+            Success(2),
+            await AsyncTry.from_success(1).and_then(lambda x: Success(x + 1)),
+        )
+
+    async def test_or_else_is_bind_failure(self):
+        failed: AsyncTry[int] = AsyncTry.from_failure(ValueError("abc"))
+        self.assertEqual(
+            Success(3), await failed.or_else(lambda e: Success(len(str(e))))
+        )
+
+    async def test_filter(self):
+        async def positive(x: int) -> bool:
+            return x > 0
+
+        self.assertEqual(Success(1), await AsyncTry.from_success(1).filter(positive))
+        self.assertEqual(
+            Failure(ValueError("predicate does not hold for -1")),
+            await AsyncTry.from_success(-1).filter(lambda x: x > 0),
+        )
+
+        def broken(x: int) -> bool:
+            raise KeyError("boom")
+
+        self.assertEqual(
+            Failure(KeyError("boom")), await AsyncTry.from_success(1).filter(broken)
+        )
+
+        predicate = Mock(return_value=True)
+        failed: AsyncTry[int] = AsyncTry.from_failure(ValueError("e"))
+        self.assertEqual(Failure(ValueError("e")), await failed.filter(predicate))
+        predicate.assert_not_called()

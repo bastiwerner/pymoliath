@@ -14,13 +14,13 @@ The `Either` type is a sealed sum type that can be either `Left` or `Right`. Lik
 `Result`, both variants carry both type parameters:
 
 ```python
-type Either[L, R] = Left[L, R] | Right[R, L]
+type Either[L, R] = Left[L, R] | Right[L, R]
 ```
 
 ## Typing like in Rust
 
 Both type parameters are covariant and the side a variant does not use defaults to `Never`: a bare
-`Right(10)` is a `Right[int, Never]` and a bare `Left("e")` is a `Left[str, Never]`. Both are
+`Right(10)` is a `Right[Never, int]` and a bare `Left("e")` is a `Left[str, Never]`. Both are
 assignable to an `Either[str, int]`, and a conditional lambda such as
 `lambda x: Right(x) if x > 0 else Left("negative")` is inferred as an `Either[str, int]`.
 
@@ -36,7 +36,7 @@ def parse(text: str) -> Either[str, int]:
 ```
 
 Methods called directly on a variant keep the precise variant type, e.g. `Right(1).map(str)` is a
-`Right[str, Never]` and `Left("e").map(str)` a `Left[str, str]`.
+`Right[Never, str]` and `Left("e").map(str)` a `Left[str, str]`.
 
 ## Practical Examples and Benefits:
 
@@ -86,38 +86,62 @@ match either_value:
         print(f"Error encountered: {y}")
 ```
 
-`Either` is a type alias, so use `is_either` (or `isinstance(x, EITHER_TYPES)`) for runtime checks
-and `is_left`/`is_right` to narrow an `Either` to one of its variants.
+`Either` is a type alias, so check it at runtime with `isinstance(x, (Left, Right))`. Both a `match`
+over `Left`/`Right` and `isinstance(x, Left)` narrow the type to the variant.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Never, Self, final, overload
+from typing import TYPE_CHECKING, Any, Never, Self, final, overload
 
-from typing_extensions import Generic, TypeIs, TypeVar
+from typing_extensions import Generic, TypeVar
 
+# either.py and maybe.py convert into each other. Importing the module (not its names) lets the
+# cycle resolve at import time; its attributes are looked up when the conversions run.
+import pymoliath.maybe as _maybe
 from pymoliath.errors import UnwrapError
 
-# Both parameters are covariant, so `Right[int, Never]` is an `Either[str, int]`. Like in Rust the
+if TYPE_CHECKING:
+    from pymoliath.maybe import Just, Maybe, Nothing
+
+# `Nothing()` is a singleton, but constructing it still runs `__new__` and `__init__`. Hot paths
+# (`Left.right()`, `Right.left()`) return this cached reference instead. It is filled on first use
+# because maybe.py may still be initializing while this module is imported.
+_nothing: Nothing | None = None
+
+
+def _load_nothing() -> Nothing:
+    global _nothing
+    _nothing = _maybe.Nothing()
+    return _nothing
+
+
+# Both parameters are covariant, so `Right[Never, int]` is an `Either[str, int]`. Like in Rust the
 # receiver fixes the types a method accepts (`unwrap_or(default: R)`, `bind` returning
 # `Either[L, U]`), which puts a covariant parameter in an input position. That is sound here: the
 # containers are immutable and those arguments are only ever returned, typed by the receiver's
 # (wider) view - the same reasoning as typeshed's `Sequence.index`. Those methods carry a
-# `# type: ignore[misc]`.
+# `type: ignore` (misc).
+#
+# Short-circuit paths return the instance itself instead of allocating a new one. Only the unused
+# (phantom) type parameter changes there, so they are typed through `Any` in that one slot - a
+# `self: Left[LeftT, Any]` annotation or a `failed: Left[LeftT, Any] = ...` local - which costs
+# nothing at runtime and keeps the other parameter checked.
 L = TypeVar("L", covariant=True)
 R = TypeVar("R", covariant=True)
 
-# Variant parameters: the side a variant does not use defaults to Never (PEP 696).
-L_Never = TypeVar("L_Never", covariant=True, default=Never)
-R_Never = TypeVar("R_Never", covariant=True, default=Never)
+# The type parameters of `Left` and `Right` (both `[L, R]`, like `Either`). Both default to Never
+# (PEP 696), so the side a variant does not use is Never: a bare `Left("e")` is a
+# `Left[str, Never]` and a bare `Right(1)` a `Right[Never, int]`. (A parameter with a default
+# can't precede one without, so both have one.)
+LeftT = TypeVar("LeftT", covariant=True, default=Never)
+RightT = TypeVar("RightT", covariant=True, default=Never)
 
 # Method/function-scoped type variables.
 U = TypeVar("U")
 V = TypeVar("V")
-W = TypeVar("W")
-Y = TypeVar("Y")
 F = TypeVar("F")
 X = TypeVar("X", bound=BaseException)
 
@@ -205,6 +229,16 @@ class _EitherImpl(Generic[L, R]):
     def and_then(self, function: Callable[[R], Either[L, U]]) -> Either[L, U]:
         """Alias of `bind`, named like in Rust.
 
+        Parameters
+        ----------
+        function: Callable[[R], Either[L, U]]
+            Function which takes a value of R and returns a new Either Monad.
+
+        Returns
+        -------
+        either: Either[L, U]
+            Returns the function result if Right, otherwise the Left.
+
         Examples
         --------
         >>> val: Either[str, int] = Right(5)
@@ -240,6 +274,16 @@ class _EitherImpl(Generic[L, R]):
     def or_else(self, function: Callable[[L], Either[F, R]]) -> Either[F, R]:
         """Alias of `bind_left`, named like in Rust.
 
+        Parameters
+        ----------
+        function: Callable[[L], Either[F, R]]
+            Function which takes a value of L and returns a new Either Monad.
+
+        Returns
+        -------
+        either: Either[F, R]
+            Returns the function result if Left, otherwise the Right.
+
         Examples
         --------
         >>> err: Either[str, int] = Left("Error")
@@ -252,7 +296,7 @@ class _EitherImpl(Generic[L, R]):
         """Applies the function wrapped in `function` to the Right value if both are Right.
 
         If both are Left, the Left of `function` takes precedence. For functions of several
-        arguments, use `map2`/`map3`.
+        arguments, curry them and use `apply2`.
 
         Parameters
         ----------
@@ -283,7 +327,7 @@ class _EitherImpl(Generic[L, R]):
         The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both are
         empty/errors, this (the function side) takes precedence. Functions of several
         arguments can be applied one argument at a time when they are curried, e.g.
-        `Right(lambda a: lambda b: a + b).apply2(x).apply2(y)`; `map2`/`map3` take them uncurried.
+        `Right(lambda a: lambda b: a + b).apply2(x).apply2(y)`.
 
         Parameters
         ----------
@@ -530,6 +574,25 @@ class _EitherImpl(Generic[L, R]):
         """
         raise NotImplementedError
 
+    def transpose(self: _EitherImpl[F, Maybe[U]]) -> Maybe[Either[F, U]]:
+        """Transposes an Either of a Maybe into a Maybe of an Either.
+
+        `Right(Nothing())` becomes `Nothing()`, `Right(Just(x))` becomes `Just(Right(x))` and
+        `Left(e)` becomes `Just(Left(e))`.
+
+        Returns
+        -------
+        maybe: Maybe[Either[F, U]]
+            Returns the transposed Maybe Monad.
+
+        Examples
+        --------
+        >>> from pymoliath.maybe import Just
+        >>> Right(Just(1)).transpose()
+        Just(Right(1))
+        """
+        raise NotImplementedError
+
     def right(self) -> Maybe[R]:
         """Converts the Either Monad into a Maybe Monad, discarding any Left value.
 
@@ -587,12 +650,15 @@ class _EitherImpl(Generic[L, R]):
         raise NotImplementedError
 
     def unwrap_or(self, default_value: R) -> R:  # type: ignore[misc]
-        """Returns the Right value, or otherwise a provided default value of the same type.
+        """Returns the Right value, or otherwise the provided default value.
+
+        On an `Either[L, R]` the default must be an R. On a bare Left (whose Right type is Never)
+        any default is accepted, e.g. `Left("e").unwrap_or(10)`.
 
         Parameters
         ----------
         default_value: R
-            Default value of R
+            Default value returned if the Either Monad is Left.
 
         Returns
         -------
@@ -607,18 +673,20 @@ class _EitherImpl(Generic[L, R]):
         """
         raise NotImplementedError
 
-    def unwrap_or_else(self, left_function: Callable[[L], R]) -> R:
-        """Returns the Right value, or otherwise calls the left_function with the Left value.
+    def unwrap_or_else(self, function: Callable[[L], R]) -> R:
+        """Returns the Right value, or otherwise calls function with the Left value.
+
+        Like `unwrap_or`, a bare Left accepts a function returning any type.
 
         Parameters
         ----------
-        left_function: Callable[[L], R]
-            Function which will be called if the Either Monad is Left.
+        function: Callable[[L], R]
+            Function which will be called with the Left value if the Either Monad is Left.
 
         Returns
         -------
         result: R
-            Returns the Right value or the left_function result.
+            Returns the Right value or the function result.
 
         Examples
         --------
@@ -702,6 +770,11 @@ class _EitherImpl(Generic[L, R]):
         right: Callable[[R], U]
             Callback function for Either monads of type Right
 
+        Returns
+        -------
+        result: U
+            Returns the result of the callback that was called.
+
         Examples
         --------
         >>> val: Either[str, int] = Right(10)
@@ -711,8 +784,11 @@ class _EitherImpl(Generic[L, R]):
         raise NotImplementedError
 
     def is_left(self) -> bool:
-        """Returns True if the Either Monad is Left, otherwise False. Use the module-level
-        `is_left` to narrow the type.
+        """Returns True if the Either Monad is Left, otherwise False.
+
+        Returns
+        -------
+        result: bool
 
         Examples
         --------
@@ -723,8 +799,11 @@ class _EitherImpl(Generic[L, R]):
         raise NotImplementedError
 
     def is_right(self) -> bool:
-        """Returns True if the Either Monad is Right, otherwise False. Use the module-level
-        `is_right` to narrow the type.
+        """Returns True if the Either Monad is Right, otherwise False.
+
+        Returns
+        -------
+        result: bool
 
         Examples
         --------
@@ -734,10 +813,84 @@ class _EitherImpl(Generic[L, R]):
         """
         raise NotImplementedError
 
+    @staticmethod
+    def from_maybe(maybe: Maybe[U], left_value: F) -> Either[F, U]:
+        """Converts a Maybe Monad into an Either Monad: Just(x) becomes Right(x), Nothing becomes
+        Left(left_value).
+
+        Available on both variants (`Right.from_maybe` and `Left.from_maybe` are the same function).
+
+        Parameters
+        ----------
+        maybe: Maybe[U]
+            Maybe Monad to be converted.
+        left_value: F
+            Left value used if the Maybe Monad is Nothing.
+
+        Returns
+        -------
+        either: Either[F, U]
+            Returns Right of the Just value, or Left(left_value).
+
+        Examples
+        --------
+        >>> from pymoliath.maybe import Just, Nothing
+        >>> Right.from_maybe(Just(1), "missing")
+        Right(1)
+        >>> Right.from_maybe(Nothing(), "missing")
+        Left('missing')
+        """
+        if isinstance(maybe, _maybe.Just):
+            return Right(maybe.value)
+        return Left(left_value)
+
+    @staticmethod
+    @overload
+    def safe(function: Callable[[], U]) -> Either[Exception, U]: ...
+
+    @staticmethod
+    @overload
+    def safe(
+        function: Callable[[], U], *, exceptions: tuple[type[X], ...]
+    ) -> Either[X, U]: ...
+
+    @staticmethod
+    def safe(
+        function: Callable[[], U],
+        *,
+        exceptions: tuple[type[BaseException], ...] = (Exception,),
+    ) -> Either[BaseException, U]:
+        """Calls function and wraps its return value in Right, or a raised exception in Left.
+
+        Parameters
+        ----------
+        function: Callable[[], U]
+            Zero-argument function which may raise an exception.
+        exceptions: tuple[type[X], ...]
+            The exception types to catch (default: `Exception`). Any other exception propagates.
+
+        Returns
+        -------
+        either: Either[X, U]
+
+        Examples
+        --------
+        >>> Right.safe(lambda: 1)
+        Right(1)
+        >>> Right.safe(lambda: 1 / 0)
+        Left(ZeroDivisionError('division by zero'))
+        >>> Right.safe(lambda: int("x"), exceptions=(ValueError,)).is_left()
+        True
+        """
+        try:
+            return Right(function())
+        except exceptions as e:
+            return Left(e)
+
 
 @final
-@dataclass(frozen=True, slots=True, repr=False)
-class Left(_EitherImpl[L_Never, R_Never]):
+@dataclass(frozen=True, slots=True, repr=False, init=False)
+class Left(_EitherImpl[LeftT, RightT]):
     """The Left variant of the Either Monad, typically wrapping an error value.
 
     Equality and hashing compare the wrapped value. Exceptions compare by identity, so two
@@ -751,80 +904,92 @@ class Left(_EitherImpl[L_Never, R_Never]):
     'Left(Error)'
     """
 
-    value: L_Never
+    value: LeftT
 
-    def map(self, function: Callable[[R_Never], U]) -> Left[L_Never, U]:
-        return self  # type: ignore[return-value]
+    def __init__(self, value: LeftT) -> None:
+        _set_left_value(self, value)
 
-    def map_left(self, function: Callable[[L_Never], F]) -> Left[F, R_Never]:
+    def map(self: Left[LeftT, Any], function: Callable[[RightT], U]) -> Left[LeftT, U]:
+        return self
+
+    def map_left(self, function: Callable[[LeftT], F]) -> Left[F, RightT]:
         return Left(function(self.value))
 
     def bind(
-        self, function: Callable[[R_Never], Either[L_Never, U]]
-    ) -> Left[L_Never, U]:
-        return self  # type: ignore[return-value]
+        self: Left[LeftT, Any], function: Callable[[RightT], Either[LeftT, U]]
+    ) -> Left[LeftT, U]:
+        return self
 
     and_then = bind
 
     def bind_left(
-        self, function: Callable[[L_Never], Either[F, R_Never]]
-    ) -> Either[F, R_Never]:
+        self, function: Callable[[LeftT], Either[F, RightT]]
+    ) -> Either[F, RightT]:
         return function(self.value)
 
     or_else = bind_left
 
     def apply(
-        self, function: Either[L_Never, Callable[[R_Never], U]]
-    ) -> Left[L_Never, U]:
+        self: Left[LeftT, Any], function: Either[LeftT, Callable[[RightT], U]]
+    ) -> Left[LeftT, U]:
         if isinstance(function, Left):
-            return function  # type: ignore[return-value]
-        return self  # type: ignore[return-value]
+            failed: Left[LeftT, Any] = function
+            return failed
+        return self
 
     def apply2(
-        self: Left[L_Never, Callable[[U], V]], value: Either[L_Never, U]
-    ) -> Left[L_Never, V]:
-        return self  # type: ignore[return-value]
+        self: Left[LeftT, Callable[[U], V]], value: Either[LeftT, U]
+    ) -> Left[LeftT, V]:
+        failed: Left[LeftT, Any] = self
+        return failed
 
-    def is_right_and(self, function: Callable[[R_Never], bool]) -> bool:
+    def is_right_and(self, function: Callable[[RightT], bool]) -> bool:
         return False
 
-    def is_left_and(self, function: Callable[[L_Never], bool]) -> bool:
+    def is_left_and(self, function: Callable[[LeftT], bool]) -> bool:
         return function(self.value)
 
-    def map_or(self, default_value: U, function: Callable[[R_Never], U]) -> U:
+    def map_or(self, default_value: U, function: Callable[[RightT], U]) -> U:
         return default_value
 
     def map_or_else(
-        self, default_function: Callable[[L_Never], U], function: Callable[[R_Never], U]
+        self, default_function: Callable[[LeftT], U], function: Callable[[RightT], U]
     ) -> U:
         return default_function(self.value)
 
-    def filter(self, predicate: Callable[[R_Never], bool], left_value: L_Never) -> Self:  # type: ignore[misc]
+    def filter(self, predicate: Callable[[RightT], bool], left_value: LeftT) -> Self:  # type: ignore[misc]
         return self
 
-    def and_(self, other: Either[L_Never, U]) -> Left[L_Never, U]:
-        return self  # type: ignore[return-value]
+    def and_(self: Left[LeftT, Any], other: Either[LeftT, U]) -> Left[LeftT, U]:
+        return self
 
-    def or_(self, other: Either[F, R_Never]) -> Either[F, R_Never]:
+    def or_(self, other: Either[F, U]) -> Either[F, U]:
         return other
 
-    def zip(self, other: Either[L_Never, U]) -> Left[L_Never, tuple[R_Never, U]]:
-        return self  # type: ignore[return-value]
+    def zip(
+        self: Left[LeftT, Any], other: Either[LeftT, U]
+    ) -> Left[LeftT, tuple[RightT, U]]:
+        return self
 
-    def swap(self) -> Right[L_Never, R_Never]:
+    def swap(self) -> Right[RightT, LeftT]:
         return Right(self.value)
 
     def flatten(self: Left[F, Either[F, U]]) -> Left[F, U]:
-        return self  # type: ignore[return-value]
+        failed: Left[F, Any] = self
+        return failed
 
     def merge(self: Left[U, U]) -> U:
         return self.value
 
-    def right(self) -> Nothing:
-        return Nothing()
+    def transpose(self: Left[F, Maybe[U]]) -> Just[Either[F, U]]:
+        failed: Left[F, Any] = self
+        return _maybe.Just(failed)
 
-    def left(self) -> Just[L_Never]:
-        return Just(self.value)
+    def right(self) -> Nothing:
+        return _nothing or _load_nothing()
+
+    def left(self) -> Just[LeftT]:
+        return _maybe.Just(self.value)
 
     def unwrap(self) -> Never:
         value = self.value
@@ -833,25 +998,23 @@ class Left(_EitherImpl[L_Never, R_Never]):
             raise UnwrapError(self, message) from value
         raise UnwrapError(self, message)
 
-    def unwrap_or(self, default_value: R_Never) -> R_Never:  # type: ignore[misc]
+    def unwrap_or(self, default_value: U) -> U:
         return default_value
 
-    def unwrap_or_else(self, left_function: Callable[[L_Never], R_Never]) -> R_Never:
-        return left_function(self.value)
+    def unwrap_or_else(self, function: Callable[[LeftT], U]) -> U:
+        return function(self.value)
 
-    def unwrap_left_or(self, default_value: L_Never) -> L_Never:  # type: ignore[misc]
+    def unwrap_left_or(self, default_value: LeftT) -> LeftT:  # type: ignore[misc]
         return self.value
 
-    def inspect(self, function: Callable[[R_Never], None]) -> Self:
+    def inspect(self, function: Callable[[RightT], None]) -> Self:
         return self
 
-    def inspect_left(self, function: Callable[[L_Never], None]) -> Self:
+    def inspect_left(self, function: Callable[[LeftT], None]) -> Self:
         function(self.value)
         return self
 
-    def match(
-        self, *, left: Callable[[L_Never], U], right: Callable[[R_Never], U]
-    ) -> U:
+    def match(self, *, left: Callable[[LeftT], U], right: Callable[[RightT], U]) -> U:
         return left(self.value)
 
     def is_left(self) -> bool:
@@ -868,12 +1031,12 @@ class Left(_EitherImpl[L_Never, R_Never]):
 
 
 @final
-@dataclass(frozen=True, slots=True, repr=False)
-class Right(_EitherImpl[L_Never, R_Never], Generic[R_Never, L_Never]):
+@dataclass(frozen=True, slots=True, repr=False, init=False)
+class Right(_EitherImpl[LeftT, RightT]):
     """The Right variant of the Either Monad, wrapping the successful value.
 
-    Its type parameters are `Right[R, L]` (the Right type first), so a bare `Right(10)` is a
-    `Right[int, Never]`.
+    Its type parameters are `Right[L, R]`, in the same order as `Either` and `Left`, so a bare
+    `Right(10)` is a `Right[Never, int]`.
 
     Equality and hashing compare the wrapped value (an unhashable value makes the Right
     unhashable).
@@ -886,111 +1049,119 @@ class Right(_EitherImpl[L_Never, R_Never], Generic[R_Never, L_Never]):
     'Right(text)'
     """
 
-    value: R_Never
+    value: RightT
 
-    def map(self, function: Callable[[R_Never], U]) -> Right[U, L_Never]:
+    def __init__(self, value: RightT) -> None:
+        _set_right_value(self, value)
+
+    def map(self, function: Callable[[RightT], U]) -> Right[LeftT, U]:
         return Right(function(self.value))
 
-    def map_left(self, function: Callable[[L_Never], F]) -> Right[R_Never, F]:
-        return self  # type: ignore[return-value]
+    def map_left(
+        self: Right[Any, RightT], function: Callable[[LeftT], F]
+    ) -> Right[F, RightT]:
+        return self
 
-    def bind(
-        self, function: Callable[[R_Never], Either[L_Never, U]]
-    ) -> Either[L_Never, U]:
+    def bind(self, function: Callable[[RightT], Either[LeftT, U]]) -> Either[LeftT, U]:
         return function(self.value)
 
     and_then = bind
 
     def bind_left(
-        self, function: Callable[[L_Never], Either[F, R_Never]]
-    ) -> Right[R_Never, F]:
-        return self  # type: ignore[return-value]
+        self: Right[Any, RightT], function: Callable[[LeftT], Either[F, RightT]]
+    ) -> Right[F, RightT]:
+        return self
 
     or_else = bind_left
 
-    def apply(
-        self, function: Either[L_Never, Callable[[R_Never], U]]
-    ) -> Either[L_Never, U]:
+    def apply(self, function: Either[LeftT, Callable[[RightT], U]]) -> Either[LeftT, U]:
         if isinstance(function, Right):
             return Right(function.value(self.value))
-        return function  # type: ignore[return-value]
+        failed: Left[LeftT, Any] = function
+        return failed
 
     def apply2(
-        self: Right[Callable[[U], V], L_Never], value: Either[L_Never, U]
-    ) -> Either[L_Never, V]:
+        self: Right[LeftT, Callable[[U], V]], value: Either[LeftT, U]
+    ) -> Either[LeftT, V]:
         if isinstance(value, Right):
             return Right(self.value(value.value))
-        return value  # type: ignore[return-value]
+        failed: Left[LeftT, Any] = value
+        return failed
 
-    def is_right_and(self, function: Callable[[R_Never], bool]) -> bool:
+    def is_right_and(self, function: Callable[[RightT], bool]) -> bool:
         return function(self.value)
 
-    def is_left_and(self, function: Callable[[L_Never], bool]) -> bool:
+    def is_left_and(self, function: Callable[[LeftT], bool]) -> bool:
         return False
 
-    def map_or(self, default_value: U, function: Callable[[R_Never], U]) -> U:
+    def map_or(self, default_value: U, function: Callable[[RightT], U]) -> U:
         return function(self.value)
 
     def map_or_else(
-        self, default_function: Callable[[L_Never], U], function: Callable[[R_Never], U]
+        self, default_function: Callable[[LeftT], U], function: Callable[[RightT], U]
     ) -> U:
         return function(self.value)
 
     def filter(
         self,
-        predicate: Callable[[R_Never], bool],
-        left_value: L_Never,  # type: ignore[misc]
-    ) -> Either[L_Never, R_Never]:
+        predicate: Callable[[RightT], bool],
+        left_value: LeftT,  # type: ignore[misc]
+    ) -> Either[LeftT, RightT]:
         return self if predicate(self.value) else Left(left_value)
 
-    def and_(self, other: Either[L_Never, U]) -> Either[L_Never, U]:
+    def and_(self, other: Either[LeftT, U]) -> Either[LeftT, U]:
         return other
 
-    def or_(self, other: Either[F, R_Never]) -> Right[R_Never, F]:
-        return self  # type: ignore[return-value]
+    def or_(self: Right[Any, RightT], other: Either[F, RightT]) -> Right[F, RightT]:
+        return self
 
-    def zip(self, other: Either[L_Never, U]) -> Either[L_Never, tuple[R_Never, U]]:
+    def zip(self, other: Either[LeftT, U]) -> Either[LeftT, tuple[RightT, U]]:
         if isinstance(other, Right):
             return Right((self.value, other.value))
-        return other  # type: ignore[return-value]
+        failed: Left[LeftT, Any] = other
+        return failed
 
-    def swap(self) -> Left[R_Never, L_Never]:
+    def swap(self) -> Left[RightT, LeftT]:
         return Left(self.value)
 
-    def flatten(self: Right[Either[F, U], F]) -> Either[F, U]:
+    def flatten(self: Right[F, Either[F, U]]) -> Either[F, U]:
         return self.value
 
     def merge(self: Right[U, U]) -> U:
         return self.value
 
-    def right(self) -> Just[R_Never]:
-        return Just(self.value)
+    def transpose(self: Right[F, Maybe[U]]) -> Maybe[Either[F, U]]:
+        maybe = self.value
+        if isinstance(maybe, _maybe.Just):
+            return _maybe.Just(Right(maybe.value))
+        return maybe
+
+    def right(self) -> Just[RightT]:
+        return _maybe.Just(self.value)
 
     def left(self) -> Nothing:
-        return Nothing()
+        return _nothing or _load_nothing()
 
-    def unwrap(self) -> R_Never:
+    def unwrap(self) -> RightT:
         return self.value
 
-    def unwrap_or(self, default_value: R_Never) -> R_Never:  # type: ignore[misc]
+    def unwrap_or(self, default_value: RightT) -> RightT:  # type: ignore[misc]
         return self.value
 
-    def unwrap_or_else(self, left_function: Callable[[L_Never], R_Never]) -> R_Never:
+    def unwrap_or_else(self, function: Callable[[LeftT], RightT]) -> RightT:
         return self.value
 
-    def unwrap_left_or(self, default_value: L_Never) -> L_Never:  # type: ignore[misc]
+    def unwrap_left_or(self, default_value: F) -> F:
         return default_value
 
-    def inspect(self, function: Callable[[R_Never], None]) -> Self:
+    def inspect(self, function: Callable[[RightT], None]) -> Self:
         function(self.value)
         return self
 
-    def inspect_left(self, function: Callable[[L_Never], None]) -> Self:
+    def inspect_left(self, function: Callable[[LeftT], None]) -> Self:
         return self
 
-    def match(
-        self, *, left: Callable[[L_Never], U], right: Callable[[R_Never], U]
-    ) -> U:
+    def match(self, *, left: Callable[[LeftT], U], right: Callable[[RightT], U]) -> U:
         return right(self.value)
 
     def is_left(self) -> bool:
@@ -1006,137 +1177,15 @@ class Right(_EitherImpl[L_Never, R_Never], Generic[R_Never, L_Never]):
         return f"Right({self.value!r})"
 
 
-type Either[LeftT, RightT] = Left[LeftT, RightT] | Right[RightT, LeftT]
+# The dataclasses are frozen, so their generated `__init__` has to bypass the blocking `__setattr__`
+# through `object.__setattr__`, which is slow. The hand-written `__init__`s above call the slot's
+# descriptor directly instead (about a third faster); assignment after construction still raises
+# `FrozenInstanceError`.
+_set_left_value: Callable[[Left[Any, Any], object], None] = Left.__dict__[
+    "value"
+].__set__
+_set_right_value: Callable[[Right[Any, Any], object], None] = Right.__dict__[
+    "value"
+].__set__
 
-EITHER_TYPES: tuple[type[Left[Any, Any]], type[Right[Any, Any]]] = (Left, Right)
-"""The runtime classes of `Either`, for `isinstance` checks (`Either` itself is a type alias)."""
-
-
-def is_either(value: object) -> TypeIs[Either[Any, Any]]:
-    """Returns True if `value` is a Left or a Right.
-
-    Examples
-    --------
-    >>> is_either(Right(1)), is_either(1)
-    (True, False)
-    """
-    return isinstance(value, EITHER_TYPES)
-
-
-def is_left(either: Either[F, U]) -> TypeIs[Left[F, U]]:
-    """Returns True if the Either Monad is Left, narrowing it to `Left` for type checkers.
-
-    Examples
-    --------
-    >>> val: Either[str, int] = Left("e")
-    >>> if is_left(val):
-    ...     print(val.value)
-    e
-    """
-    return isinstance(either, Left)
-
-
-def is_right(either: Either[F, U]) -> TypeIs[Right[U, F]]:
-    """Returns True if the Either Monad is Right, narrowing it to `Right` for type checkers.
-
-    Examples
-    --------
-    >>> val: Either[str, int] = Right(1)
-    >>> if is_right(val):
-    ...     print(val.value)
-    1
-    """
-    return isinstance(either, Right)
-
-
-def map2(
-    first: Either[F, U], second: Either[F, V], function: Callable[[U, V], W]
-) -> Either[F, W]:
-    """Applies a two-argument function to the values of two Either Monads if both are Right.
-
-    If both are Left, the first Left takes precedence.
-
-    Examples
-    --------
-    >>> map2(Right(1), Right(2), lambda a, b: a + b)
-    Right(3)
-    >>> map2(Left("first"), Left("second"), lambda a, b: a + b)
-    Left('first')
-    """
-    if isinstance(first, Left):
-        return first  # type: ignore[return-value]
-    if isinstance(second, Left):
-        return second  # type: ignore[return-value]
-    return Right(function(first.value, second.value))
-
-
-def map3(
-    first: Either[F, U],
-    second: Either[F, V],
-    third: Either[F, W],
-    function: Callable[[U, V, W], Y],
-) -> Either[F, Y]:
-    """Applies a three-argument function to the values of three Either Monads if all are Right.
-
-    If several are Left, the first Left takes precedence.
-
-    Examples
-    --------
-    >>> map3(Right(1), Right(2), Right(3), lambda a, b, c: a + b + c)
-    Right(6)
-    """
-    if isinstance(first, Left):
-        return first  # type: ignore[return-value]
-    if isinstance(second, Left):
-        return second  # type: ignore[return-value]
-    if isinstance(third, Left):
-        return third  # type: ignore[return-value]
-    return Right(function(first.value, second.value, third.value))
-
-
-@overload
-def either_safe(function: Callable[[], U]) -> Either[Exception, U]: ...
-
-
-@overload
-def either_safe(
-    function: Callable[[], U], *, exceptions: tuple[type[X], ...]
-) -> Either[X, U]: ...
-
-
-def either_safe(
-    function: Callable[[], U],
-    *,
-    exceptions: tuple[type[BaseException], ...] = (Exception,),
-) -> Either[BaseException, U]:
-    """Calls function and wraps its return value in Right, or a raised exception in Left.
-
-    Parameters
-    ----------
-    function: Callable[[], U]
-        Zero-argument function which may raise an exception.
-    exceptions: tuple[type[X], ...]
-        The exception types to catch (default: `Exception`). Any other exception propagates.
-
-    Returns
-    -------
-    either: Either[X, U]
-
-    Examples
-    --------
-    >>> either_safe(lambda: 1)
-    Right(1)
-    >>> either_safe(lambda: 1 / 0)
-    Left(ZeroDivisionError('division by zero'))
-    >>> either_safe(lambda: int("x"), exceptions=(ValueError,)).is_left()
-    True
-    """
-    try:
-        return Right(function())
-    except exceptions as e:
-        return Left(e)
-
-
-# Imported last: maybe.py imports Left/Right from this module, so the cycle resolves once at
-# import time instead of on every call.
-from pymoliath.maybe import Just, Maybe, Nothing  # noqa: E402
+type Either[L, R] = Left[L, R] | Right[L, R]

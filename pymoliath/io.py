@@ -85,7 +85,7 @@ class IO(Generic[TypeSource]):
         >>> action.run()
         10
         """
-        if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
+        if not callable(value):
             raise TypeError("IO value must be of type Callable")
         self._value = value
 

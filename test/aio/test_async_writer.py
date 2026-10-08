@@ -115,3 +115,14 @@ class TestAsyncWriter(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((10, "log"), await pipeline)
         self.assertEqual((10, "log"), await pipeline)
         self.assertEqual([10, 10], calls)
+
+    async def test_bind_returning_plain_tuple(self):
+        """Regression: a callback returning a plain (value, monoid) tuple must not be awaited."""
+        writer: AsyncWriter[int, list[str]] = AsyncWriter.from_value(10, ["created"])
+        self.assertEqual(
+            (11, ["created", "incremented"]),
+            await writer.bind(lambda x: (x + 1, ["incremented"])),
+        )
+
+    async def test_run_returns_a_coroutine(self):
+        self.assertEqual((1, ["log"]), await AsyncWriter.from_value(1, ["log"]).run())

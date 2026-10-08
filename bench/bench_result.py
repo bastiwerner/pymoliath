@@ -7,7 +7,7 @@ size. Pass pyperf options such as `--fast` or `-o out.json` to compare runs with
 
 import sys
 
-import pyperf
+import pyperf  # pyright: ignore[reportMissingTypeStubs]  (pyperf ships no type information)
 
 from pymoliath.result import Err, Ok, Result
 

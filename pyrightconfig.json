@@ -1,5 +1,9 @@
 {
-  "include": ["pymoliath", "test"],
+  "include": [
+    "pymoliath",
+    "test",
+    "bench"
+  ],
   "typeCheckingMode": "strict",
   "reportUnknownArgumentType": "none",
   "reportUnknownLambdaType": "none",

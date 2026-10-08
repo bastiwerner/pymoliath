@@ -90,7 +90,7 @@ class Reader(Generic[TypeEnv, TypeSource]):
         >>> reader.run({"value": 10})
         10
         """
-        if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
+        if not callable(value):
             raise TypeError("Reader value must be of type Callable")
         self._value = value
 

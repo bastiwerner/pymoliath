@@ -1,7 +1,7 @@
 [project]
 name = "pymoliath"
-version = "2.0.0"
-description = ""
+version = "3.0.0"
+description = "Type-safe, Rust- and Haskell-style monads for Python: Result, Either, Option, Maybe, Try, IO, Reader, Writer, State and their async counterparts."
 authors = [{ name = "Bastian Werner", email = "bastian-werner@outlook.com" }]
 requires-python = ">=3.12,<4.0"
 dependencies = [
@@ -21,22 +21,7 @@ dev = [
 
 [tool.mypy]
 strict = true
-# The sum types, their async wrappers and the helpers they use. Reader/State/IO/Lazy/Writer are not
-# mypy-clean yet (pyright covers the whole package).
-files = [
-    "pymoliath/result.py",
-    "pymoliath/either.py",
-    "pymoliath/option.py",
-    "pymoliath/maybe.py",
-    "pymoliath/exception.py",
-    "pymoliath/errors.py",
-    "pymoliath/util.py",
-    "pymoliath/aio/async_result.py",
-    "pymoliath/aio/async_either.py",
-    "pymoliath/aio/async_option.py",
-    "pymoliath/aio/async_maybe.py",
-    "pymoliath/aio/async_try.py",
-]
+files = ["pymoliath"]
 follow_imports = "silent"
 
 [tool.ruff]

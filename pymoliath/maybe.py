@@ -77,32 +77,36 @@ match maybe_value:
         print("No value present")
 ```
 
-`Maybe` is a type alias, so use `is_maybe` (or `isinstance(x, MAYBE_TYPES)`) for runtime checks
-and `is_just`/`is_nothing` to narrow a `Maybe` to one of its variants.
+`Maybe` is a type alias, so check it at runtime with `isinstance(x, (Just, Nothing))`. Both a `match`
+over `Just`/`Nothing` and `isinstance(x, Just)` narrow the type to the variant.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, ClassVar, Never, Self, final, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Never, Self, final, overload
 
-from typing_extensions import Generic, TypeIs, TypeVar
+from typing_extensions import Generic, TypeVar
 
+# maybe.py and either.py convert into each other. Importing the module (not its names) lets the
+# cycle resolve at import time; its attributes are looked up when the conversions run.
+import pymoliath.either as _either
 from pymoliath.errors import UnwrapError
+
+if TYPE_CHECKING:
+    from pymoliath.either import Either, Left, Right
 
 # Covariant, so `Just[bool]` is a `Maybe[int]` and `Nothing` (a `Maybe[Never]`) is every `Maybe[T]`.
 # Like in Rust the receiver fixes the types some methods accept (`unwrap_or(default: T)`,
 # `or_(other: Maybe[T])`), which puts the covariant parameter in an input position. That is sound
 # here: the containers are immutable and those arguments are only ever returned, typed by the
-# receiver's (wider) view. Those methods carry a `# type: ignore[misc]`.
+# receiver's (wider) view. Those methods carry a `type: ignore` (misc).
 T = TypeVar("T", covariant=True)
 
 # Method/function-scoped type variables.
 U = TypeVar("U")
 V = TypeVar("V")
-W = TypeVar("W")
-Y = TypeVar("Y")
 L = TypeVar("L")
 
 
@@ -160,6 +164,16 @@ class _MaybeImpl(Generic[T]):
     def and_then(self, function: Callable[[T], Maybe[U]]) -> Maybe[U]:
         """Alias of `bind`, named like in Rust.
 
+        Parameters
+        ----------
+        function: Callable[[T], Maybe[U]]
+            Function which takes a value of T and returns a new Maybe Monad.
+
+        Returns
+        -------
+        maybe: Maybe[U]
+            Returns the function result if Just, otherwise Nothing.
+
         Examples
         --------
         >>> Just(5).and_then(lambda x: Just(x * 2))
@@ -175,6 +189,11 @@ class _MaybeImpl(Generic[T]):
         function: Callable[[], Maybe[T]]
             Function computing the fallback Maybe Monad.
 
+        Returns
+        -------
+        maybe: Maybe[T]
+            Returns the Just, or the function result if Nothing.
+
         Examples
         --------
         >>> empty: Maybe[int] = Nothing()
@@ -185,7 +204,8 @@ class _MaybeImpl(Generic[T]):
 
     def apply(self, function: Maybe[Callable[[T], U]]) -> Maybe[U]:
         """Applies the function wrapped in `function` to the Just value if both are Just,
-        otherwise returns Nothing. For functions of several arguments, use `map2`/`map3`.
+        otherwise returns Nothing. For functions of several
+        arguments, curry them and use `apply2`.
 
         Parameters
         ----------
@@ -212,7 +232,7 @@ class _MaybeImpl(Generic[T]):
         The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both are
         empty/errors, this (the function side) takes precedence. Functions of several
         arguments can be applied one argument at a time when they are curried, e.g.
-        `Just(lambda a: lambda b: a + b).apply2(x).apply2(y)`; `map2`/`map3` take them uncurried.
+        `Just(lambda a: lambda b: a + b).apply2(x).apply2(y)`.
 
         Parameters
         ----------
@@ -221,7 +241,8 @@ class _MaybeImpl(Generic[T]):
 
         Returns
         -------
-        result: Maybe[V]
+        maybe: Maybe[V]
+            Returns Just of the function result if both are Just, otherwise Nothing.
 
         Examples
         --------
@@ -233,12 +254,12 @@ class _MaybeImpl(Generic[T]):
         """
         raise NotImplementedError
 
-    def filter(self, filter_function: Callable[[T], bool]) -> Maybe[T]:
+    def filter(self, predicate: Callable[[T], bool]) -> Maybe[T]:
         """Returns the Maybe Monad if it is Just and the predicate returns True, otherwise Nothing.
 
         Parameters
         ----------
-        filter_function: Callable[[T], bool]
+        predicate: Callable[[T], bool]
             Predicate function applied to the Just value.
 
         Returns
@@ -312,6 +333,11 @@ class _MaybeImpl(Generic[T]):
         function: Callable[[T], U]
             Function applied to the Just value.
 
+        Returns
+        -------
+        result: U
+            Returns the function result or the default function's result.
+
         Examples
         --------
         >>> empty: Maybe[int] = Nothing()
@@ -367,6 +393,16 @@ class _MaybeImpl(Generic[T]):
     def xor(self, other: Maybe[T]) -> Maybe[T]:
         """Returns the Just if exactly one of this Maybe Monad and `other` is Just, otherwise Nothing.
 
+        Parameters
+        ----------
+        other: Maybe[T]
+            Maybe Monad to be compared with this Maybe Monad.
+
+        Returns
+        -------
+        maybe: Maybe[T]
+            Returns the only Just, or Nothing if both or neither are Just.
+
         Examples
         --------
         >>> val: Maybe[int] = Just(1)
@@ -421,6 +457,11 @@ class _MaybeImpl(Generic[T]):
         `Nothing()` becomes `Right(Nothing())`, `Just(Right(x))` becomes `Right(Just(x))` and
         `Just(Left(e))` becomes `Left(e)`.
 
+        Returns
+        -------
+        either: Either[L, Maybe[U]]
+            Returns the transposed Either Monad.
+
         Examples
         --------
         >>> from pymoliath.either import Right
@@ -451,19 +492,19 @@ class _MaybeImpl(Generic[T]):
         """
         raise NotImplementedError
 
-    def right_or_else(self, left_function: Callable[[], L]) -> Either[L, T]:
+    def right_or_else(self, function: Callable[[], L]) -> Either[L, T]:
         """Converts the Maybe Monad into an Either Monad, mapping Just(v) to Right(v) and Nothing to
-        Left(left_function()).
+        Left(function()).
 
         Parameters
         ----------
-        left_function: Callable[[], L]
+        function: Callable[[], L]
             Function computing the Left value if the Maybe Monad is Nothing.
 
         Returns
         -------
         either: Either[L, T]
-            Returns Right with the Just value, or Left with the left_function result.
+            Returns Right with the Just value, or Left with the function result.
 
         Examples
         --------
@@ -495,12 +536,14 @@ class _MaybeImpl(Generic[T]):
         raise NotImplementedError
 
     def unwrap_or(self, default_value: T) -> T:  # type: ignore[misc]
-        """Returns the Just value, or otherwise a provided default value of the same type.
+        """Returns the Just value, or otherwise the provided default value.
+
+        On a `Maybe[T]` the default must be a T. A bare `Nothing()` accepts a default of any type.
 
         Parameters
         ----------
         default_value: T
-            Default value of T
+            Default value used if the Maybe Monad is Nothing.
 
         Returns
         -------
@@ -515,18 +558,18 @@ class _MaybeImpl(Generic[T]):
         """
         raise NotImplementedError
 
-    def unwrap_or_else(self, nothing_function: Callable[[], T]) -> T:
-        """Returns the Just value, or otherwise calls the nothing_function.
+    def unwrap_or_else(self, function: Callable[[], T]) -> T:
+        """Returns the Just value, or otherwise the result of `function`.
 
         Parameters
         ----------
-        nothing_function: Callable[[], T]
+        function: Callable[[], T]
             Function which will be called if the Maybe Monad is Nothing.
 
         Returns
         -------
         result: T
-            Returns the Just value or the nothing_function result.
+            Returns the Just value or the function result.
 
         Examples
         --------
@@ -547,6 +590,7 @@ class _MaybeImpl(Generic[T]):
         Returns
         -------
         maybe: Maybe[T]
+            Returns the Maybe Monad unchanged.
 
         Examples
         --------
@@ -568,6 +612,11 @@ class _MaybeImpl(Generic[T]):
         nothing: Callable[[], U]
             Callback function for Maybe monads of type Nothing
 
+        Returns
+        -------
+        result: U
+            Returns the result of the callback that was called.
+
         Examples
         --------
         >>> val: Maybe[int] = Just(10)
@@ -577,8 +626,11 @@ class _MaybeImpl(Generic[T]):
         raise NotImplementedError
 
     def is_nothing(self) -> bool:
-        """Returns True if the Maybe Monad is Nothing, otherwise False. Use the module-level `is_nothing`
-        to narrow the type.
+        """Returns True if the Maybe Monad is Nothing, otherwise False.
+
+        Returns
+        -------
+        result: bool
 
         Examples
         --------
@@ -589,8 +641,11 @@ class _MaybeImpl(Generic[T]):
         raise NotImplementedError
 
     def is_just(self) -> bool:
-        """Returns True if the Maybe Monad is Just, otherwise False. Use the module-level
-        `is_just` to narrow the type.
+        """Returns True if the Maybe Monad is Just, otherwise False.
+
+        Returns
+        -------
+        result: bool
 
         Examples
         --------
@@ -603,6 +658,11 @@ class _MaybeImpl(Generic[T]):
     def to_optional(self) -> T | None:
         """Converts the Maybe Monad into an optional value: the Just value or None.
 
+        Returns
+        -------
+        value: T | None
+            Returns the Just value, or None if Nothing.
+
         Examples
         --------
         >>> val: Maybe[int] = Just(5)
@@ -612,19 +672,86 @@ class _MaybeImpl(Generic[T]):
         raise NotImplementedError
 
     @staticmethod
+    @overload
+    def from_optional(value: None) -> Nothing: ...
+
+    @staticmethod
+    @overload
+    def from_optional(value: U | None) -> Maybe[U]: ...
+
+    @staticmethod
     def from_optional(value: U | None) -> Maybe[U]:
         """Creates a Maybe Monad from an optional value: Nothing for None, otherwise Just.
+
+        Parameters
+        ----------
+        value: U | None
+            Optional value.
+
+        Returns
+        -------
+        maybe: Maybe[U]
+            Returns Nothing for None, otherwise Just of the value.
 
         Examples
         --------
         >>> Just.from_optional(None)
         Nothing()
+        >>> Just.from_optional(1)
+        Just(1)
         """
-        return from_optional(value)
+        if value is None:
+            return _NOTHING
+        return Just(value)
+
+    @staticmethod
+    @overload
+    def safe(function: Callable[[], U]) -> Maybe[U]: ...
+
+    @staticmethod
+    @overload
+    def safe(
+        function: Callable[[], U], *, exceptions: tuple[type[BaseException], ...]
+    ) -> Maybe[U]: ...
+
+    @staticmethod
+    def safe(
+        function: Callable[[], U],
+        *,
+        exceptions: tuple[type[BaseException], ...] = (Exception,),
+    ) -> Maybe[U]:
+        """Calls function and wraps its return value in Just, or returns Nothing if it raises.
+
+        Parameters
+        ----------
+        function: Callable[[], U]
+            Zero-argument function which may raise an exception.
+        exceptions: tuple[type[BaseException], ...]
+            The exception types to turn into Nothing (default: `Exception`). Any other exception
+            propagates.
+
+        Returns
+        -------
+        maybe: Maybe[U]
+            Returns Just of the function result, or Nothing if it raised one of `exceptions`.
+
+        Examples
+        --------
+        >>> Just.safe(lambda: 1)
+        Just(1)
+        >>> Just.safe(lambda: 1 / 0)
+        Nothing()
+        >>> Just.safe(lambda: int("x"), exceptions=(ValueError,))
+        Nothing()
+        """
+        try:
+            return Just(function())
+        except exceptions:
+            return _NOTHING
 
 
 @final
-@dataclass(frozen=True, slots=True, repr=False)
+@dataclass(frozen=True, slots=True, repr=False, init=False)
 class Just(_MaybeImpl[T]):
     """The Just variant of the Maybe Monad, wrapping a value.
 
@@ -639,6 +766,9 @@ class Just(_MaybeImpl[T]):
     """
 
     value: T
+
+    def __init__(self, value: T) -> None:
+        _set_just_value(self, value)
 
     def map(self, function: Callable[[T], U]) -> Just[U]:
         return Just(function(self.value))
@@ -661,8 +791,8 @@ class Just(_MaybeImpl[T]):
             return Just(self.value(value.value))
         return value
 
-    def filter(self, filter_function: Callable[[T], bool]) -> Maybe[T]:
-        return self if filter_function(self.value) else Nothing()
+    def filter(self, predicate: Callable[[T], bool]) -> Maybe[T]:
+        return self if predicate(self.value) else _NOTHING
 
     def is_just_and(self, function: Callable[[T], bool]) -> bool:
         return function(self.value)
@@ -682,7 +812,7 @@ class Just(_MaybeImpl[T]):
         return self
 
     def xor(self, other: Maybe[T]) -> Maybe[T]:
-        return self if isinstance(other, Nothing) else Nothing()
+        return self if isinstance(other, Nothing) else _NOTHING
 
     def zip(self, other: Maybe[U]) -> Maybe[tuple[T, U]]:
         if isinstance(other, Just):
@@ -694,15 +824,16 @@ class Just(_MaybeImpl[T]):
 
     def transpose(self: Just[Either[L, U]]) -> Either[L, Maybe[U]]:
         either = self.value
-        if isinstance(either, Right):
-            return Right(Just(either.value))
-        return either  # type: ignore[return-value]
+        if isinstance(either, _either.Right):
+            return _either.Right(Just(either.value))
+        failed: Left[L, Any] = either
+        return failed
 
-    def right_or(self, left_value: L) -> Right[T, L]:
-        return Right(self.value)
+    def right_or(self, left_value: L) -> Right[L, T]:
+        return _either.Right(self.value)
 
-    def right_or_else(self, left_function: Callable[[], L]) -> Right[T, L]:
-        return Right(self.value)
+    def right_or_else(self, function: Callable[[], L]) -> Right[L, T]:
+        return _either.Right(self.value)
 
     def unwrap(self) -> T:
         return self.value
@@ -710,7 +841,7 @@ class Just(_MaybeImpl[T]):
     def unwrap_or(self, default_value: T) -> T:  # type: ignore[misc]
         return self.value
 
-    def unwrap_or_else(self, nothing_function: Callable[[], T]) -> T:
+    def unwrap_or_else(self, function: Callable[[], T]) -> T:
         return self.value
 
     def inspect(self, function: Callable[[T], None]) -> Self:
@@ -737,7 +868,7 @@ class Just(_MaybeImpl[T]):
 
 
 @final
-@dataclass(frozen=True, slots=True, repr=False)
+@dataclass(frozen=True, slots=True, repr=False, init=False)
 class Nothing(_MaybeImpl[Never]):
     """The Nothing variant of the Maybe Monad, representing the absence of a value.
 
@@ -776,7 +907,7 @@ class Nothing(_MaybeImpl[Never]):
     def apply2(self, value: Maybe[U]) -> Nothing:
         return self
 
-    def filter(self, filter_function: Callable[[Never], bool]) -> Nothing:
+    def filter(self, predicate: Callable[[Never], bool]) -> Nothing:
         return self
 
     def is_just_and(self, function: Callable[[Never], bool]) -> bool:
@@ -805,14 +936,14 @@ class Nothing(_MaybeImpl[Never]):
     def flatten(self) -> Nothing:
         return self
 
-    def transpose(self) -> Right[Nothing, Never]:
-        return Right(self)
+    def transpose(self) -> Right[Never, Nothing]:
+        return _either.Right(self)
 
     def right_or(self, left_value: L) -> Left[L, Never]:
-        return Left(left_value)
+        return _either.Left(left_value)
 
-    def right_or_else(self, left_function: Callable[[], L]) -> Left[L, Never]:
-        return Left(left_function())
+    def right_or_else(self, function: Callable[[], L]) -> Left[L, Never]:
+        return _either.Left(function())
 
     def unwrap(self) -> Never:
         raise UnwrapError(self, "called unwrap on Nothing()")
@@ -820,8 +951,8 @@ class Nothing(_MaybeImpl[Never]):
     def unwrap_or(self, default_value: U) -> U:
         return default_value
 
-    def unwrap_or_else(self, nothing_function: Callable[[], U]) -> U:
-        return nothing_function()
+    def unwrap_or_else(self, function: Callable[[], U]) -> U:
+        return function()
 
     def inspect(self, function: Callable[[Never], None]) -> Self:
         return self
@@ -847,146 +978,10 @@ class Nothing(_MaybeImpl[Never]):
 
 type Maybe[T] = Just[T] | Nothing
 
-MAYBE_TYPES: tuple[type[Just[Any]], type[Nothing]] = (Just, Nothing)
-"""The runtime classes of `Maybe`, for `isinstance` checks (`Maybe` itself is a type alias)."""
+# A frozen dataclass's generated __init__ assigns fields through object.__setattr__, which is slow.
+# Just's __init__ sets its slot through the slot's member descriptor instead (about a third
+# faster); the instance stays frozen, so assignment still raises FrozenInstanceError.
+_set_just_value: Callable[[Just[Any], Any], None] = Just.__dict__["value"].__set__
 
-
-def is_maybe(value: object) -> TypeIs[Maybe[Any]]:
-    """Returns True if `value` is a Just or Nothing.
-
-    Examples
-    --------
-    >>> is_maybe(Nothing()), is_maybe(None)
-    (True, False)
-    """
-    return isinstance(value, MAYBE_TYPES)
-
-
-def is_just(maybe: Maybe[U]) -> TypeIs[Just[U]]:
-    """Returns True if the Maybe Monad is Just, narrowing it to `Just` for type checkers.
-
-    Examples
-    --------
-    >>> val: Maybe[int] = Just(1)
-    >>> if is_just(val):
-    ...     print(val.value)
-    1
-    """
-    return isinstance(maybe, Just)
-
-
-def is_nothing(maybe: Maybe[U]) -> TypeIs[Nothing]:
-    """Returns True if the Maybe Monad is Nothing, narrowing it to `Nothing` for type checkers.
-
-    Examples
-    --------
-    >>> is_nothing(Nothing())
-    True
-    """
-    return isinstance(maybe, Nothing)
-
-
-def from_optional(value: U | None) -> Maybe[U]:
-    """Creates a Maybe Monad from an optional value: Nothing for None, otherwise Just.
-
-    Parameters
-    ----------
-    value: U | None
-        Optional value.
-
-    Returns
-    -------
-    maybe: Maybe[U]
-
-    Examples
-    --------
-    >>> from_optional(None)
-    Nothing()
-    >>> from_optional(1)
-    Just(1)
-    """
-    if value is None:
-        return Nothing()
-    return Just(value)
-
-
-def map2(first: Maybe[U], second: Maybe[V], function: Callable[[U, V], W]) -> Maybe[W]:
-    """Applies a two-argument function to the values of two Maybe Monads if both are Just.
-
-    Examples
-    --------
-    >>> map2(Just(1), Just(2), lambda a, b: a + b)
-    Just(3)
-    >>> map2(Just(1), Nothing(), lambda a, b: a + b)
-    Nothing()
-    """
-    if isinstance(first, Just) and isinstance(second, Just):
-        return Just(function(first.value, second.value))
-    return Nothing()
-
-
-def map3(
-    first: Maybe[U],
-    second: Maybe[V],
-    third: Maybe[W],
-    function: Callable[[U, V, W], Y],
-) -> Maybe[Y]:
-    """Applies a three-argument function to the values of three Maybe Monads if all are Just.
-
-    Examples
-    --------
-    >>> map3(Just(1), Just(2), Just(3), lambda a, b, c: a + b + c)
-    Just(6)
-    """
-    if isinstance(first, Just) and isinstance(second, Just) and isinstance(third, Just):
-        return Just(function(first.value, second.value, third.value))
-    return Nothing()
-
-
-@overload
-def safe(function: Callable[[], U]) -> Maybe[U]: ...
-
-
-@overload
-def safe(
-    function: Callable[[], U], *, exceptions: tuple[type[BaseException], ...]
-) -> Maybe[U]: ...
-
-
-def safe(
-    function: Callable[[], U],
-    *,
-    exceptions: tuple[type[BaseException], ...] = (Exception,),
-) -> Maybe[U]:
-    """Calls function and wraps its return value in Just, or returns Nothing if it raises.
-
-    Parameters
-    ----------
-    function: Callable[[], U]
-        Zero-argument function which may raise an exception.
-    exceptions: tuple[type[BaseException], ...]
-        The exception types to turn into Nothing (default: `Exception`). Any other exception
-        propagates.
-
-    Returns
-    -------
-    maybe: Maybe[U]
-
-    Examples
-    --------
-    >>> safe(lambda: 1)
-    Just(1)
-    >>> safe(lambda: 1 / 0)
-    Nothing()
-    >>> safe(lambda: int("x"), exceptions=(ValueError,))
-    Nothing()
-    """
-    try:
-        return Just(function())
-    except exceptions:
-        return Nothing()
-
-
-# Imported last: either.py imports Just/Nothing from this module, so the cycle resolves once at
-# import time instead of on every call.
-from pymoliath.either import Either, Left, Right  # noqa: E402
+# The Nothing singleton, returned directly on hot paths instead of going through Nothing.__new__.
+_NOTHING = Nothing()

@@ -77,32 +77,36 @@ match option_value:
         print("No value present")
 ```
 
-`Option` is a type alias, so use `is_option` (or `isinstance(x, OPTION_TYPES)`) for runtime checks
-and `is_some`/`is_nil` to narrow an `Option` to one of its variants.
+`Option` is a type alias, so check it at runtime with `isinstance(x, (Some, Nil))`. Both a `match`
+over `Some`/`Nil` and `isinstance(x, Some)` narrow the type to the variant.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, ClassVar, Never, Self, final, overload
+from typing import TYPE_CHECKING, Any, ClassVar, Never, Self, final, overload
 
-from typing_extensions import Generic, TypeIs, TypeVar
+from typing_extensions import Generic, TypeVar
 
+# option.py and result.py convert into each other. Importing the module (not its names) lets the
+# cycle resolve at import time; its attributes are looked up when the conversions run.
+import pymoliath.result as _result
 from pymoliath.errors import UnwrapError
+
+if TYPE_CHECKING:
+    from pymoliath.result import Err, Ok, Result
 
 # Covariant, so `Some[bool]` is an `Option[int]` and `Nil` (an `Option[Never]`) is every `Option[T]`.
 # Like in Rust the receiver fixes the types some methods accept (`unwrap_or(default: T)`,
 # `or_(other: Option[T])`), which puts the covariant parameter in an input position. That is sound
 # here: the containers are immutable and those arguments are only ever returned, typed by the
-# receiver's (wider) view. Those methods carry a `# type: ignore[misc]`.
+# receiver's (wider) view. Those methods carry a `type: ignore` (misc).
 T = TypeVar("T", covariant=True)
 
 # Method/function-scoped type variables.
 U = TypeVar("U")
 V = TypeVar("V")
-W = TypeVar("W")
-Y = TypeVar("Y")
 E = TypeVar("E")
 
 
@@ -160,6 +164,16 @@ class _OptionImpl(Generic[T]):
     def and_then(self, function: Callable[[T], Option[U]]) -> Option[U]:
         """Alias of `bind`, named like in Rust.
 
+        Parameters
+        ----------
+        function: Callable[[T], Option[U]]
+            Function which takes a value of T and returns a new Option Monad.
+
+        Returns
+        -------
+        option: Option[U]
+            Returns the function result if Some, otherwise Nil.
+
         Examples
         --------
         >>> Some(5).and_then(lambda x: Some(x * 2))
@@ -175,6 +189,11 @@ class _OptionImpl(Generic[T]):
         function: Callable[[], Option[T]]
             Function computing the fallback Option Monad.
 
+        Returns
+        -------
+        option: Option[T]
+            Returns the Some, or the function result if Nil.
+
         Examples
         --------
         >>> empty: Option[int] = Nil()
@@ -185,7 +204,8 @@ class _OptionImpl(Generic[T]):
 
     def apply(self, function: Option[Callable[[T], U]]) -> Option[U]:
         """Applies the function wrapped in `function` to the Some value if both are Some,
-        otherwise returns Nil. For functions of several arguments, use `map2`/`map3`.
+        otherwise returns Nil. For functions of several
+        arguments, curry them and use `apply2`.
 
         Parameters
         ----------
@@ -212,7 +232,7 @@ class _OptionImpl(Generic[T]):
         The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both are
         empty/errors, this (the function side) takes precedence. Functions of several
         arguments can be applied one argument at a time when they are curried, e.g.
-        `Some(lambda a: lambda b: a + b).apply2(x).apply2(y)`; `map2`/`map3` take them uncurried.
+        `Some(lambda a: lambda b: a + b).apply2(x).apply2(y)`.
 
         Parameters
         ----------
@@ -221,7 +241,8 @@ class _OptionImpl(Generic[T]):
 
         Returns
         -------
-        result: Option[V]
+        option: Option[V]
+            Returns Some of the function result if both are Some, otherwise Nil.
 
         Examples
         --------
@@ -233,12 +254,12 @@ class _OptionImpl(Generic[T]):
         """
         raise NotImplementedError
 
-    def filter(self, filter_function: Callable[[T], bool]) -> Option[T]:
+    def filter(self, predicate: Callable[[T], bool]) -> Option[T]:
         """Returns the Option Monad if it is Some and the predicate returns True, otherwise Nil.
 
         Parameters
         ----------
-        filter_function: Callable[[T], bool]
+        predicate: Callable[[T], bool]
             Predicate function applied to the Some value.
 
         Returns
@@ -312,6 +333,11 @@ class _OptionImpl(Generic[T]):
         function: Callable[[T], U]
             Function applied to the Some value.
 
+        Returns
+        -------
+        result: U
+            Returns the function result or the default function's result.
+
         Examples
         --------
         >>> empty: Option[int] = Nil()
@@ -367,6 +393,16 @@ class _OptionImpl(Generic[T]):
     def xor(self, other: Option[T]) -> Option[T]:
         """Returns the Some if exactly one of this Option Monad and `other` is Some, otherwise Nil.
 
+        Parameters
+        ----------
+        other: Option[T]
+            Option Monad to be compared with this Option Monad.
+
+        Returns
+        -------
+        option: Option[T]
+            Returns the only Some, or Nil if both or neither are Some.
+
         Examples
         --------
         >>> val: Option[int] = Some(1)
@@ -415,11 +451,18 @@ class _OptionImpl(Generic[T]):
         """
         raise NotImplementedError
 
-    def transpose(self: _OptionImpl[Result[U, E]]) -> Result[Option[U], E]:
+    def transpose(
+        self: _OptionImpl[Result[U, E]],
+    ) -> Result[Option[U], E]:
         """Transposes an Option of a Result into a Result of an Option.
 
         `Nil()` becomes `Ok(Nil())`, `Some(Ok(x))` becomes `Ok(Some(x))` and `Some(Err(e))` becomes
         `Err(e)`.
+
+        Returns
+        -------
+        result: Result[Option[U], E]
+            Returns the transposed Result Monad.
 
         Examples
         --------
@@ -429,19 +472,19 @@ class _OptionImpl(Generic[T]):
         """
         raise NotImplementedError
 
-    def ok_or(self, err_value: E) -> Result[T, E]:
+    def ok_or(self, error: E) -> Result[T, E]:
         """Converts the Option Monad into a Result Monad, mapping Some(v) to Ok(v) and Nil to
-        Err(err_value).
+        Err(error).
 
         Parameters
         ----------
-        err_value: E
+        error: E
             Error value used if the Option Monad is Nil.
 
         Returns
         -------
         result: Result[T, E]
-            Returns Ok with the Some value, or Err with err_value.
+            Returns Ok with the Some value, or Err with the error value.
 
         Examples
         --------
@@ -451,19 +494,19 @@ class _OptionImpl(Generic[T]):
         """
         raise NotImplementedError
 
-    def ok_or_else(self, err_function: Callable[[], E]) -> Result[T, E]:
+    def ok_or_else(self, function: Callable[[], E]) -> Result[T, E]:
         """Converts the Option Monad into a Result Monad, mapping Some(v) to Ok(v) and Nil to
-        Err(err_function()).
+        Err(function()).
 
         Parameters
         ----------
-        err_function: Callable[[], E]
+        function: Callable[[], E]
             Function computing the error value if the Option Monad is Nil.
 
         Returns
         -------
         result: Result[T, E]
-            Returns Ok with the Some value, or Err with the err_function result.
+            Returns Ok with the Some value, or Err with the function result.
 
         Examples
         --------
@@ -495,12 +538,14 @@ class _OptionImpl(Generic[T]):
         raise NotImplementedError
 
     def unwrap_or(self, default_value: T) -> T:  # type: ignore[misc]
-        """Returns the Some value, or otherwise a provided default value of the same type.
+        """Returns the Some value, or otherwise the provided default value.
+
+        On an `Option[T]` the default must be a T. A bare `Nil()` accepts a default of any type.
 
         Parameters
         ----------
         default_value: T
-            Default value of T
+            Default value used if the Option Monad is Nil.
 
         Returns
         -------
@@ -515,18 +560,18 @@ class _OptionImpl(Generic[T]):
         """
         raise NotImplementedError
 
-    def unwrap_or_else(self, nothing_function: Callable[[], T]) -> T:
-        """Returns the Some value, or otherwise calls the nothing_function.
+    def unwrap_or_else(self, function: Callable[[], T]) -> T:
+        """Returns the Some value, or otherwise the result of `function`.
 
         Parameters
         ----------
-        nothing_function: Callable[[], T]
+        function: Callable[[], T]
             Function which will be called if the Option Monad is Nil.
 
         Returns
         -------
         result: T
-            Returns the Some value or the nothing_function result.
+            Returns the Some value or the function result.
 
         Examples
         --------
@@ -547,6 +592,7 @@ class _OptionImpl(Generic[T]):
         Returns
         -------
         option: Option[T]
+            Returns the Option Monad unchanged.
 
         Examples
         --------
@@ -568,6 +614,11 @@ class _OptionImpl(Generic[T]):
         nil: Callable[[], U]
             Callback function for Option monads of type Nil
 
+        Returns
+        -------
+        result: U
+            Returns the result of the callback that was called.
+
         Examples
         --------
         >>> val: Option[int] = Some(10)
@@ -576,21 +627,27 @@ class _OptionImpl(Generic[T]):
         """
         raise NotImplementedError
 
-    def is_nothing(self) -> bool:
-        """Returns True if the Option Monad is Nil, otherwise False. Use the module-level `is_nil`
-        to narrow the type.
+    def is_nil(self) -> bool:
+        """Returns True if the Option Monad is Nil, otherwise False.
+
+        Returns
+        -------
+        result: bool
 
         Examples
         --------
         >>> val: Option[int] = Nil()
-        >>> val.is_nothing()
+        >>> val.is_nil()
         True
         """
         raise NotImplementedError
 
     def is_some(self) -> bool:
-        """Returns True if the Option Monad is Some, otherwise False. Use the module-level
-        `is_some` to narrow the type.
+        """Returns True if the Option Monad is Some, otherwise False.
+
+        Returns
+        -------
+        result: bool
 
         Examples
         --------
@@ -603,6 +660,11 @@ class _OptionImpl(Generic[T]):
     def to_optional(self) -> T | None:
         """Converts the Option Monad into an optional value: the Some value or None.
 
+        Returns
+        -------
+        value: T | None
+            Returns the Some value, or None if Nil.
+
         Examples
         --------
         >>> val: Option[int] = Some(5)
@@ -612,19 +674,86 @@ class _OptionImpl(Generic[T]):
         raise NotImplementedError
 
     @staticmethod
+    @overload
+    def from_optional(value: None) -> Nil: ...
+
+    @staticmethod
+    @overload
+    def from_optional(value: U | None) -> Option[U]: ...
+
+    @staticmethod
     def from_optional(value: U | None) -> Option[U]:
         """Creates an Option Monad from an optional value: Nil for None, otherwise Some.
+
+        Parameters
+        ----------
+        value: U | None
+            Optional value.
+
+        Returns
+        -------
+        option: Option[U]
+            Returns Nil for None, otherwise Some of the value.
 
         Examples
         --------
         >>> Some.from_optional(None)
         Nil()
+        >>> Some.from_optional(1)
+        Some(1)
         """
-        return from_optional(value)
+        if value is None:
+            return _NIL
+        return Some(value)
+
+    @staticmethod
+    @overload
+    def safe(function: Callable[[], U]) -> Option[U]: ...
+
+    @staticmethod
+    @overload
+    def safe(
+        function: Callable[[], U], *, exceptions: tuple[type[BaseException], ...]
+    ) -> Option[U]: ...
+
+    @staticmethod
+    def safe(
+        function: Callable[[], U],
+        *,
+        exceptions: tuple[type[BaseException], ...] = (Exception,),
+    ) -> Option[U]:
+        """Calls function and wraps its return value in Some, or returns Nil if it raises.
+
+        Parameters
+        ----------
+        function: Callable[[], U]
+            Zero-argument function which may raise an exception.
+        exceptions: tuple[type[BaseException], ...]
+            The exception types to turn into Nil (default: `Exception`). Any other exception
+            propagates.
+
+        Returns
+        -------
+        option: Option[U]
+            Returns Some of the function result, or Nil if it raised one of `exceptions`.
+
+        Examples
+        --------
+        >>> Some.safe(lambda: 1)
+        Some(1)
+        >>> Some.safe(lambda: 1 / 0)
+        Nil()
+        >>> Some.safe(lambda: int("x"), exceptions=(ValueError,))
+        Nil()
+        """
+        try:
+            return Some(function())
+        except exceptions:
+            return _NIL
 
 
 @final
-@dataclass(frozen=True, slots=True, repr=False)
+@dataclass(frozen=True, slots=True, repr=False, init=False)
 class Some(_OptionImpl[T]):
     """The Some variant of the Option Monad, wrapping a value.
 
@@ -639,6 +768,9 @@ class Some(_OptionImpl[T]):
     """
 
     value: T
+
+    def __init__(self, value: T) -> None:
+        _set_some_value(self, value)
 
     def map(self, function: Callable[[T], U]) -> Some[U]:
         return Some(function(self.value))
@@ -661,8 +793,8 @@ class Some(_OptionImpl[T]):
             return Some(self.value(value.value))
         return value
 
-    def filter(self, filter_function: Callable[[T], bool]) -> Option[T]:
-        return self if filter_function(self.value) else Nil()
+    def filter(self, predicate: Callable[[T], bool]) -> Option[T]:
+        return self if predicate(self.value) else _NIL
 
     def is_some_and(self, function: Callable[[T], bool]) -> bool:
         return function(self.value)
@@ -682,7 +814,7 @@ class Some(_OptionImpl[T]):
         return self
 
     def xor(self, other: Option[T]) -> Option[T]:
-        return self if isinstance(other, Nil) else Nil()
+        return self if isinstance(other, Nil) else _NIL
 
     def zip(self, other: Option[U]) -> Option[tuple[T, U]]:
         if isinstance(other, Some):
@@ -694,15 +826,16 @@ class Some(_OptionImpl[T]):
 
     def transpose(self: Some[Result[U, E]]) -> Result[Option[U], E]:
         result = self.value
-        if isinstance(result, Ok):
-            return Ok(Some(result.value))
-        return result  # type: ignore[return-value]
+        if isinstance(result, _result.Ok):
+            return _result.Ok(Some(result.value))
+        failed: Err[Any, E] = result
+        return failed
 
-    def ok_or(self, err_value: E) -> Ok[T, E]:
-        return Ok(self.value)
+    def ok_or(self, error: E) -> Ok[T, E]:
+        return _result.Ok(self.value)
 
-    def ok_or_else(self, err_function: Callable[[], E]) -> Ok[T, E]:
-        return Ok(self.value)
+    def ok_or_else(self, function: Callable[[], E]) -> Ok[T, E]:
+        return _result.Ok(self.value)
 
     def unwrap(self) -> T:
         return self.value
@@ -710,7 +843,7 @@ class Some(_OptionImpl[T]):
     def unwrap_or(self, default_value: T) -> T:  # type: ignore[misc]
         return self.value
 
-    def unwrap_or_else(self, nothing_function: Callable[[], T]) -> T:
+    def unwrap_or_else(self, function: Callable[[], T]) -> T:
         return self.value
 
     def inspect(self, function: Callable[[T], None]) -> Self:
@@ -720,7 +853,7 @@ class Some(_OptionImpl[T]):
     def match(self, *, some: Callable[[T], U], nil: Callable[[], U]) -> U:
         return some(self.value)
 
-    def is_nothing(self) -> bool:
+    def is_nil(self) -> bool:
         return False
 
     def is_some(self) -> bool:
@@ -737,7 +870,7 @@ class Some(_OptionImpl[T]):
 
 
 @final
-@dataclass(frozen=True, slots=True, repr=False)
+@dataclass(frozen=True, slots=True, repr=False, init=False)
 class Nil(_OptionImpl[Never]):
     """The Nil variant of the Option Monad, representing the absence of a value.
 
@@ -776,7 +909,7 @@ class Nil(_OptionImpl[Never]):
     def apply2(self, value: Option[U]) -> Nil:
         return self
 
-    def filter(self, filter_function: Callable[[Never], bool]) -> Nil:
+    def filter(self, predicate: Callable[[Never], bool]) -> Nil:
         return self
 
     def is_some_and(self, function: Callable[[Never], bool]) -> bool:
@@ -806,13 +939,13 @@ class Nil(_OptionImpl[Never]):
         return self
 
     def transpose(self) -> Ok[Nil, Never]:
-        return Ok(self)
+        return _result.Ok(self)
 
-    def ok_or(self, err_value: E) -> Err[Never, E]:
-        return Err(err_value)
+    def ok_or(self, error: E) -> Err[Never, E]:
+        return _result.Err(error)
 
-    def ok_or_else(self, err_function: Callable[[], E]) -> Err[Never, E]:
-        return Err(err_function())
+    def ok_or_else(self, function: Callable[[], E]) -> Err[Never, E]:
+        return _result.Err(function())
 
     def unwrap(self) -> Never:
         raise UnwrapError(self, "called unwrap on Nil()")
@@ -820,8 +953,8 @@ class Nil(_OptionImpl[Never]):
     def unwrap_or(self, default_value: U) -> U:
         return default_value
 
-    def unwrap_or_else(self, nothing_function: Callable[[], U]) -> U:
-        return nothing_function()
+    def unwrap_or_else(self, function: Callable[[], U]) -> U:
+        return function()
 
     def inspect(self, function: Callable[[Never], None]) -> Self:
         return self
@@ -829,7 +962,7 @@ class Nil(_OptionImpl[Never]):
     def match(self, *, some: Callable[[Never], U], nil: Callable[[], U]) -> U:
         return nil()
 
-    def is_nothing(self) -> bool:
+    def is_nil(self) -> bool:
         return True
 
     def is_some(self) -> bool:
@@ -847,148 +980,10 @@ class Nil(_OptionImpl[Never]):
 
 type Option[T] = Some[T] | Nil
 
-OPTION_TYPES: tuple[type[Some[Any]], type[Nil]] = (Some, Nil)
-"""The runtime classes of `Option`, for `isinstance` checks (`Option` itself is a type alias)."""
+# A frozen dataclass's generated __init__ assigns fields through object.__setattr__, which is slow.
+# Some's __init__ sets its slot through the slot's member descriptor instead (about a third
+# faster); the instance stays frozen, so assignment still raises FrozenInstanceError.
+_set_some_value: Callable[[Some[Any], Any], None] = Some.__dict__["value"].__set__
 
-
-def is_option(value: object) -> TypeIs[Option[Any]]:
-    """Returns True if `value` is a Some or Nil.
-
-    Examples
-    --------
-    >>> is_option(Nil()), is_option(None)
-    (True, False)
-    """
-    return isinstance(value, OPTION_TYPES)
-
-
-def is_some(option: Option[U]) -> TypeIs[Some[U]]:
-    """Returns True if the Option Monad is Some, narrowing it to `Some` for type checkers.
-
-    Examples
-    --------
-    >>> val: Option[int] = Some(1)
-    >>> if is_some(val):
-    ...     print(val.value)
-    1
-    """
-    return isinstance(option, Some)
-
-
-def is_nil(option: Option[U]) -> TypeIs[Nil]:
-    """Returns True if the Option Monad is Nil, narrowing it to `Nil` for type checkers.
-
-    Examples
-    --------
-    >>> is_nil(Nil())
-    True
-    """
-    return isinstance(option, Nil)
-
-
-def from_optional(value: U | None) -> Option[U]:
-    """Creates an Option Monad from an optional value: Nil for None, otherwise Some.
-
-    Parameters
-    ----------
-    value: U | None
-        Optional value.
-
-    Returns
-    -------
-    option: Option[U]
-
-    Examples
-    --------
-    >>> from_optional(None)
-    Nil()
-    >>> from_optional(1)
-    Some(1)
-    """
-    if value is None:
-        return Nil()
-    return Some(value)
-
-
-def map2(
-    first: Option[U], second: Option[V], function: Callable[[U, V], W]
-) -> Option[W]:
-    """Applies a two-argument function to the values of two Option Monads if both are Some.
-
-    Examples
-    --------
-    >>> map2(Some(1), Some(2), lambda a, b: a + b)
-    Some(3)
-    >>> map2(Some(1), Nil(), lambda a, b: a + b)
-    Nil()
-    """
-    if isinstance(first, Some) and isinstance(second, Some):
-        return Some(function(first.value, second.value))
-    return Nil()
-
-
-def map3(
-    first: Option[U],
-    second: Option[V],
-    third: Option[W],
-    function: Callable[[U, V, W], Y],
-) -> Option[Y]:
-    """Applies a three-argument function to the values of three Option Monads if all are Some.
-
-    Examples
-    --------
-    >>> map3(Some(1), Some(2), Some(3), lambda a, b, c: a + b + c)
-    Some(6)
-    """
-    if isinstance(first, Some) and isinstance(second, Some) and isinstance(third, Some):
-        return Some(function(first.value, second.value, third.value))
-    return Nil()
-
-
-@overload
-def safe(function: Callable[[], U]) -> Option[U]: ...
-
-
-@overload
-def safe(
-    function: Callable[[], U], *, exceptions: tuple[type[BaseException], ...]
-) -> Option[U]: ...
-
-
-def safe(
-    function: Callable[[], U],
-    *,
-    exceptions: tuple[type[BaseException], ...] = (Exception,),
-) -> Option[U]:
-    """Calls function and wraps its return value in Some, or returns Nil if it raises.
-
-    Parameters
-    ----------
-    function: Callable[[], U]
-        Zero-argument function which may raise an exception.
-    exceptions: tuple[type[BaseException], ...]
-        The exception types to turn into Nil (default: `Exception`). Any other exception
-        propagates.
-
-    Returns
-    -------
-    option: Option[U]
-
-    Examples
-    --------
-    >>> safe(lambda: 1)
-    Some(1)
-    >>> safe(lambda: 1 / 0)
-    Nil()
-    >>> safe(lambda: int("x"), exceptions=(ValueError,))
-    Nil()
-    """
-    try:
-        return Some(function())
-    except exceptions:
-        return Nil()
-
-
-# Imported last: result.py imports Some/Nil from this module, so the cycle resolves once at import
-# time instead of on every call.
-from pymoliath.result import Err, Ok, Result  # noqa: E402
+# The Nil singleton, returned directly on hot paths instead of going through Nil.__new__.
+_NIL = Nil()

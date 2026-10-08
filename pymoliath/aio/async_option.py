@@ -7,23 +7,23 @@
 ```python
 import asyncio
 
-asyncio.run(AsyncOption.from_value(10).map(lambda x: x + 1))  # Some(11)
-asyncio.run(AsyncOption.from_option(Nil()).map(lambda x: x + 1))  # Nil(), map is never called
+asyncio.run(AsyncOption.from_some(10).map(lambda x: x + 1).run())  # Some(11)
+asyncio.run(AsyncOption.from_option(Nil()).map(lambda x: x + 1).run())  # Nil(), map is never called
 
 
 async def fetch(x: int) -> int: ...
 
 
-asyncio.run(AsyncOption.from_value(10).map(fetch))  # async callback, auto-detected
-asyncio.run(AsyncOption.from_value(10).bind(lambda x: AsyncOption.from_value(x + 1)))  # Some(11)
-asyncio.run(AsyncOption.from_value(10).filter(lambda x: x > 5))  # Some(10)
+asyncio.run(AsyncOption.from_some(10).map(fetch).run())  # async callback, auto-detected
+asyncio.run(AsyncOption.from_some(10).bind(lambda x: AsyncOption.from_some(x + 1)).run())  # Some(11)
+asyncio.run(AsyncOption.from_some(10).filter(lambda x: x > 5).run())  # Some(10)
 
 
 async def fetch_ten() -> int:
     return 10
 
 
-asyncio.run(AsyncOption.from_coroutine(fetch_ten))  # Some(10)
+asyncio.run(AsyncOption.from_coroutine(fetch_ten).run())  # Some(10)
 ```
 """
 
@@ -39,12 +39,8 @@ T = TypeVar("T")
 U = TypeVar("U")
 
 # Function-scoped TypeVar for the static constructors: the class-scoped T would be Unknown when
-# called on the unspecialized class (`AsyncOption.from_value(1)`).
+# called on the unspecialized class (`AsyncOption.from_some(1)`).
 V = TypeVar("V")
-# Function-scoped TypeVars for `map2`.
-A = TypeVar("A")
-B = TypeVar("B")
-C = TypeVar("C")
 
 
 class AsyncOption(Generic[T]):
@@ -76,7 +72,7 @@ class AsyncOption(Generic[T]):
         --------
         >>> import asyncio
         >>> async def run(): return Some(10)
-        >>> asyncio.run(AsyncOption(run))
+        >>> asyncio.run(AsyncOption(run).run())
         Some(10)
         """
         self._run = run
@@ -87,13 +83,33 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncOption.from_value(10))
+        >>> async def main():
+        ...     return await AsyncOption.from_some(10)
+        >>> asyncio.run(main())
         Some(10)
         """
         return self._run().__await__()
 
+    async def run(self) -> Option[T]:
+        """Runs the pipeline and resolves to its result, as a coroutine.
+
+        Equivalent to awaiting it directly. Use `run()` where a coroutine is required, e.g.
+        `asyncio.run(value.run())` (before Python 3.14 `asyncio.run` only accepts coroutines).
+
+        Returns
+        -------
+        result: Option[T]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_some(10).run())
+        Some(10)
+        """
+        return await self
+
     @staticmethod
-    def from_value(value: V) -> AsyncOption[V]:
+    def from_some(value: V) -> AsyncOption[V]:
         """Lifts a plain value into an already-Some AsyncOption.
 
         Parameters
@@ -108,13 +124,38 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncOption.from_value(10))
+        >>> asyncio.run(AsyncOption.from_some(10).run())
         Some(10)
         """
 
         async def run() -> Option[V]:
             """Resolves immediately to Some(value)."""
             return Some(value)
+
+        return AsyncOption(run)
+
+    @staticmethod
+    # V is deliberately only in the return type: like a bare Nil, the value type is left open to
+    # be solved from context.
+    def from_nil() -> AsyncOption[V]:  # pyright: ignore[reportInvalidTypeVarUse]
+        """Creates an already-Nil AsyncOption.
+
+        Returns
+        -------
+        async_option: AsyncOption[V]
+            Like a bare `Nil()`, the value type is left open to be solved from context; annotate
+            the target (e.g. `empty: AsyncOption[int] = AsyncOption.from_nil()`) where there is none.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_nil().run())
+        Nil()
+        """
+
+        async def run() -> Option[V]:
+            """Resolves immediately to Nil()."""
+            return Nil()
 
         return AsyncOption(run)
 
@@ -134,9 +175,9 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncOption.from_option(Some(10)))
+        >>> asyncio.run(AsyncOption.from_option(Some(10)).run())
         Some(10)
-        >>> asyncio.run(AsyncOption.from_option(Nil()))
+        >>> asyncio.run(AsyncOption.from_option(Nil()).run())
         Nil()
         """
 
@@ -167,7 +208,7 @@ class AsyncOption(Generic[T]):
         --------
         >>> import asyncio
         >>> async def fetch_ten() -> int: return 10
-        >>> asyncio.run(AsyncOption.from_coroutine(fetch_ten))
+        >>> asyncio.run(AsyncOption.from_coroutine(fetch_ten).run())
         Some(10)
         """
 
@@ -194,9 +235,9 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncOption.from_value(5).map(lambda x: x + 1))
+        >>> asyncio.run(AsyncOption.from_some(5).map(lambda x: x + 1).run())
         Some(6)
-        >>> asyncio.run(AsyncOption.from_option(Nil()).map(lambda x: x + 1))
+        >>> asyncio.run(AsyncOption.from_option(Nil()).map(lambda x: x + 1).run())
         Nil()
         """
 
@@ -206,7 +247,7 @@ class AsyncOption(Generic[T]):
                 case Some(value):
                     return Some(await _resolve(function(value)))
                 case Nil():
-                    return Nil()
+                    return option
                 case _:
                     assert_never(option)
 
@@ -237,9 +278,9 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncOption.from_value(5).bind(lambda x: AsyncOption.from_value(x + 1)))
+        >>> asyncio.run(AsyncOption.from_some(5).bind(lambda x: AsyncOption.from_some(x + 1)).run())
         Some(6)
-        >>> asyncio.run(AsyncOption.from_option(Nil()).bind(lambda x: AsyncOption.from_value(x + 1)))
+        >>> asyncio.run(AsyncOption.from_option(Nil()).bind(lambda x: AsyncOption.from_some(x + 1)).run())
         Nil()
         """
 
@@ -252,9 +293,72 @@ class AsyncOption(Generic[T]):
                         return await result
                     return await _resolve(result)
                 case Nil():
-                    return Nil()
+                    return option
                 case _:
                     assert_never(option)
+
+        return AsyncOption(run)
+
+    def and_then(
+        self,
+        function: Callable[[T], AsyncOption[U] | Option[U] | Awaitable[Option[U]]],
+    ) -> AsyncOption[U]:
+        """Alias of `bind`, named like in Rust.
+
+        Parameters
+        ----------
+        function: Callable[[T], AsyncOption[U] | Option[U] | Awaitable[Option[U]]]
+            Function applied to the resolved value, as for `bind`.
+
+        Returns
+        -------
+        async_option: AsyncOption[U]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_some(5).and_then(lambda x: AsyncOption.from_some(x + 1)).run())
+        Some(6)
+        """
+        return self.bind(function)
+
+    def or_else(
+        self,
+        function: Callable[[], AsyncOption[T] | Option[T] | Awaitable[Option[T]]],
+    ) -> AsyncOption[T]:
+        """Resolves to this AsyncOption if it is Some, otherwise to the result of `function`.
+
+        Unlike `or_`, the fallback is only computed (and `function` only called) if this
+        AsyncOption resolves to Nil.
+
+        Parameters
+        ----------
+        function: Callable[[], AsyncOption[T] | Option[T] | Awaitable[Option[T]]]
+            Zero-argument function computing the fallback: another AsyncOption, a plain Option, or an
+            awaitable resolving to one.
+
+        Returns
+        -------
+        async_option: AsyncOption[T]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncOption.from_nil().or_else(lambda: AsyncOption.from_some(1)).run())
+        Some(1)
+        >>> asyncio.run(AsyncOption.from_some(2).or_else(lambda: AsyncOption.from_some(1)).run())
+        Some(2)
+        """
+
+        async def run() -> Option[T]:
+            """Awaits self, computing the fallback only if it resolves to Nil."""
+            option = await self
+            if isinstance(option, Nil):
+                fallback = function()
+                if isinstance(fallback, AsyncOption):
+                    return await fallback
+                return await _resolve(fallback)
+            return option
 
         return AsyncOption(run)
 
@@ -262,7 +366,7 @@ class AsyncOption(Generic[T]):
         """Applies the function wrapped in `function` to this AsyncOption's value (<*>).
 
         If both fail, Nil takes precedence, as in `Option.apply`. For functions of
-        several arguments, use the module-level `map2`.
+        several arguments, curry them and use `apply2`.
 
         Parameters
         ----------
@@ -277,9 +381,9 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> val = AsyncOption.from_value(10)
-        >>> func = AsyncOption.from_value(lambda x: x * 2)
-        >>> asyncio.run(val.apply(func))
+        >>> val = AsyncOption.from_some(10)
+        >>> func = AsyncOption.from_some(lambda x: x * 2)
+        >>> asyncio.run(val.apply(func).run())
         Some(20)
         """
         return function.bind(lambda inner: self.map(inner))
@@ -291,7 +395,7 @@ class AsyncOption(Generic[T]):
 
         The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both fail, the
         Nil of this (the function side) takes precedence. Curried functions of several arguments
-        can be applied one argument at a time; `map2` takes them uncurried.
+        can be applied one argument at a time.
 
         Parameters
         ----------
@@ -305,42 +409,42 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> func = AsyncOption.from_value(lambda y: 10 + y)
-        >>> asyncio.run(func.apply2(AsyncOption.from_value(5)))
+        >>> func = AsyncOption.from_some(lambda y: 10 + y)
+        >>> asyncio.run(func.apply2(AsyncOption.from_some(5)).run())
         Some(15)
         """
         return self.bind(lambda inner: value.map(inner))
 
     def filter(
-        self, filter_function: Callable[[T], bool | Awaitable[bool]]
+        self, predicate: Callable[[T], bool | Awaitable[bool]]
     ) -> AsyncOption[T]:
         """Returns a Some if filter function is True and this AsyncOption resolves to Some, otherwise Nil.
 
         Parameters
         ----------
-        filter_function: Callable[[T], bool | Awaitable[bool]]
+        predicate: Callable[[T], bool | Awaitable[bool]]
             Sync or async predicate applied to the resolved value if Some.
 
         Returns
         -------
         async_option: AsyncOption[T]
             Returns an AsyncOption resolving to Some if this AsyncOption resolves to Some and
-            `filter_function` returns True, otherwise Nil.
+            `predicate` returns True, otherwise Nil.
 
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncOption.from_value(10).filter(lambda x: x > 5))
+        >>> asyncio.run(AsyncOption.from_some(10).filter(lambda x: x > 5).run())
         Some(10)
-        >>> asyncio.run(AsyncOption.from_value(10).filter(lambda x: x < 5))
+        >>> asyncio.run(AsyncOption.from_some(10).filter(lambda x: x < 5).run())
         Nil()
         """
 
         async def run() -> Option[T]:
-            """Awaits self, then keeps or discards the value based on `filter_function`."""
+            """Awaits self, then keeps or discards the value based on `predicate`."""
             match option := await self:
                 case Some(value):
-                    return option if await _resolve(filter_function(value)) else Nil()
+                    return option if await _resolve(predicate(value)) else Nil()
                 case Nil():
                     return option
                 case _:
@@ -363,9 +467,9 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncOption.from_value(1).and_(AsyncOption.from_value(2)))
+        >>> asyncio.run(AsyncOption.from_some(1).and_(AsyncOption.from_some(2)).run())
         Some(2)
-        >>> asyncio.run(AsyncOption.from_option(Nil()).and_(AsyncOption.from_value(2)))
+        >>> asyncio.run(AsyncOption.from_option(Nil()).and_(AsyncOption.from_some(2)).run())
         Nil()
         """
         return self.bind(lambda _: other)
@@ -385,9 +489,9 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncOption.from_value(1).or_(AsyncOption.from_value(2)))
+        >>> asyncio.run(AsyncOption.from_some(1).or_(AsyncOption.from_some(2)).run())
         Some(1)
-        >>> asyncio.run(AsyncOption.from_option(Nil()).or_(AsyncOption.from_value(2)))
+        >>> asyncio.run(AsyncOption.from_option(Nil()).or_(AsyncOption.from_some(2)).run())
         Some(2)
         """
 
@@ -418,9 +522,9 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncOption.from_value(1).zip(AsyncOption.from_value(2)))
+        >>> asyncio.run(AsyncOption.from_some(1).zip(AsyncOption.from_some(2)).run())
         Some((1, 2))
-        >>> asyncio.run(AsyncOption.from_option(Nil()).zip(AsyncOption.from_value(2)))
+        >>> asyncio.run(AsyncOption.from_option(Nil()).zip(AsyncOption.from_some(2)).run())
         Nil()
         """
 
@@ -430,7 +534,7 @@ class AsyncOption(Generic[T]):
                 case Some(value):
                     return (await other).map(lambda other_value: (value, other_value))
                 case Nil():
-                    return Nil()
+                    return option
                 case _:
                     assert_never(option)
 
@@ -448,8 +552,8 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> nested = AsyncOption.from_value(AsyncOption.from_value(1))
-        >>> asyncio.run(nested.flatten())
+        >>> nested = AsyncOption.from_some(AsyncOption.from_some(1))
+        >>> asyncio.run(nested.flatten().run())
         Some(1)
         """
 
@@ -459,7 +563,7 @@ class AsyncOption(Generic[T]):
                 case Some(nested):
                     return await nested
                 case Nil():
-                    return Nil()
+                    return option
                 case _:
                     assert_never(option)
 
@@ -482,7 +586,7 @@ class AsyncOption(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncOption.from_value(42).inspect(lambda x: print(f"Value is: {x}")))
+        >>> asyncio.run(AsyncOption.from_some(42).inspect(lambda x: print(f"Value is: {x}")).run())
         Value is: 42
         Some(42)
         """
@@ -501,7 +605,7 @@ class AsyncOption(Generic[T]):
 
         Examples
         --------
-        >>> str(AsyncOption.from_value(10))  # doctest: +ELLIPSIS
+        >>> str(AsyncOption.from_some(10))  # doctest: +ELLIPSIS
         'AsyncOption(<function...>)'
         """
         return f"AsyncOption({self._run})"
@@ -511,25 +615,7 @@ class AsyncOption(Generic[T]):
 
         Examples
         --------
-        >>> repr(AsyncOption.from_value(10))  # doctest: +ELLIPSIS
+        >>> repr(AsyncOption.from_some(10))  # doctest: +ELLIPSIS
         'AsyncOption(<function...>)'
         """
         return str(self)
-
-
-def map2(
-    first: AsyncOption[A], second: AsyncOption[B], function: Callable[[A, B], C]
-) -> AsyncOption[C]:
-    """Combines the values of two AsyncOptions with a two-argument function once both are awaited.
-
-    The first Nil wins: if `first` fails, `second` is not awaited.
-
-    Examples
-    --------
-    >>> import asyncio
-    >>> asyncio.run(map2(AsyncOption.from_value(1), AsyncOption.from_value(2), lambda a, b: a + b))
-    Some(3)
-    >>> asyncio.run(map2(AsyncOption.from_value(1), AsyncOption.from_option(Nil()), lambda a, b: a + b))
-    Nil()
-    """
-    return first.bind(lambda a: second.map(lambda b: function(a, b)))

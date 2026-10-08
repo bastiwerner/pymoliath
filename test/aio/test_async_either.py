@@ -3,7 +3,6 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from pymoliath.aio import AsyncEither
-from pymoliath.aio.async_either import map2
 from pymoliath.either import Either, Left, Right
 
 
@@ -198,20 +197,6 @@ class TestAsyncEither(unittest.IsolatedAsyncioTestCase):
         result = await AsyncEither.from_right(10).apply(AsyncEither.from_right(f))
         self.assertEqual(Right(20), result)
 
-    async def test_map2(self):
-        def add(a: int, b: int) -> int:
-            return a + b
-
-        self.assertEqual(
-            Right(3),
-            await map2(AsyncEither.from_right(1), AsyncEither.from_right(2), add),
-        )
-        first: AsyncEither[str, int] = AsyncEither.from_left("first")
-        second: AsyncEither[str, int] = AsyncEither.from_left("second")
-        self.assertEqual(Left("first"), await map2(first, second, add))
-        one: AsyncEither[str, int] = AsyncEither.from_right(1)
-        self.assertEqual(Left("second"), await map2(one, second, add))
-
     async def test_apply_function_side_wins(self):
         def f(x: int) -> int:
             return x * 2
@@ -288,3 +273,31 @@ class TestAsyncEither(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Right(2), await function.apply2(value))
         self.assertEqual(Left("value"), await function.apply2(error))
         self.assertEqual(Left("function"), await failed.apply2(error))
+
+    async def test_from_left_and_run(self):
+        self.assertEqual(Left("e"), await AsyncEither.from_left("e"))
+        self.assertEqual(Right(1), await AsyncEither.from_right(1).run())
+
+    async def test_and_then_is_bind(self):
+        value: AsyncEither[str, int] = AsyncEither.from_right(1)
+        self.assertEqual(Right(2), await value.and_then(lambda x: Right(x + 1)))
+
+    async def test_or_else_is_bind_left(self):
+        failed: AsyncEither[str, int] = AsyncEither.from_left("abc")
+        self.assertEqual(Right(3), await failed.or_else(lambda e: Right(len(e))))
+
+    async def test_filter(self):
+        async def positive(x: int) -> bool:
+            return x > 0
+
+        value: AsyncEither[str, int] = AsyncEither.from_right(-1)
+        self.assertEqual(
+            Left("negative"), await value.filter(lambda x: x > 0, "negative")
+        )
+        one: AsyncEither[str, int] = AsyncEither.from_right(1)
+        self.assertEqual(Right(1), await one.filter(positive, "negative"))
+
+        predicate = Mock(return_value=True)
+        failed: AsyncEither[str, int] = AsyncEither.from_left("e")
+        self.assertEqual(Left("e"), await failed.filter(predicate, "negative"))
+        predicate.assert_not_called()

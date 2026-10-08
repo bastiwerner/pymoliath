@@ -3,7 +3,6 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from pymoliath.aio import AsyncResult
-from pymoliath.aio.async_result import map2
 from pymoliath.result import Err, Ok, Result
 
 
@@ -194,19 +193,6 @@ class TestAsyncResult(unittest.IsolatedAsyncioTestCase):
         result = await AsyncResult.from_ok(10).apply(AsyncResult.from_ok(f))
         self.assertEqual(Ok(20), result)
 
-    async def test_map2(self):
-        def add(a: int, b: int) -> int:
-            return a + b
-
-        self.assertEqual(
-            Ok(3), await map2(AsyncResult.from_ok(1), AsyncResult.from_ok(2), add)
-        )
-        first: AsyncResult[int, str] = AsyncResult.from_err("first")
-        second: AsyncResult[int, str] = AsyncResult.from_err("second")
-        self.assertEqual(Err("first"), await map2(first, second, add))
-        one: AsyncResult[int, str] = AsyncResult.from_ok(1)
-        self.assertEqual(Err("second"), await map2(one, second, add))
-
     async def test_apply_function_side_wins(self):
         def f(x: int) -> int:
             return x * 2
@@ -276,3 +262,35 @@ class TestAsyncResult(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Ok(2), await function.apply2(value))
         self.assertEqual(Err("value"), await function.apply2(error))
         self.assertEqual(Err("function"), await failed.apply2(error))
+
+    async def test_from_err_and_run(self):
+        self.assertEqual(Err("e"), await AsyncResult.from_err("e"))
+        self.assertEqual(Ok(1), await AsyncResult.from_ok(1).run())
+
+    async def test_and_then_is_bind(self):
+        value: AsyncResult[int, str] = AsyncResult.from_ok(1)
+        self.assertEqual(Ok(2), await value.and_then(lambda x: Ok(x + 1)))
+        failed: AsyncResult[int, str] = AsyncResult.from_err("e")
+        self.assertEqual(Err("e"), await failed.and_then(lambda x: Ok(x + 1)))
+
+    async def test_or_else_is_bind_err(self):
+        failed: AsyncResult[int, str] = AsyncResult.from_err("abc")
+        self.assertEqual(Ok(3), await failed.or_else(lambda e: Ok(len(e))))
+        value: AsyncResult[int, str] = AsyncResult.from_ok(1)
+        self.assertEqual(Ok(1), await value.or_else(lambda e: Ok(len(e))))
+
+    async def test_filter(self):
+        async def positive(x: int) -> bool:
+            return x > 0
+
+        value: AsyncResult[int, str] = AsyncResult.from_ok(-1)
+        self.assertEqual(
+            Err("negative"), await value.filter(lambda x: x > 0, "negative")
+        )
+        one: AsyncResult[int, str] = AsyncResult.from_ok(1)
+        self.assertEqual(Ok(1), await one.filter(positive, "negative"))
+
+        predicate = Mock(return_value=True)
+        failed: AsyncResult[int, str] = AsyncResult.from_err("e")
+        self.assertEqual(Err("e"), await failed.filter(predicate, "negative"))
+        predicate.assert_not_called()

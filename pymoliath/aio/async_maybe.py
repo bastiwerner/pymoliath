@@ -7,23 +7,23 @@
 ```python
 import asyncio
 
-asyncio.run(AsyncMaybe.from_value(10).map(lambda x: x + 1))  # Just(11)
-asyncio.run(AsyncMaybe.from_maybe(Nothing()).map(lambda x: x + 1))  # Nothing(), map is never called
+asyncio.run(AsyncMaybe.from_just(10).map(lambda x: x + 1).run())  # Just(11)
+asyncio.run(AsyncMaybe.from_maybe(Nothing()).map(lambda x: x + 1).run())  # Nothing(), map is never called
 
 
 async def fetch(x: int) -> int: ...
 
 
-asyncio.run(AsyncMaybe.from_value(10).map(fetch))  # async callback, auto-detected
-asyncio.run(AsyncMaybe.from_value(10).bind(lambda x: AsyncMaybe.from_value(x + 1)))  # Just(11)
-asyncio.run(AsyncMaybe.from_value(10).filter(lambda x: x > 5))  # Just(10)
+asyncio.run(AsyncMaybe.from_just(10).map(fetch).run())  # async callback, auto-detected
+asyncio.run(AsyncMaybe.from_just(10).bind(lambda x: AsyncMaybe.from_just(x + 1)).run())  # Just(11)
+asyncio.run(AsyncMaybe.from_just(10).filter(lambda x: x > 5).run())  # Just(10)
 
 
 async def fetch_ten() -> int:
     return 10
 
 
-asyncio.run(AsyncMaybe.from_coroutine(fetch_ten))  # Just(10)
+asyncio.run(AsyncMaybe.from_coroutine(fetch_ten).run())  # Just(10)
 ```
 """
 
@@ -39,12 +39,8 @@ T = TypeVar("T")
 U = TypeVar("U")
 
 # Function-scoped TypeVar for the static constructors: the class-scoped T would be Unknown when
-# called on the unspecialized class (`AsyncMaybe.from_value(1)`).
+# called on the unspecialized class (`AsyncMaybe.from_just(1)`).
 V = TypeVar("V")
-# Function-scoped TypeVars for `map2`.
-A = TypeVar("A")
-B = TypeVar("B")
-C = TypeVar("C")
 
 
 class AsyncMaybe(Generic[T]):
@@ -76,7 +72,7 @@ class AsyncMaybe(Generic[T]):
         --------
         >>> import asyncio
         >>> async def run(): return Just(10)
-        >>> asyncio.run(AsyncMaybe(run))
+        >>> asyncio.run(AsyncMaybe(run).run())
         Just(10)
         """
         self._run = run
@@ -87,13 +83,33 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncMaybe.from_value(10))
+        >>> async def main():
+        ...     return await AsyncMaybe.from_just(10)
+        >>> asyncio.run(main())
         Just(10)
         """
         return self._run().__await__()
 
+    async def run(self) -> Maybe[T]:
+        """Runs the pipeline and resolves to its result, as a coroutine.
+
+        Equivalent to awaiting it directly. Use `run()` where a coroutine is required, e.g.
+        `asyncio.run(value.run())` (before Python 3.14 `asyncio.run` only accepts coroutines).
+
+        Returns
+        -------
+        result: Maybe[T]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_just(10).run())
+        Just(10)
+        """
+        return await self
+
     @staticmethod
-    def from_value(value: V) -> AsyncMaybe[V]:
+    def from_just(value: V) -> AsyncMaybe[V]:
         """Lifts a plain value into an already-Just AsyncMaybe.
 
         Parameters
@@ -108,13 +124,38 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncMaybe.from_value(10))
+        >>> asyncio.run(AsyncMaybe.from_just(10).run())
         Just(10)
         """
 
         async def run() -> Maybe[V]:
             """Resolves immediately to Just(value)."""
             return Just(value)
+
+        return AsyncMaybe(run)
+
+    @staticmethod
+    # V is deliberately only in the return type: like a bare Nothing, the value type is left open to
+    # be solved from context.
+    def from_nothing() -> AsyncMaybe[V]:  # pyright: ignore[reportInvalidTypeVarUse]
+        """Creates an already-Nothing AsyncMaybe.
+
+        Returns
+        -------
+        async_maybe: AsyncMaybe[V]
+            Like a bare `Nothing()`, the value type is left open to be solved from context; annotate
+            the target (e.g. `empty: AsyncMaybe[int] = AsyncMaybe.from_nothing()`) where there is none.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_nothing().run())
+        Nothing()
+        """
+
+        async def run() -> Maybe[V]:
+            """Resolves immediately to Nothing()."""
+            return Nothing()
 
         return AsyncMaybe(run)
 
@@ -134,9 +175,9 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncMaybe.from_maybe(Just(10)))
+        >>> asyncio.run(AsyncMaybe.from_maybe(Just(10)).run())
         Just(10)
-        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()))
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).run())
         Nothing()
         """
 
@@ -167,7 +208,7 @@ class AsyncMaybe(Generic[T]):
         --------
         >>> import asyncio
         >>> async def fetch_ten() -> int: return 10
-        >>> asyncio.run(AsyncMaybe.from_coroutine(fetch_ten))
+        >>> asyncio.run(AsyncMaybe.from_coroutine(fetch_ten).run())
         Just(10)
         """
 
@@ -194,9 +235,9 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncMaybe.from_value(5).map(lambda x: x + 1))
+        >>> asyncio.run(AsyncMaybe.from_just(5).map(lambda x: x + 1).run())
         Just(6)
-        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).map(lambda x: x + 1))
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).map(lambda x: x + 1).run())
         Nothing()
         """
 
@@ -206,7 +247,7 @@ class AsyncMaybe(Generic[T]):
                 case Just(value):
                     return Just(await _resolve(function(value)))
                 case Nothing():
-                    return Nothing()
+                    return maybe
                 case _:
                     assert_never(maybe)
 
@@ -237,9 +278,9 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncMaybe.from_value(5).bind(lambda x: AsyncMaybe.from_value(x + 1)))
+        >>> asyncio.run(AsyncMaybe.from_just(5).bind(lambda x: AsyncMaybe.from_just(x + 1)).run())
         Just(6)
-        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).bind(lambda x: AsyncMaybe.from_value(x + 1)))
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).bind(lambda x: AsyncMaybe.from_just(x + 1)).run())
         Nothing()
         """
 
@@ -252,9 +293,72 @@ class AsyncMaybe(Generic[T]):
                         return await result
                     return await _resolve(result)
                 case Nothing():
-                    return Nothing()
+                    return maybe
                 case _:
                     assert_never(maybe)
+
+        return AsyncMaybe(run)
+
+    def and_then(
+        self,
+        function: Callable[[T], AsyncMaybe[U] | Maybe[U] | Awaitable[Maybe[U]]],
+    ) -> AsyncMaybe[U]:
+        """Alias of `bind`, named like in Rust.
+
+        Parameters
+        ----------
+        function: Callable[[T], AsyncMaybe[U] | Maybe[U] | Awaitable[Maybe[U]]]
+            Function applied to the resolved value, as for `bind`.
+
+        Returns
+        -------
+        async_maybe: AsyncMaybe[U]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_just(5).and_then(lambda x: AsyncMaybe.from_just(x + 1)).run())
+        Just(6)
+        """
+        return self.bind(function)
+
+    def or_else(
+        self,
+        function: Callable[[], AsyncMaybe[T] | Maybe[T] | Awaitable[Maybe[T]]],
+    ) -> AsyncMaybe[T]:
+        """Resolves to this AsyncMaybe if it is Just, otherwise to the result of `function`.
+
+        Unlike `or_`, the fallback is only computed (and `function` only called) if this
+        AsyncMaybe resolves to Nothing.
+
+        Parameters
+        ----------
+        function: Callable[[], AsyncMaybe[T] | Maybe[T] | Awaitable[Maybe[T]]]
+            Zero-argument function computing the fallback: another AsyncMaybe, a plain Maybe, or an
+            awaitable resolving to one.
+
+        Returns
+        -------
+        async_maybe: AsyncMaybe[T]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncMaybe.from_nothing().or_else(lambda: AsyncMaybe.from_just(1)).run())
+        Just(1)
+        >>> asyncio.run(AsyncMaybe.from_just(2).or_else(lambda: AsyncMaybe.from_just(1)).run())
+        Just(2)
+        """
+
+        async def run() -> Maybe[T]:
+            """Awaits self, computing the fallback only if it resolves to Nothing."""
+            maybe = await self
+            if isinstance(maybe, Nothing):
+                fallback = function()
+                if isinstance(fallback, AsyncMaybe):
+                    return await fallback
+                return await _resolve(fallback)
+            return maybe
 
         return AsyncMaybe(run)
 
@@ -262,7 +366,7 @@ class AsyncMaybe(Generic[T]):
         """Applies the function wrapped in `function` to this AsyncMaybe's value (<*>).
 
         If both fail, Nothing takes precedence, as in `Maybe.apply`. For functions of
-        several arguments, use the module-level `map2`.
+        several arguments, curry them and use `apply2`.
 
         Parameters
         ----------
@@ -277,9 +381,9 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> val = AsyncMaybe.from_value(10)
-        >>> func = AsyncMaybe.from_value(lambda x: x * 2)
-        >>> asyncio.run(val.apply(func))
+        >>> val = AsyncMaybe.from_just(10)
+        >>> func = AsyncMaybe.from_just(lambda x: x * 2)
+        >>> asyncio.run(val.apply(func).run())
         Just(20)
         """
         return function.bind(lambda inner: self.map(inner))
@@ -291,7 +395,7 @@ class AsyncMaybe(Generic[T]):
 
         The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both fail, the
         Nothing of this (the function side) takes precedence. Curried functions of several arguments
-        can be applied one argument at a time; `map2` takes them uncurried.
+        can be applied one argument at a time.
 
         Parameters
         ----------
@@ -305,44 +409,40 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> func = AsyncMaybe.from_value(lambda y: 10 + y)
-        >>> asyncio.run(func.apply2(AsyncMaybe.from_value(5)))
+        >>> func = AsyncMaybe.from_just(lambda y: 10 + y)
+        >>> asyncio.run(func.apply2(AsyncMaybe.from_just(5)).run())
         Just(15)
         """
         return self.bind(lambda inner: value.map(inner))
 
-    def filter(
-        self, filter_function: Callable[[T], bool | Awaitable[bool]]
-    ) -> AsyncMaybe[T]:
+    def filter(self, predicate: Callable[[T], bool | Awaitable[bool]]) -> AsyncMaybe[T]:
         """Returns a Just if filter function is True and this AsyncMaybe resolves to Just, otherwise Nothing.
 
         Parameters
         ----------
-        filter_function: Callable[[T], bool | Awaitable[bool]]
+        predicate: Callable[[T], bool | Awaitable[bool]]
             Sync or async predicate applied to the resolved value if Just.
 
         Returns
         -------
         async_maybe: AsyncMaybe[T]
             Returns an AsyncMaybe resolving to Just if this AsyncMaybe resolves to Just and
-            `filter_function` returns True, otherwise Nothing.
+            `predicate` returns True, otherwise Nothing.
 
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncMaybe.from_value(10).filter(lambda x: x > 5))
+        >>> asyncio.run(AsyncMaybe.from_just(10).filter(lambda x: x > 5).run())
         Just(10)
-        >>> asyncio.run(AsyncMaybe.from_value(10).filter(lambda x: x < 5))
+        >>> asyncio.run(AsyncMaybe.from_just(10).filter(lambda x: x < 5).run())
         Nothing()
         """
 
         async def run() -> Maybe[T]:
-            """Awaits self, then keeps or discards the value based on `filter_function`."""
+            """Awaits self, then keeps or discards the value based on `predicate`."""
             match maybe := await self:
                 case Just(value):
-                    return (
-                        maybe if await _resolve(filter_function(value)) else Nothing()
-                    )
+                    return maybe if await _resolve(predicate(value)) else Nothing()
                 case Nothing():
                     return maybe
                 case _:
@@ -365,9 +465,9 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncMaybe.from_value(1).and_(AsyncMaybe.from_value(2)))
+        >>> asyncio.run(AsyncMaybe.from_just(1).and_(AsyncMaybe.from_just(2)).run())
         Just(2)
-        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).and_(AsyncMaybe.from_value(2)))
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).and_(AsyncMaybe.from_just(2)).run())
         Nothing()
         """
         return self.bind(lambda _: other)
@@ -387,9 +487,9 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncMaybe.from_value(1).or_(AsyncMaybe.from_value(2)))
+        >>> asyncio.run(AsyncMaybe.from_just(1).or_(AsyncMaybe.from_just(2)).run())
         Just(1)
-        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).or_(AsyncMaybe.from_value(2)))
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).or_(AsyncMaybe.from_just(2)).run())
         Just(2)
         """
 
@@ -420,9 +520,9 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncMaybe.from_value(1).zip(AsyncMaybe.from_value(2)))
+        >>> asyncio.run(AsyncMaybe.from_just(1).zip(AsyncMaybe.from_just(2)).run())
         Just((1, 2))
-        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).zip(AsyncMaybe.from_value(2)))
+        >>> asyncio.run(AsyncMaybe.from_maybe(Nothing()).zip(AsyncMaybe.from_just(2)).run())
         Nothing()
         """
 
@@ -432,7 +532,7 @@ class AsyncMaybe(Generic[T]):
                 case Just(value):
                     return (await other).map(lambda other_value: (value, other_value))
                 case Nothing():
-                    return Nothing()
+                    return maybe
                 case _:
                     assert_never(maybe)
 
@@ -450,8 +550,8 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> nested = AsyncMaybe.from_value(AsyncMaybe.from_value(1))
-        >>> asyncio.run(nested.flatten())
+        >>> nested = AsyncMaybe.from_just(AsyncMaybe.from_just(1))
+        >>> asyncio.run(nested.flatten().run())
         Just(1)
         """
 
@@ -461,7 +561,7 @@ class AsyncMaybe(Generic[T]):
                 case Just(nested):
                     return await nested
                 case Nothing():
-                    return Nothing()
+                    return maybe
                 case _:
                     assert_never(maybe)
 
@@ -482,7 +582,7 @@ class AsyncMaybe(Generic[T]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncMaybe.from_value(42).inspect(lambda x: print(f"Value is: {x}")))
+        >>> asyncio.run(AsyncMaybe.from_just(42).inspect(lambda x: print(f"Value is: {x}")).run())
         Value is: 42
         Just(42)
         """
@@ -501,7 +601,7 @@ class AsyncMaybe(Generic[T]):
 
         Examples
         --------
-        >>> str(AsyncMaybe.from_value(10))  # doctest: +ELLIPSIS
+        >>> str(AsyncMaybe.from_just(10))  # doctest: +ELLIPSIS
         'AsyncMaybe(<function...>)'
         """
         return f"AsyncMaybe({self._run})"
@@ -511,25 +611,7 @@ class AsyncMaybe(Generic[T]):
 
         Examples
         --------
-        >>> repr(AsyncMaybe.from_value(10))  # doctest: +ELLIPSIS
+        >>> repr(AsyncMaybe.from_just(10))  # doctest: +ELLIPSIS
         'AsyncMaybe(<function...>)'
         """
         return str(self)
-
-
-def map2(
-    first: AsyncMaybe[A], second: AsyncMaybe[B], function: Callable[[A, B], C]
-) -> AsyncMaybe[C]:
-    """Combines the values of two AsyncMaybes with a two-argument function once both are awaited.
-
-    The first Nothing wins: if `first` fails, `second` is not awaited.
-
-    Examples
-    --------
-    >>> import asyncio
-    >>> asyncio.run(map2(AsyncMaybe.from_value(1), AsyncMaybe.from_value(2), lambda a, b: a + b))
-    Just(3)
-    >>> asyncio.run(map2(AsyncMaybe.from_value(1), AsyncMaybe.from_maybe(Nothing()), lambda a, b: a + b))
-    Nothing()
-    """
-    return first.bind(lambda a: second.map(lambda b: function(a, b)))

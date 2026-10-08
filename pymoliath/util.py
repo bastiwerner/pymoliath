@@ -11,12 +11,90 @@ curry(lambda x, y: x + y)(1)(2)  # 3
 ```
 """
 
-from functools import partial, reduce
-from typing import Any, Callable, TypeVar, Union
+import inspect
+from functools import partial
+from types import FunctionType, MethodType
+from typing import Any, Callable, NamedTuple, TypeVar
 
 TypeSource = TypeVar("TypeSource")
 TypeResult = TypeVar("TypeResult")
 TypePure = TypeVar("TypePure")
+
+
+class _Arity(NamedTuple):
+    """How many positional arguments a callable takes (computed once, without calling it)."""
+
+    positional: (
+        int  # positional parameters, including those with defaults (excluding *args)
+    )
+    required: int  # positional parameters without a default
+    varargs: bool  # whether it has *args
+    kwonly_required: bool  # whether a keyword-only parameter has no default
+
+    def binds(self, count: int) -> bool:
+        """Whether `count` positional arguments make a complete call."""
+        return (
+            not self.kwonly_required
+            and self.required <= count
+            and (count <= self.positional or self.varargs)
+        )
+
+    def accepts(self, count: int) -> bool:
+        """Whether `count` positional arguments fit, even if more are needed afterwards."""
+        return count <= self.positional or self.varargs
+
+
+def _code_arity(function: FunctionType, bound: int) -> _Arity:
+    """Reads the arity of a plain function from its code object (fast path)."""
+    code = function.__code__
+    positional = code.co_argcount - bound
+    defaults = len(function.__defaults__ or ())
+    kwonly_defaults = len(function.__kwdefaults__ or {})
+    return _Arity(
+        positional=positional,
+        required=max(0, code.co_argcount - defaults - bound),
+        varargs=bool(code.co_flags & inspect.CO_VARARGS),
+        kwonly_required=code.co_kwonlyargcount > kwonly_defaults,
+    )
+
+
+def _arity(function: Callable[..., Any]) -> _Arity | None:
+    """The arity of `function`, or None if it can't be determined (e.g. some builtins)."""
+    if isinstance(function, FunctionType):
+        return _code_arity(function, 0)
+    if isinstance(function, MethodType) and isinstance(function.__func__, FunctionType):
+        return _code_arity(function.__func__, 1)
+    if isinstance(function, partial) and not function.keywords:
+        inner = _arity(function.func)
+        if inner is not None:
+            applied = len(function.args)
+            return inner._replace(
+                positional=max(0, inner.positional - applied),
+                required=max(0, inner.required - applied),
+            )
+    try:
+        signature = inspect.signature(function)
+    except (TypeError, ValueError):
+        return None
+    kinds = [parameter.kind for parameter in signature.parameters.values()]
+    positional = [
+        parameter
+        for parameter in signature.parameters.values()
+        if parameter.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    return _Arity(
+        positional=len(positional),
+        required=sum(
+            parameter.default is inspect.Parameter.empty for parameter in positional
+        ),
+        varargs=inspect.Parameter.VAR_POSITIONAL in kinds,
+        kwonly_required=any(
+            parameter.kind is inspect.Parameter.KEYWORD_ONLY
+            and parameter.default is inspect.Parameter.empty
+            for parameter in signature.parameters.values()
+        ),
+    )
 
 
 def compose(
@@ -27,6 +105,12 @@ def compose(
     Composes zero or more functions into a functional composition. The
     functions are composed right to left. A composition of zero
     functions gives back the identity function.
+
+    A tuple is unpacked into the arguments of a function that takes two or more positional
+    parameters (required or with defaults, not counting `*args`), if the tuple fits them.
+    Otherwise - for one-parameter and `*args` functions, or a tuple of the wrong length - it is
+    passed as a single argument. The arity of each function is read once, when composing, and no
+    function is ever retried, so exceptions raised inside the functions propagate unchanged.
 
     Parameters
     ----------
@@ -46,20 +130,44 @@ def compose(
     11
     >>> compose(lambda x: x, lambda y: y + 2)(10)
     12
+    >>> compose(lambda total: total * 2, lambda a, b: a + b)((1, 2))
+    6
+    >>> compose(lambda a, b=10: a + b)((1, 2))
+    3
+    >>> compose(len)((1, 2))
+    2
     """
+    steps: list[tuple[Callable[..., Any], _Arity | None]] = [
+        (function, _arity(function)) for function in reversed(callables)
+    ]
 
     def composition(source: Any) -> Any:
-        """Applies `callables` right to left to `source`, falling back to unpacking on TypeError."""
-        try:
-            return reduce(lambda acc, f: f(acc), callables[::-1], source)
-        except TypeError:
-            return reduce(lambda acc, f: f(*acc), callables[::-1], source)
+        """Applies `callables` right to left to `source`."""
+        value = source
+        for function, arity in steps:
+            if (
+                isinstance(value, tuple)
+                and arity is not None
+                and arity.positional >= 2
+                and arity.binds(len(value))
+            ):
+                value = function(*value)
+            else:
+                value = function(value)
+        return value
 
     return composition
 
 
 def curry(function: Callable[..., Any]) -> Callable[[Any], Any]:
-    """Currying function
+    """Curries `function`: it takes its arguments one call at a time.
+
+    `curry(f)(a)(b)(c)` is `f(a, b, c)`. A function that is complete with one argument is
+    returned unchanged, so `curry(f)(a)` is `f(a)`.
+
+    The arity is read from the function once (without calling it), so exceptions raised inside
+    `function` - including TypeErrors - always propagate unchanged. Functions without a readable
+    signature (some builtins) are called with one argument.
 
     Parameters
     ----------
@@ -69,18 +177,40 @@ def curry(function: Callable[..., Any]) -> Callable[[Any], Any]:
     Returns
     -------
     result: Callable[[Any], Any]
-        Curried function which can be called until all function arguments
-        are passed.
+        Curried function which takes one argument per call until all positional arguments are
+        passed.
+
+    Example
+    -------
+    >>> curry(lambda a, b: a + b)(1)(2)
+    3
+    >>> curry(lambda a, b, c: a + b + c)(1)(2)(3)
+    6
+    >>> curry(lambda a: a * 2)(3)
+    6
     """
+    if not _needs_more_than_one(function):
+        return function
+    return lambda value: curry(partial(function, value))
 
-    def inner(value: Any) -> Union[Any, Callable[[Any], Any]]:
-        """Applies `value` to `function`, or partially applies it if `function` needs more arguments."""
-        try:
-            return function(value)
-        except TypeError:
-            return partial(function, value)
 
-    return inner
+def _needs_more_than_one(function: Callable[..., Any]) -> bool:
+    """Whether one positional argument fits `function` but doesn't complete the call.
+
+    Plain functions and partials of plain functions take a fast path through the code object,
+    since `curry` runs on every applicative `apply`.
+    """
+    applied = 0
+    target = function
+    if isinstance(target, partial) and not target.keywords:
+        applied = len(target.args)
+        target = target.func
+    if isinstance(target, FunctionType):
+        code = target.__code__
+        required = code.co_argcount - len(target.__defaults__ or ()) - applied
+        return required > 1
+    arity = _arity(function)
+    return arity is not None and not arity.binds(1) and arity.accepts(1)
 
 
 def pipe(

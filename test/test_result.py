@@ -1,4 +1,6 @@
+import copy
 import math
+import pickle
 import unittest
 from collections.abc import Callable
 from decimal import Decimal
@@ -7,22 +9,14 @@ from unittest.mock import Mock
 from pymoliath.errors import UnwrapError
 from pymoliath.option import Nil, Option, Some
 from pymoliath.result import (
-    RESULT_TYPES,
     Err,
     Ok,
     Result,
-    from_option,
-    is_err,
-    is_ok,
-    is_result,
-    map2,
-    map3,
-    result_safe,
 )
 from pymoliath.util import compose
 
 
-class TestResultMonad(unittest.TestCase):
+class TestResult(unittest.TestCase):
     """
     Monad operations:
     ≡       Identical to
@@ -65,7 +59,7 @@ class TestResultMonad(unittest.TestCase):
         self.assertEqual(ok_value, ok_value.bind(lambda x: Ok(x)))
         self.assertEqual(failure, failure.bind(lambda x: Err(x)))
 
-    def test_either_monad_associativity_law(self):
+    def test_monad_associativity_law(self):
         """Associativity law: (m >>= f) >>= g ≡ m >>= (x -> f x >>= g)
         https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
 
@@ -173,39 +167,27 @@ class TestResultMonad(unittest.TestCase):
             w.apply(v.apply(u.apply(Ok(composition)))), w.apply(v).apply(u)
         )
 
-    def test_apply_error_precedence(self):
+    def test_apply_function_side_wins(self):
         value: Result[int, str] = Err("value")
         function: Result[Callable[[int], int], str] = Err("function")
         self.assertEqual(Err("function"), value.apply(function))
         self.assertEqual(Err("value"), value.apply(Ok(lambda x: x)))
 
-    def test_map2_and_map3(self):
-        one: Result[int, str] = Ok(1)
-        two: Result[int, str] = Ok(2)
-        first: Result[int, str] = Err("first")
-        second: Result[int, str] = Err("second")
-
-        self.assertEqual(Ok(3), map2(one, two, lambda a, b: a + b))
-        self.assertEqual(Err("first"), map2(first, second, lambda a, b: a + b))
-        self.assertEqual(Err("second"), map2(one, second, lambda a, b: a + b))
-        self.assertEqual(Ok(6), map3(one, two, Ok(3), lambda a, b, c: a + b + c))
-        self.assertEqual(Err("second"), map3(one, second, first, lambda a, b, c: a))
-
-    def test_either_monad_representation(self):
+    def test_str(self):
         ok_value = Ok("a")
         err_value = Err("b")
 
         self.assertEqual(str(ok_value), "Ok(a)")
         self.assertEqual(str(err_value), f"Err({TypeError('b')})")
 
-    def test_result_is_ok_is_err(self):
+    def test_is_ok_is_err(self):
         ok_value = Ok(10)
         err_value = Err("error")
 
         self.assertTrue(ok_value.is_ok() and not ok_value.is_err())
         self.assertTrue(err_value.is_err() and not err_value.is_ok())
 
-    def test_either_monad_unwrap(self):
+    def test_unwrap(self):
         ok_value: Result[int, str] = Ok(10)
         failure: Result[int, str] = Err("error")
 
@@ -222,7 +204,7 @@ class TestResultMonad(unittest.TestCase):
         foo: Result[int, str] = Err("foo")
         self.assertEqual(3, foo.unwrap_or_else(lambda x: len(x)))
 
-    def test_result_inspect(self):
+    def test_inspect(self):
         ok_value = Ok(10)
         error_value = Err("error")
         print_mock = Mock()
@@ -234,27 +216,27 @@ class TestResultMonad(unittest.TestCase):
         )
         print_mock.assert_called_with("error")
 
-    def test_safe_function_returns_correct_result(self):
+    def test_safe(self):
         def unsafe_function():
             raise Exception("error")
 
         def safe_function():
             return 10
 
-        unsafe_result: Result[int, Exception] = result_safe(unsafe_function)
-        safe_result: Result[int, Exception] = result_safe(safe_function)
+        unsafe_result: Result[int, Exception] = Ok.safe(unsafe_function)
+        safe_result: Result[int, Exception] = Ok.safe(safe_function)
 
         self.assertTrue(unsafe_result.is_err_and(lambda e: str(e) == "error"))
         self.assertEqual(Ok(10), safe_result)
 
     def test_safe_narrows_the_caught_exceptions(self):
-        caught = result_safe(lambda: 1 // 0, exceptions=(ZeroDivisionError,))
+        caught = Ok.safe(lambda: 1 // 0, exceptions=(ZeroDivisionError,))
         self.assertTrue(caught.is_err_and(lambda e: type(e) is ZeroDivisionError))
 
         with self.assertRaises(KeyError):
-            result_safe(lambda: {}["missing"], exceptions=(ZeroDivisionError,))
+            Ok.safe(lambda: {}["missing"], exceptions=(ZeroDivisionError,))
 
-    def test_result_monad_map_and_bind(self):
+    def test_map_and_bind(self):
         ok_value: Result[str, str] = Ok("hello")
 
         self.assertEqual(
@@ -266,7 +248,7 @@ class TestResultMonad(unittest.TestCase):
             ),
         )
 
-    def test_result_monad_is_ok_and_is_err_and(self):
+    def test_is_ok_and_is_err_and(self):
         ok_value = Ok(10)
         err_value = Err("error")
 
@@ -276,14 +258,14 @@ class TestResultMonad(unittest.TestCase):
         self.assertTrue(err_value.is_err_and(lambda e: e == "error"))
         self.assertFalse(err_value.is_ok_and(lambda v: v > 5))
 
-    def test_result_monad_map_or(self):
+    def test_map_or(self):
         ok_value = Ok(10)
         err_value = Err("error")
 
         self.assertEqual(11, ok_value.map_or(0, lambda v: v + 1))
         self.assertEqual(0, err_value.map_or(0, lambda v: v + 1))
 
-    def test_result_monad_and_or(self):
+    def test_and_or(self):
         ok_value: Result[int, str] = Ok(10)
         err_value: Result[int, str] = Err("error")
 
@@ -292,7 +274,7 @@ class TestResultMonad(unittest.TestCase):
         self.assertEqual(ok_value, ok_value.or_(Ok(20)))
         self.assertEqual(Ok(20), err_value.or_(Ok(20)))
 
-    def test_result_monad_zip(self):
+    def test_zip(self):
         ok_value: Result[int, str] = Ok(10)
         err_value: Result[int, str] = Err("error")
 
@@ -300,12 +282,12 @@ class TestResultMonad(unittest.TestCase):
         self.assertEqual(Err("error"), ok_value.zip(Err("error")))
         self.assertEqual(err_value, err_value.zip(Ok("a")))
 
-    def test_result_monad_flatten(self):
+    def test_flatten(self):
         self.assertEqual(Ok(10), Ok(Ok(10)).flatten())
         self.assertEqual(Err("error"), Ok(Err("error")).flatten())
         self.assertEqual(Err("error"), Err("error").flatten())
 
-    def test_result_monad_ok_and_err(self):
+    def test_ok_and_err_to_option(self):
         ok_value = Ok(10)
         err_value = Err("error")
 
@@ -314,7 +296,7 @@ class TestResultMonad(unittest.TestCase):
         self.assertEqual(Nil(), err_value.ok())
         self.assertEqual(Some("error"), err_value.err())
 
-    def test_result_supports_structural_pattern_matching(self):
+    def test_supports_structural_pattern_matching(self):
         def describe(value: Result[int, str]) -> str:
             # No `case _:` fallback: Result is a closed union (Ok[T] | Err[E]),
             # so this is statically exhaustive without one.
@@ -375,7 +357,7 @@ class TestResultValueSemantics(unittest.TestCase):
         with self.assertRaises(TypeError):
             hash(Ok([]))
 
-    def test_repr_distinguishes_payload_types(self):
+    def test_repr(self):
         self.assertEqual("Ok('1')", repr(Ok("1")))
         self.assertEqual("Ok(1)", repr(Ok(1)))
         self.assertEqual("Err('e')", repr(Err("e")))
@@ -390,30 +372,58 @@ class TestResultValueSemantics(unittest.TestCase):
         self.assertIs(error, raised.exception.__cause__)
         self.assertNotIsInstance(raised.exception, ValueError)
 
-    def test_cannot_subclass_at_type_level(self):
+    def test_variants_are_final(self):
         # Sealing is static (@final); the runtime hook was removed.
         self.assertTrue(getattr(Ok, "__final__", False))
         self.assertTrue(getattr(Err, "__final__", False))
 
-    def test_runtime_checks(self):
-        self.assertTrue(is_result(Ok(1)))
-        self.assertTrue(is_result(Err(1)))
-        self.assertFalse(is_result(Some(1)))
-        self.assertIsInstance(Ok(1), RESULT_TYPES)
+    def test_copy_and_pickle_round_trip(self):
+        for value in (Ok(1), Ok([1, 2]), Err("e"), Err(ValueError("boom"))):
+            with self.subTest(value=value):
+                self.assertEqual(repr(value), repr(copy.copy(value)))
+                self.assertEqual(repr(value), repr(copy.deepcopy(value)))
+                self.assertEqual(repr(value), repr(pickle.loads(pickle.dumps(value))))
+        for value in (Ok(1), Ok([1, 2]), Err("e")):
+            with self.subTest(value=value):
+                self.assertEqual(value, copy.copy(value))
+                self.assertEqual(value, copy.deepcopy(value))
+                self.assertEqual(value, pickle.loads(pickle.dumps(value)))
 
-        value: Result[int, str] = Ok(1)
-        self.assertTrue(is_ok(value))
-        self.assertFalse(is_err(value))
+    def test_is_frozen(self):
+        with self.assertRaises(AttributeError):  # dataclasses.FrozenInstanceError
+            Ok(1).value = 2  # type: ignore[misc]
+        with self.assertRaises(AttributeError):
+            Err("e").error = "x"  # type: ignore[misc]
 
 
 class TestResultFeatures(unittest.TestCase):
-    def test_match_is_keyword_only(self):
+    def test_renamed_parameters_by_keyword(self):
+        value: Result[int, str] = Ok(-1)
+        error: Result[int, str] = Err("abc")
+        self.assertEqual(3, error.unwrap_or_else(function=len))
+        self.assertEqual(-1, value.unwrap_or_else(function=len))
+        self.assertEqual(
+            Err("neg"), value.filter(predicate=lambda x: x > 0, error="neg")
+        )
+        self.assertEqual(Ok(1), Ok.from_option(option=Some(1), error="missing"))
+        self.assertEqual(
+            3, error.map_or_else(default_function=len, function=lambda x: x * 2)
+        )
+
+    def test_match(self):
         value: Result[int, str] = Ok(1)
         self.assertEqual("ok 1", value.match(ok=lambda x: f"ok {x}", err=lambda e: e))
         error: Result[int, str] = Err("e")
         self.assertEqual("e", error.match(ok=lambda x: f"ok {x}", err=lambda e: e))
         with self.assertRaises(TypeError):
             value.match(lambda x: x, lambda e: e)  # type: ignore[misc]  # pyright: ignore[reportCallIssue]
+
+    def test_bare_err_recovers_without_annotation(self):
+        # The unused Ok type of a bare Err is Never; recovery methods accept any type, like Nil's.
+        self.assertEqual(10, Err("e").unwrap_or(10))
+        self.assertEqual(1, Err("e").unwrap_or_else(len))
+        self.assertEqual(Ok(1), Err("e").or_(Ok(1)))
+        self.assertEqual("e", Ok(1).unwrap_err_or("e"))
 
     def test_swap(self):
         self.assertEqual(Err(1), Ok(1).swap())
@@ -451,5 +461,5 @@ class TestResultFeatures(unittest.TestCase):
         self.assertEqual(Ok(3), error.or_else(lambda e: Ok(len(e))))
 
     def test_from_option(self):
-        self.assertEqual(Ok(1), from_option(Some(1), "missing"))
-        self.assertEqual(Err("missing"), from_option(Nil(), "missing"))
+        self.assertEqual(Ok(1), Ok.from_option(Some(1), "missing"))
+        self.assertEqual(Err("missing"), Ok.from_option(Nil(), "missing"))

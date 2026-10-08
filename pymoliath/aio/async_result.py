@@ -7,22 +7,22 @@
 ```python
 import asyncio
 
-asyncio.run(AsyncResult.from_ok(10).map(lambda x: x + 1))  # Ok(11)
-asyncio.run(AsyncResult.from_err("error").map(lambda x: x + 1))  # Err(error), map is never called
+asyncio.run(AsyncResult.from_ok(10).map(lambda x: x + 1).run())  # Ok(11)
+asyncio.run(AsyncResult.from_err("error").map(lambda x: x + 1).run())  # Err(error), map is never called
 
 
 async def fetch(x: int) -> int: ...
 
 
-asyncio.run(AsyncResult.from_ok(10).map(fetch))  # async callback, auto-detected
-asyncio.run(AsyncResult.from_ok(10).bind(lambda x: AsyncResult.from_ok(x + 1)))  # Ok(11)
+asyncio.run(AsyncResult.from_ok(10).map(fetch).run())  # async callback, auto-detected
+asyncio.run(AsyncResult.from_ok(10).bind(lambda x: AsyncResult.from_ok(x + 1)).run())  # Ok(11)
 
 
 async def fetch_ten() -> int:
     return 10
 
 
-asyncio.run(AsyncResult.from_coroutine(fetch_ten))  # Ok(10)
+asyncio.run(AsyncResult.from_coroutine(fetch_ten).run())  # Ok(10)
 ```
 """
 
@@ -47,10 +47,6 @@ V = TypeVar("V")
 X = TypeVar("X")
 # Like Ok's error type: `Never` unless the context (e.g. an annotation) asks for another one.
 X_Never = TypeVar("X_Never", default=Never)
-# Function-scoped TypeVars for `map2`.
-A = TypeVar("A")
-B = TypeVar("B")
-C = TypeVar("C")
 
 
 class AsyncResult(Generic[T, E]):
@@ -65,6 +61,11 @@ class AsyncResult(Generic[T, E]):
     or `async def` functions - whichever is returned is auto-detected at the point it's called
     (awaited only if it actually is an awaitable), so real async I/O can be mixed freely with plain
     transforms in the same chain.
+
+    `from_err` leaves the success type open, like a bare `Err`: it is solved from context, but
+    the two type checkers disagree on it without any (pyright: Unknown, mypy: Never). Annotate the
+    target where there is no context, e.g.
+    `failed: AsyncResult[int, str] = AsyncResult.from_err("e")`.
     """
 
     __slots__ = ("_run",)
@@ -84,7 +85,7 @@ class AsyncResult(Generic[T, E]):
         --------
         >>> import asyncio
         >>> async def run(): return Ok(10)
-        >>> asyncio.run(AsyncResult(run))
+        >>> asyncio.run(AsyncResult(run).run())
         Ok(10)
         """
         self._run = run
@@ -95,10 +96,30 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_ok(10))
+        >>> async def main():
+        ...     return await AsyncResult.from_ok(10)
+        >>> asyncio.run(main())
         Ok(10)
         """
         return self._run().__await__()
+
+    async def run(self) -> Result[T, E]:
+        """Runs the pipeline and resolves to its result, as a coroutine.
+
+        Equivalent to awaiting it directly. Use `run()` where a coroutine is required, e.g.
+        `asyncio.run(value.run())` (before Python 3.14 `asyncio.run` only accepts coroutines).
+
+        Returns
+        -------
+        result: Result[T, E]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_ok(10).run())
+        Ok(10)
+        """
+        return await self
 
     @staticmethod
     def from_ok(value: V) -> AsyncResult[V, X_Never]:
@@ -117,7 +138,7 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_ok(10))
+        >>> asyncio.run(AsyncResult.from_ok(10).run())
         Ok(10)
         """
 
@@ -130,13 +151,13 @@ class AsyncResult(Generic[T, E]):
     @staticmethod
     # V is deliberately only in the return type: like a bare Err, the Ok type is left open to be
     # solved from context.
-    def from_err(value: X) -> AsyncResult[V, X]:  # pyright: ignore[reportInvalidTypeVarUse]
-        """Lifts a plain value into an already-Err AsyncResult.
+    def from_err(error: X) -> AsyncResult[V, X]:  # pyright: ignore[reportInvalidTypeVarUse]
+        """Lifts an error value into an already-Err AsyncResult.
 
         Parameters
         ----------
-        value: X
-            Value to be wrapped as Err once awaited.
+        error: X
+            Error to be wrapped as Err once awaited.
 
         Returns
         -------
@@ -146,13 +167,13 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_err("error"))
+        >>> asyncio.run(AsyncResult.from_err("error").run())
         Err('error')
         """
 
         async def run() -> Result[V, X]:
-            """Resolves immediately to Err(value)."""
-            return Err(value)
+            """Resolves immediately to Err(error)."""
+            return Err(error)
 
         return AsyncResult(run)
 
@@ -172,9 +193,9 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_result(Ok(10)))
+        >>> asyncio.run(AsyncResult.from_result(Ok(10)).run())
         Ok(10)
-        >>> asyncio.run(AsyncResult.from_result(Err("error")))
+        >>> asyncio.run(AsyncResult.from_result(Err("error")).run())
         Err('error')
         """
 
@@ -205,7 +226,7 @@ class AsyncResult(Generic[T, E]):
         --------
         >>> import asyncio
         >>> async def fetch_ten() -> int: return 10
-        >>> asyncio.run(AsyncResult.from_coroutine(fetch_ten))
+        >>> asyncio.run(AsyncResult.from_coroutine(fetch_ten).run())
         Ok(10)
         """
 
@@ -232,9 +253,9 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_ok(5).map(lambda x: x + 1))
+        >>> asyncio.run(AsyncResult.from_ok(5).map(lambda x: x + 1).run())
         Ok(6)
-        >>> asyncio.run(AsyncResult.from_err("error").map(lambda x: x + 1))
+        >>> asyncio.run(AsyncResult.from_err("error").map(lambda x: x + 1).run())
         Err('error')
         """
 
@@ -243,8 +264,9 @@ class AsyncResult(Generic[T, E]):
             match outcome := await self:
                 case Ok(value):
                     return Ok(await _resolve(function(value)))
-                case Err(error):
-                    return Err(error)
+                case Err():
+                    failed: Err[Any, E] = outcome
+                    return failed
                 case _:
                     assert_never(outcome)
 
@@ -267,17 +289,18 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_err("error").map_err(str.upper))
+        >>> asyncio.run(AsyncResult.from_err("error").map_err(str.upper).run())
         Err('ERROR')
-        >>> asyncio.run(AsyncResult.from_ok(10).map_err(str.upper))
+        >>> asyncio.run(AsyncResult.from_ok(10).map_err(str.upper).run())
         Ok(10)
         """
 
         async def run() -> Result[T, F]:
             """Awaits self, then applies `function` to the Err value, short-circuiting on Ok."""
             match outcome := await self:
-                case Ok(value):
-                    return Ok(value)
+                case Ok():
+                    succeeded: Ok[T, Any] = outcome
+                    return succeeded
                 case Err(error):
                     return Err(await _resolve(function(error)))
                 case _:
@@ -310,9 +333,9 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_ok(5).bind(lambda x: AsyncResult.from_ok(x + 1)))
+        >>> asyncio.run(AsyncResult.from_ok(5).bind(lambda x: AsyncResult.from_ok(x + 1)).run())
         Ok(6)
-        >>> asyncio.run(AsyncResult.from_err("error").bind(lambda x: AsyncResult.from_ok(x + 1)))
+        >>> asyncio.run(AsyncResult.from_err("error").bind(lambda x: AsyncResult.from_ok(x + 1)).run())
         Err('error')
         """
 
@@ -324,12 +347,38 @@ class AsyncResult(Generic[T, E]):
                     if isinstance(next_result, AsyncResult):
                         return await next_result
                     return await _resolve(next_result)
-                case Err(error):
-                    return Err(error)
+                case Err():
+                    failed: Err[Any, E] = outcome
+                    return failed
                 case _:
                     assert_never(outcome)
 
         return AsyncResult(run)
+
+    def and_then(
+        self,
+        function: Callable[
+            [T], AsyncResult[U, E] | Result[U, E] | Awaitable[Result[U, E]]
+        ],
+    ) -> AsyncResult[U, E]:
+        """Alias of `bind`, named like in Rust.
+
+        Parameters
+        ----------
+        function: Callable[[T], AsyncResult[U, E] | Result[U, E] | Awaitable[Result[U, E]]]
+            Function applied to the resolved value, as for `bind`.
+
+        Returns
+        -------
+        async_result: AsyncResult[U, E]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_ok(5).and_then(lambda x: AsyncResult.from_ok(x + 1)).run())
+        Ok(6)
+        """
+        return self.bind(function)
 
     def bind_err(
         self,
@@ -356,17 +405,18 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_err("error").bind_err(lambda e: AsyncResult.from_ok(0)))
+        >>> asyncio.run(AsyncResult.from_err("error").bind_err(lambda e: AsyncResult.from_ok(0)).run())
         Ok(0)
-        >>> asyncio.run(AsyncResult.from_ok(10).bind_err(lambda e: AsyncResult.from_ok(0)))
+        >>> asyncio.run(AsyncResult.from_ok(10).bind_err(lambda e: AsyncResult.from_ok(0)).run())
         Ok(10)
         """
 
         async def run() -> Result[T, F]:
             """Awaits self, then chains into `function`'s result, short-circuiting on Ok."""
             match outcome := await self:
-                case Ok(value):
-                    return Ok(value)
+                case Ok():
+                    succeeded: Ok[T, Any] = outcome
+                    return succeeded
                 case Err(error):
                     next_result = function(error)
                     if isinstance(next_result, AsyncResult):
@@ -377,11 +427,36 @@ class AsyncResult(Generic[T, E]):
 
         return AsyncResult(run)
 
+    def or_else(
+        self,
+        function: Callable[
+            [E], AsyncResult[T, F] | Result[T, F] | Awaitable[Result[T, F]]
+        ],
+    ) -> AsyncResult[T, F]:
+        """Alias of `bind_err`, named like in Rust.
+
+        Parameters
+        ----------
+        function: Callable[[E], AsyncResult[T, F] | Result[T, F] | Awaitable[Result[T, F]]]
+            Function applied to the resolved error, as for `bind_err`.
+
+        Returns
+        -------
+        async_result: AsyncResult[T, F]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_err("e").or_else(lambda e: AsyncResult.from_ok(0)).run())
+        Ok(0)
+        """
+        return self.bind_err(function)
+
     def apply(self, function: AsyncResult[Callable[[T], U], E]) -> AsyncResult[U, E]:
         """Applies the function wrapped in `function` to this AsyncResult's value (<*>).
 
         If both fail, the Err of `function` takes precedence, as in `Result.apply`. For functions of
-        several arguments, use the module-level `map2`.
+        several arguments, curry them and use `apply2`.
 
         Parameters
         ----------
@@ -398,7 +473,7 @@ class AsyncResult(Generic[T, E]):
         >>> import asyncio
         >>> val = AsyncResult.from_ok(10)
         >>> func = AsyncResult.from_ok(lambda x: x * 2)
-        >>> asyncio.run(val.apply(func))
+        >>> asyncio.run(val.apply(func).run())
         Ok(20)
         """
         return function.bind(lambda inner: self.map(inner))
@@ -410,7 +485,7 @@ class AsyncResult(Generic[T, E]):
 
         The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both fail, the
         Err of this (the function side) takes precedence. Curried functions of several arguments
-        can be applied one argument at a time; `map2` takes them uncurried.
+        can be applied one argument at a time.
 
         Parameters
         ----------
@@ -425,10 +500,46 @@ class AsyncResult(Generic[T, E]):
         --------
         >>> import asyncio
         >>> func = AsyncResult.from_ok(lambda y: 10 + y)
-        >>> asyncio.run(func.apply2(AsyncResult.from_ok(5)))
+        >>> asyncio.run(func.apply2(AsyncResult.from_ok(5)).run())
         Ok(15)
         """
         return self.bind(lambda inner: value.map(inner))
+
+    def filter(
+        self, predicate: Callable[[T], bool | Awaitable[bool]], error: E
+    ) -> AsyncResult[T, E]:
+        """Keeps the Ok value if the predicate holds for it, otherwise resolves to Err(error).
+
+        Parameters
+        ----------
+        predicate: Callable[[T], bool | Awaitable[bool]]
+            Sync or async predicate applied to the resolved value if Ok.
+        error: E
+            Error used if the predicate does not hold.
+
+        Returns
+        -------
+        async_result: AsyncResult[T, E]
+            Resolves to the Ok, to Err(error) if the predicate fails, or to the original Err
+            without calling `predicate`.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncResult.from_ok(-1).filter(lambda x: x > 0, "negative").run())
+        Err('negative')
+        >>> asyncio.run(AsyncResult.from_ok(1).filter(lambda x: x > 0, "negative").run())
+        Ok(1)
+        """
+
+        async def run() -> Result[T, E]:
+            """Awaits self, then keeps the Ok value only if `predicate` holds."""
+            outcome = await self
+            if isinstance(outcome, Ok) and not await _resolve(predicate(outcome.value)):
+                return Err(error)
+            return outcome
+
+        return AsyncResult(run)
 
     def and_(self, other: AsyncResult[U, E]) -> AsyncResult[U, E]:
         """Returns `other` if this AsyncResult resolves to Ok, otherwise Err.
@@ -445,9 +556,9 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_ok(1).and_(AsyncResult.from_ok(2)))
+        >>> asyncio.run(AsyncResult.from_ok(1).and_(AsyncResult.from_ok(2)).run())
         Ok(2)
-        >>> asyncio.run(AsyncResult.from_err("error").and_(AsyncResult.from_ok(2)))
+        >>> asyncio.run(AsyncResult.from_err("error").and_(AsyncResult.from_ok(2)).run())
         Err('error')
         """
         return self.bind(lambda _: other)
@@ -467,17 +578,18 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_ok(1).or_(AsyncResult.from_ok(2)))
+        >>> asyncio.run(AsyncResult.from_ok(1).or_(AsyncResult.from_ok(2)).run())
         Ok(1)
-        >>> asyncio.run(AsyncResult.from_err("error").or_(AsyncResult.from_ok(2)))
+        >>> asyncio.run(AsyncResult.from_err("error").or_(AsyncResult.from_ok(2)).run())
         Ok(2)
         """
 
         async def run() -> Result[T, F]:
             """Awaits self, falling back to `other` if this AsyncResult resolves to Err."""
             match outcome := await self:
-                case Ok(value):
-                    return Ok(value)
+                case Ok():
+                    succeeded: Ok[T, Any] = outcome
+                    return succeeded
                 case Err():
                     return await other
                 case _:
@@ -500,9 +612,9 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_ok(1).zip(AsyncResult.from_ok(2)))
+        >>> asyncio.run(AsyncResult.from_ok(1).zip(AsyncResult.from_ok(2)).run())
         Ok((1, 2))
-        >>> asyncio.run(AsyncResult.from_err("error").zip(AsyncResult.from_ok(2)))
+        >>> asyncio.run(AsyncResult.from_err("error").zip(AsyncResult.from_ok(2)).run())
         Err('error')
         """
 
@@ -511,8 +623,9 @@ class AsyncResult(Generic[T, E]):
             match outcome := await self:
                 case Ok(value):
                     return (await other).map(lambda other_value: (value, other_value))
-                case Err(error):
-                    return Err(error)
+                case Err():
+                    failed: Err[Any, E] = outcome
+                    return failed
                 case _:
                     assert_never(outcome)
 
@@ -533,7 +646,7 @@ class AsyncResult(Generic[T, E]):
         --------
         >>> import asyncio
         >>> nested = AsyncResult.from_ok(AsyncResult.from_ok(1))
-        >>> asyncio.run(nested.flatten())
+        >>> asyncio.run(nested.flatten().run())
         Ok(1)
         """
 
@@ -542,8 +655,9 @@ class AsyncResult(Generic[T, E]):
             match outcome := await self:
                 case Ok(nested):
                     return await nested
-                case Err(error):
-                    return Err(error)
+                case Err():
+                    failed: Err[Any, E] = outcome
+                    return failed
                 case _:
                     assert_never(outcome)
 
@@ -566,7 +680,7 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_ok(10).inspect(lambda x: print(f"Value: {x}")))
+        >>> asyncio.run(AsyncResult.from_ok(10).inspect(lambda x: print(f"Value: {x}")).run())
         Value: 10
         Ok(10)
         """
@@ -597,7 +711,7 @@ class AsyncResult(Generic[T, E]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncResult.from_err("error").inspect_err(lambda e: print(f"Error: {e}")))
+        >>> asyncio.run(AsyncResult.from_err("error").inspect_err(lambda e: print(f"Error: {e}")).run())
         Error: error
         Err('error')
         """
@@ -630,21 +744,3 @@ class AsyncResult(Generic[T, E]):
         'AsyncResult(<function...>)'
         """
         return str(self)
-
-
-def map2(
-    first: AsyncResult[A, X], second: AsyncResult[B, X], function: Callable[[A, B], C]
-) -> AsyncResult[C, X]:
-    """Combines the values of two AsyncResults with a two-argument function once both are awaited.
-
-    The first Err wins: if `first` fails, `second` is not awaited.
-
-    Examples
-    --------
-    >>> import asyncio
-    >>> asyncio.run(map2(AsyncResult.from_ok(1), AsyncResult.from_ok(2), lambda a, b: a + b))
-    Ok(3)
-    >>> asyncio.run(map2(AsyncResult.from_err("first"), AsyncResult.from_err("second"), lambda a, b: a + b))
-    Err('first')
-    """
-    return first.bind(lambda a: second.map(lambda b: function(a, b)))

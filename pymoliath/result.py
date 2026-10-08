@@ -94,38 +94,61 @@ match result_value:
         print(f"Error encountered: {y}")
 ```
 
-`Result` is a type alias, so use `is_result` (or `isinstance(x, RESULT_TYPES)`) for runtime checks
-and `is_ok`/`is_err` to narrow a `Result` to one of its variants.
+`Result` is a type alias, so check it at runtime with `isinstance(x, (Ok, Err))`. Both a `match`
+over `Ok`/`Err` and `isinstance(x, Ok)` narrow the type to the variant.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Never, Self, final, overload
+from typing import TYPE_CHECKING, Any, Never, Self, final, overload
 
-from typing_extensions import Generic, TypeIs, TypeVar
+from typing_extensions import Generic, TypeVar
 
+# result.py and option.py convert into each other. Importing the module (not its names) lets the
+# cycle resolve at import time; its attributes are looked up when the conversions run.
+import pymoliath.option as _option
 from pymoliath.errors import UnwrapError
+
+if TYPE_CHECKING:
+    from pymoliath.option import Nil, Option, Some
+
+# `Nil()` is a singleton, but constructing it still runs `__new__` and `__init__`. Hot paths
+# (`Ok.err()`, `Err.ok()`) return this cached reference instead. It is filled on first use because
+# option.py may still be initializing while this module is imported.
+_nil: Nil | None = None
+
+
+def _load_nil() -> Nil:
+    global _nil
+    _nil = _option.Nil()
+    return _nil
+
 
 # Both parameters are covariant, so `Ok[int, Never]` is a `Result[int, str]`. Like in Rust the
 # receiver fixes the types a method accepts (`unwrap_or(default: T)`, `bind` returning
 # `Result[U, E]`), which puts a covariant parameter in an input position. That is sound here: the
 # containers are immutable and those arguments are only ever returned, typed by the receiver's
 # (wider) view - the same reasoning as typeshed's `Sequence.index`. Those methods carry a
-# `# type: ignore[misc]`.
+# `type: ignore` (misc).
+#
+# Short-circuit paths return the instance itself instead of allocating a new one. Only the unused
+# (phantom) type parameter changes there, so they are typed through `Any` in that one slot - a
+# `self: Err[Any, ErrT]` annotation or a `failed: Err[Any, ErrT] = ...` local - which costs nothing
+# at runtime and keeps the other parameter checked.
 T = TypeVar("T", covariant=True)
 E = TypeVar("E", covariant=True)
 
-# Variant parameters: the side a variant does not use defaults to Never (PEP 696).
-T_Never = TypeVar("T_Never", covariant=True, default=Never)
-E_Never = TypeVar("E_Never", covariant=True, default=Never)
+# The type parameters of `Ok` and `Err`. Both default to Never (PEP 696), so the side a variant
+# does not use is Never: a bare `Ok(1)` is an `Ok[int, Never]` and a bare `Err("e")` an
+# `Err[Never, str]`. (A parameter with a default can't precede one without, so both have one.)
+OkT = TypeVar("OkT", covariant=True, default=Never)
+ErrT = TypeVar("ErrT", covariant=True, default=Never)
 
 # Method/function-scoped type variables.
 U = TypeVar("U")
 V = TypeVar("V")
-W = TypeVar("W")
-Y = TypeVar("Y")
 F = TypeVar("F")
 X = TypeVar("X", bound=BaseException)
 
@@ -213,6 +236,16 @@ class _ResultImpl(Generic[T, E]):
     def and_then(self, function: Callable[[T], Result[U, E]]) -> Result[U, E]:
         """Alias of `bind`, named like in Rust.
 
+        Parameters
+        ----------
+        function: Callable[[T], Result[U, E]]
+            Function which takes a value of T and returns a new Result Monad.
+
+        Returns
+        -------
+        result: Result[U, E]
+            Returns the function result if Ok, otherwise the Err.
+
         Examples
         --------
         >>> val: Result[int, str] = Ok(5)
@@ -248,6 +281,16 @@ class _ResultImpl(Generic[T, E]):
     def or_else(self, function: Callable[[E], Result[T, F]]) -> Result[T, F]:
         """Alias of `bind_err`, named like in Rust.
 
+        Parameters
+        ----------
+        function: Callable[[E], Result[T, F]]
+            Function which takes a value of E and returns a new Result Monad.
+
+        Returns
+        -------
+        result: Result[T, F]
+            Returns the function result if Err, otherwise the Ok.
+
         Examples
         --------
         >>> err: Result[int, str] = Err("error")
@@ -260,7 +303,7 @@ class _ResultImpl(Generic[T, E]):
         """Applies the function wrapped in `function` to the Ok value if both are Ok.
 
         If both are Err, the Err of `function` takes precedence. For functions of several
-        arguments, use `map2`/`map3`.
+        arguments, curry them and use `apply2`.
 
         Parameters
         ----------
@@ -291,7 +334,7 @@ class _ResultImpl(Generic[T, E]):
         The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both are
         empty/errors, this (the function side) takes precedence. Functions of several
         arguments can be applied one argument at a time when they are curried, e.g.
-        `Ok(lambda a: lambda b: a + b).apply2(x).apply2(y)`; `map2`/`map3` take them uncurried.
+        `Ok(lambda a: lambda b: a + b).apply2(x).apply2(y)`.
 
         Parameters
         ----------
@@ -546,6 +589,11 @@ class _ResultImpl(Generic[T, E]):
         `Ok(Nil())` becomes `Nil()`, `Ok(Some(x))` becomes `Some(Ok(x))` and `Err(e)` becomes
         `Some(Err(e))`.
 
+        Returns
+        -------
+        option: Option[Result[U, F]]
+            Returns the transposed Option Monad.
+
         Examples
         --------
         >>> from pymoliath.option import Some
@@ -610,12 +658,15 @@ class _ResultImpl(Generic[T, E]):
         raise NotImplementedError
 
     def unwrap_or(self, default_value: T) -> T:  # type: ignore[misc]
-        """Returns the Ok value, or otherwise a provided default value of the same type.
+        """Returns the Ok value, or otherwise the provided default value.
+
+        On a `Result[T, E]` the default must be a T. On a bare Err (whose Ok type is Never) any
+        default is accepted, e.g. `Err("e").unwrap_or(10)`.
 
         Parameters
         ----------
         default_value: T
-            Default value of T
+            Default value returned if the Result Monad is Err.
 
         Returns
         -------
@@ -630,18 +681,20 @@ class _ResultImpl(Generic[T, E]):
         """
         raise NotImplementedError
 
-    def unwrap_or_else(self, err_function: Callable[[E], T]) -> T:
-        """Returns the Ok value, or otherwise calls the err_function with the Err value.
+    def unwrap_or_else(self, function: Callable[[E], T]) -> T:
+        """Returns the Ok value, or otherwise calls function with the Err value.
+
+        Like `unwrap_or`, a bare Err accepts a function returning any type.
 
         Parameters
         ----------
-        err_function: Callable[[E], T]
-            Error function which will be called if the result is of type Err.
+        function: Callable[[E], T]
+            Function which will be called with the Err value if the result is of type Err.
 
         Returns
         -------
         result: T
-            Returns the Ok value or the err_function result.
+            Returns the Ok value or the function result.
 
         Examples
         --------
@@ -725,6 +778,11 @@ class _ResultImpl(Generic[T, E]):
         err: Callable[[E], U]
             Callback function for Result monads of type Err
 
+        Returns
+        -------
+        result: U
+            Returns the result of the callback that was called.
+
         Examples
         --------
         >>> val: Result[int, str] = Ok(10)
@@ -734,8 +792,11 @@ class _ResultImpl(Generic[T, E]):
         raise NotImplementedError
 
     def is_ok(self) -> bool:
-        """Returns True if the Result Monad is Ok, otherwise False. Use the module-level `is_ok`
-        to narrow the type.
+        """Returns True if the Result Monad is Ok, otherwise False.
+
+        Returns
+        -------
+        result: bool
 
         Examples
         --------
@@ -746,8 +807,11 @@ class _ResultImpl(Generic[T, E]):
         raise NotImplementedError
 
     def is_err(self) -> bool:
-        """Returns True if the Result Monad is Err, otherwise False. Use the module-level `is_err`
-        to narrow the type.
+        """Returns True if the Result Monad is Err, otherwise False.
+
+        Returns
+        -------
+        result: bool
 
         Examples
         --------
@@ -757,10 +821,83 @@ class _ResultImpl(Generic[T, E]):
         """
         raise NotImplementedError
 
+    @staticmethod
+    def from_option(option: Option[U], error: F) -> Result[U, F]:
+        """Converts an Option Monad into a Result Monad: Some(x) becomes Ok(x), Nil becomes Err(error).
+
+        Available on both variants (`Ok.from_option` and `Err.from_option` are the same function).
+
+        Parameters
+        ----------
+        option: Option[U]
+            Option Monad to be converted.
+        error: F
+            Error value used if the Option Monad is Nil.
+
+        Returns
+        -------
+        result: Result[U, F]
+            Returns Ok of the Some value, or Err(error).
+
+        Examples
+        --------
+        >>> from pymoliath.option import Nil, Some
+        >>> Ok.from_option(Some(1), "missing")
+        Ok(1)
+        >>> Ok.from_option(Nil(), "missing")
+        Err('missing')
+        """
+        if isinstance(option, _option.Some):
+            return Ok(option.value)
+        return Err(error)
+
+    @staticmethod
+    @overload
+    def safe(function: Callable[[], U]) -> Result[U, Exception]: ...
+
+    @staticmethod
+    @overload
+    def safe(
+        function: Callable[[], U], *, exceptions: tuple[type[X], ...]
+    ) -> Result[U, X]: ...
+
+    @staticmethod
+    def safe(
+        function: Callable[[], U],
+        *,
+        exceptions: tuple[type[BaseException], ...] = (Exception,),
+    ) -> Result[U, BaseException]:
+        """Calls function and wraps its return value in Ok, or a raised exception in Err.
+
+        Parameters
+        ----------
+        function: Callable[[], U]
+            Zero-argument function which may raise an exception.
+        exceptions: tuple[type[X], ...]
+            The exception types to catch (default: `Exception`). Any other exception propagates.
+
+        Returns
+        -------
+        result: Result[U, X]
+
+        Examples
+        --------
+        >>> Ok.safe(lambda: 1)
+        Ok(1)
+        >>> Ok.safe(lambda: 1 / 0)
+        Err(ZeroDivisionError('division by zero'))
+        >>> Ok.safe(lambda: int("x"), exceptions=(ValueError,)).is_err()
+        True
+        """
+        try:
+            return Ok(function())
+        except exceptions as e:
+            return Err(e)
+
 
 @final
-@dataclass(frozen=True, slots=True, repr=False)
-class Ok(_ResultImpl[T, E_Never]):
+@dataclass(frozen=True, slots=True, repr=False, init=False)
+class Ok(_ResultImpl[OkT, ErrT]):
     """The Ok variant of the Result Monad, wrapping a success value.
 
     Equality and hashing compare the wrapped value (an unhashable value makes the Ok unhashable).
@@ -773,69 +910,77 @@ class Ok(_ResultImpl[T, E_Never]):
     'Ok(text)'
     """
 
-    value: T
+    value: OkT
 
-    def map(self, function: Callable[[T], U]) -> Ok[U, E_Never]:
+    def __init__(self, value: OkT) -> None:
+        _set_ok_value(self, value)
+
+    def map(self, function: Callable[[OkT], U]) -> Ok[U, ErrT]:
         return Ok(function(self.value))
 
-    def map_err(self, function: Callable[[E_Never], F]) -> Ok[T, F]:
-        return self  # type: ignore[return-value]
+    def map_err(self: Ok[OkT, Any], function: Callable[[ErrT], F]) -> Ok[OkT, F]:
+        return self
 
-    def bind(self, function: Callable[[T], Result[U, E_Never]]) -> Result[U, E_Never]:
+    def bind(self, function: Callable[[OkT], Result[U, ErrT]]) -> Result[U, ErrT]:
         return function(self.value)
 
     and_then = bind
 
-    def bind_err(self, function: Callable[[E_Never], Result[T, F]]) -> Ok[T, F]:
-        return self  # type: ignore[return-value]
+    def bind_err(
+        self: Ok[OkT, Any], function: Callable[[ErrT], Result[OkT, F]]
+    ) -> Ok[OkT, F]:
+        return self
 
     or_else = bind_err
 
-    def apply(self, function: Result[Callable[[T], U], E_Never]) -> Result[U, E_Never]:
+    def apply(self, function: Result[Callable[[OkT], U], ErrT]) -> Result[U, ErrT]:
         if isinstance(function, Ok):
             return Ok(function.value(self.value))
-        return function  # type: ignore[return-value]
+        failed: Err[Any, ErrT] = function
+        return failed
 
     def apply2(
-        self: Ok[Callable[[U], V], E_Never], value: Result[U, E_Never]
-    ) -> Result[V, E_Never]:
+        self: Ok[Callable[[U], V], ErrT], value: Result[U, ErrT]
+    ) -> Result[V, ErrT]:
         if isinstance(value, Ok):
             return Ok(self.value(value.value))
-        return value  # type: ignore[return-value]
+        failed: Err[Any, ErrT] = value
+        return failed
 
-    def is_ok_and(self, function: Callable[[T], bool]) -> bool:
+    def is_ok_and(self, function: Callable[[OkT], bool]) -> bool:
         return function(self.value)
 
-    def is_err_and(self, function: Callable[[E_Never], bool]) -> bool:
+    def is_err_and(self, function: Callable[[ErrT], bool]) -> bool:
         return False
 
-    def map_or(self, default_value: U, function: Callable[[T], U]) -> U:
+    def map_or(self, default_value: U, function: Callable[[OkT], U]) -> U:
         return function(self.value)
 
     def map_or_else(
-        self, default_function: Callable[[E_Never], U], function: Callable[[T], U]
+        self, default_function: Callable[[ErrT], U], function: Callable[[OkT], U]
     ) -> U:
         return function(self.value)
 
     def filter(
         self,
-        predicate: Callable[[T], bool],
-        error: E_Never,  # type: ignore[misc]
-    ) -> Result[T, E_Never]:
+        predicate: Callable[[OkT], bool],
+        error: ErrT,  # type: ignore[misc]
+    ) -> Result[OkT, ErrT]:
         return self if predicate(self.value) else Err(error)
 
-    def and_(self, other: Result[U, E_Never]) -> Result[U, E_Never]:
+    def and_(self, other: Result[U, ErrT]) -> Result[U, ErrT]:
         return other
 
-    def or_(self, other: Result[T, F]) -> Ok[T, F]:
-        return self  # type: ignore[return-value]
+    def or_(self: Ok[OkT, Any], other: Result[OkT, F]) -> Ok[OkT, F]:
+        return self
 
-    def zip(self, other: Result[U, E_Never]) -> Result[tuple[T, U], E_Never]:
+    def zip(self, other: Result[U, ErrT]) -> Result[tuple[OkT, U], ErrT]:
         if isinstance(other, Ok):
             return Ok((self.value, other.value))
-        return other  # type: ignore[return-value]
+        failed: Err[Any, ErrT] = other
+        return failed
 
-    def swap(self) -> Err[E_Never, T]:
+    def swap(self) -> Err[ErrT, OkT]:
         return Err(self.value)
 
     def flatten(self: Ok[Result[U, F], F]) -> Result[U, F]:
@@ -846,36 +991,36 @@ class Ok(_ResultImpl[T, E_Never]):
 
     def transpose(self: Ok[Option[U], F]) -> Option[Result[U, F]]:
         option = self.value
-        if isinstance(option, Some):
-            return Some(Ok(option.value))
+        if isinstance(option, _option.Some):
+            return _option.Some(Ok(option.value))
         return option
 
-    def ok(self) -> Some[T]:
-        return Some(self.value)
+    def ok(self) -> Some[OkT]:
+        return _option.Some(self.value)
 
     def err(self) -> Nil:
-        return Nil()
+        return _nil or _load_nil()
 
-    def unwrap(self) -> T:
+    def unwrap(self) -> OkT:
         return self.value
 
-    def unwrap_or(self, default_value: T) -> T:  # type: ignore[misc]
+    def unwrap_or(self, default_value: OkT) -> OkT:  # type: ignore[misc]
         return self.value
 
-    def unwrap_or_else(self, err_function: Callable[[E_Never], T]) -> T:
+    def unwrap_or_else(self, function: Callable[[ErrT], OkT]) -> OkT:
         return self.value
 
-    def unwrap_err_or(self, default_value: E_Never) -> E_Never:  # type: ignore[misc]
+    def unwrap_err_or(self, default_value: F) -> F:
         return default_value
 
-    def inspect(self, function: Callable[[T], None]) -> Self:
+    def inspect(self, function: Callable[[OkT], None]) -> Self:
         function(self.value)
         return self
 
-    def inspect_err(self, function: Callable[[E_Never], None]) -> Self:
+    def inspect_err(self, function: Callable[[ErrT], None]) -> Self:
         return self
 
-    def match(self, *, ok: Callable[[T], U], err: Callable[[E_Never], U]) -> U:
+    def match(self, *, ok: Callable[[OkT], U], err: Callable[[ErrT], U]) -> U:
         return ok(self.value)
 
     def is_ok(self) -> bool:
@@ -892,8 +1037,8 @@ class Ok(_ResultImpl[T, E_Never]):
 
 
 @final
-@dataclass(frozen=True, slots=True, repr=False)
-class Err(_ResultImpl[T_Never, E_Never]):
+@dataclass(frozen=True, slots=True, repr=False, init=False)
+class Err(_ResultImpl[OkT, ErrT]):
     """The Err variant of the Result Monad, wrapping an error value.
 
     Equality and hashing compare the wrapped error. Exceptions compare by identity, so two
@@ -907,83 +1052,88 @@ class Err(_ResultImpl[T_Never, E_Never]):
     'Err(error)'
     """
 
-    error: E_Never
+    error: ErrT
 
-    def map(self, function: Callable[[T_Never], U]) -> Err[U, E_Never]:
-        return self  # type: ignore[return-value]
+    def __init__(self, error: ErrT) -> None:
+        _set_err_error(self, error)
 
-    def map_err(self, function: Callable[[E_Never], F]) -> Err[T_Never, F]:
+    def map(self: Err[Any, ErrT], function: Callable[[OkT], U]) -> Err[U, ErrT]:
+        return self
+
+    def map_err(self, function: Callable[[ErrT], F]) -> Err[OkT, F]:
         return Err(function(self.error))
 
     def bind(
-        self, function: Callable[[T_Never], Result[U, E_Never]]
-    ) -> Err[U, E_Never]:
-        return self  # type: ignore[return-value]
+        self: Err[Any, ErrT], function: Callable[[OkT], Result[U, ErrT]]
+    ) -> Err[U, ErrT]:
+        return self
 
     and_then = bind
 
-    def bind_err(
-        self, function: Callable[[E_Never], Result[T_Never, F]]
-    ) -> Result[T_Never, F]:
+    def bind_err(self, function: Callable[[ErrT], Result[OkT, F]]) -> Result[OkT, F]:
         return function(self.error)
 
     or_else = bind_err
 
     def apply(
-        self, function: Result[Callable[[T_Never], U], E_Never]
-    ) -> Err[U, E_Never]:
+        self: Err[Any, ErrT], function: Result[Callable[[OkT], U], ErrT]
+    ) -> Err[U, ErrT]:
         if isinstance(function, Err):
-            return function  # type: ignore[return-value]
-        return self  # type: ignore[return-value]
+            failed: Err[Any, ErrT] = function
+            return failed
+        return self
 
     def apply2(
-        self: Err[Callable[[U], V], E_Never], value: Result[U, E_Never]
-    ) -> Err[V, E_Never]:
-        return self  # type: ignore[return-value]
+        self: Err[Callable[[U], V], ErrT], value: Result[U, ErrT]
+    ) -> Err[V, ErrT]:
+        failed: Err[Any, ErrT] = self
+        return failed
 
-    def is_ok_and(self, function: Callable[[T_Never], bool]) -> bool:
+    def is_ok_and(self, function: Callable[[OkT], bool]) -> bool:
         return False
 
-    def is_err_and(self, function: Callable[[E_Never], bool]) -> bool:
+    def is_err_and(self, function: Callable[[ErrT], bool]) -> bool:
         return function(self.error)
 
-    def map_or(self, default_value: U, function: Callable[[T_Never], U]) -> U:
+    def map_or(self, default_value: U, function: Callable[[OkT], U]) -> U:
         return default_value
 
     def map_or_else(
-        self, default_function: Callable[[E_Never], U], function: Callable[[T_Never], U]
+        self, default_function: Callable[[ErrT], U], function: Callable[[OkT], U]
     ) -> U:
         return default_function(self.error)
 
-    def filter(self, predicate: Callable[[T_Never], bool], error: E_Never) -> Self:  # type: ignore[misc]
+    def filter(self, predicate: Callable[[OkT], bool], error: ErrT) -> Self:  # type: ignore[misc]
         return self
 
-    def and_(self, other: Result[U, E_Never]) -> Err[U, E_Never]:
-        return self  # type: ignore[return-value]
+    def and_(self: Err[Any, ErrT], other: Result[U, ErrT]) -> Err[U, ErrT]:
+        return self
 
-    def or_(self, other: Result[T_Never, F]) -> Result[T_Never, F]:
+    def or_(self, other: Result[U, F]) -> Result[U, F]:
         return other
 
-    def zip(self, other: Result[U, E_Never]) -> Err[tuple[T_Never, U], E_Never]:
-        return self  # type: ignore[return-value]
+    def zip(self: Err[Any, ErrT], other: Result[U, ErrT]) -> Err[tuple[OkT, U], ErrT]:
+        return self
 
-    def swap(self) -> Ok[E_Never, T_Never]:
+    def swap(self) -> Ok[ErrT, OkT]:
         return Ok(self.error)
 
     def flatten(self: Err[Result[U, F], F]) -> Err[U, F]:
-        return self  # type: ignore[return-value]
+        failed: Err[Any, F] = self
+        return failed
 
     def merge(self: Err[U, U]) -> U:
         return self.error
 
     def transpose(self: Err[Option[U], F]) -> Some[Result[U, F]]:
-        return Some(self)  # type: ignore[arg-type]
+        failed: Err[Any, F] = self
+        return _option.Some(failed)
 
     def ok(self) -> Nil:
-        return Nil()
+        return _nil or _load_nil()
 
-    def err(self) -> Some[E_Never]:
-        return Some(self.error)
+    def err(self) -> Some[ErrT]:
+        return _option.Some(self.error)
 
     def unwrap(self) -> Never:
         error = self.error
@@ -992,23 +1142,23 @@ class Err(_ResultImpl[T_Never, E_Never]):
             raise UnwrapError(self, message) from error
         raise UnwrapError(self, message)
 
-    def unwrap_or(self, default_value: T_Never) -> T_Never:  # type: ignore[misc]
+    def unwrap_or(self, default_value: U) -> U:
         return default_value
 
-    def unwrap_or_else(self, err_function: Callable[[E_Never], T_Never]) -> T_Never:
-        return err_function(self.error)
+    def unwrap_or_else(self, function: Callable[[ErrT], U]) -> U:
+        return function(self.error)
 
-    def unwrap_err_or(self, default_value: E_Never) -> E_Never:  # type: ignore[misc]
+    def unwrap_err_or(self, default_value: ErrT) -> ErrT:  # type: ignore[misc]
         return self.error
 
-    def inspect(self, function: Callable[[T_Never], None]) -> Self:
+    def inspect(self, function: Callable[[OkT], None]) -> Self:
         return self
 
-    def inspect_err(self, function: Callable[[E_Never], None]) -> Self:
+    def inspect_err(self, function: Callable[[ErrT], None]) -> Self:
         function(self.error)
         return self
 
-    def match(self, *, ok: Callable[[T_Never], U], err: Callable[[E_Never], U]) -> U:
+    def match(self, *, ok: Callable[[OkT], U], err: Callable[[ErrT], U]) -> U:
         return err(self.error)
 
     def is_ok(self) -> bool:
@@ -1024,153 +1174,11 @@ class Err(_ResultImpl[T_Never, E_Never]):
         return f"Err({self.error!r})"
 
 
-type Result[OkT, ErrT] = Ok[OkT, ErrT] | Err[OkT, ErrT]
+# The dataclasses are frozen, so their generated `__init__` has to bypass the blocking `__setattr__`
+# through `object.__setattr__`, which is slow. The hand-written `__init__`s above call the slot's
+# descriptor directly instead (about a third faster); assignment after construction still raises
+# `FrozenInstanceError`.
+_set_ok_value: Callable[[Ok[Any, Any], object], None] = Ok.__dict__["value"].__set__
+_set_err_error: Callable[[Err[Any, Any], object], None] = Err.__dict__["error"].__set__
 
-RESULT_TYPES: tuple[type[Ok[Any, Any]], type[Err[Any, Any]]] = (Ok, Err)
-"""The runtime classes of `Result`, for `isinstance` checks (`Result` itself is a type alias)."""
-
-
-def is_result(value: object) -> TypeIs[Result[Any, Any]]:
-    """Returns True if `value` is an Ok or an Err.
-
-    Examples
-    --------
-    >>> is_result(Ok(1)), is_result(1)
-    (True, False)
-    """
-    return isinstance(value, RESULT_TYPES)
-
-
-def is_ok(result: Result[U, F]) -> TypeIs[Ok[U, F]]:
-    """Returns True if the Result Monad is Ok, narrowing it to `Ok` for type checkers.
-
-    Examples
-    --------
-    >>> val: Result[int, str] = Ok(1)
-    >>> if is_ok(val):
-    ...     print(val.value)
-    1
-    """
-    return isinstance(result, Ok)
-
-
-def is_err(result: Result[U, F]) -> TypeIs[Err[U, F]]:
-    """Returns True if the Result Monad is Err, narrowing it to `Err` for type checkers.
-
-    Examples
-    --------
-    >>> val: Result[int, str] = Err("e")
-    >>> if is_err(val):
-    ...     print(val.error)
-    e
-    """
-    return isinstance(result, Err)
-
-
-def from_option(option: Option[U], error: F) -> Result[U, F]:
-    """Converts an Option Monad into a Result Monad: Some(x) becomes Ok(x), Nil becomes Err(error).
-
-    Examples
-    --------
-    >>> from pymoliath.option import Nil, Some
-    >>> from_option(Some(1), "missing")
-    Ok(1)
-    >>> from_option(Nil(), "missing")
-    Err('missing')
-    """
-    if isinstance(option, Some):
-        return Ok(option.value)
-    return Err(error)
-
-
-def map2(
-    first: Result[U, F], second: Result[V, F], function: Callable[[U, V], W]
-) -> Result[W, F]:
-    """Applies a two-argument function to the values of two Result Monads if both are Ok.
-
-    If both are Err, the first Err takes precedence.
-
-    Examples
-    --------
-    >>> map2(Ok(1), Ok(2), lambda a, b: a + b)
-    Ok(3)
-    >>> map2(Err("first"), Err("second"), lambda a, b: a + b)
-    Err('first')
-    """
-    if isinstance(first, Err):
-        return first  # type: ignore[return-value]
-    if isinstance(second, Err):
-        return second  # type: ignore[return-value]
-    return Ok(function(first.value, second.value))
-
-
-def map3(
-    first: Result[U, F],
-    second: Result[V, F],
-    third: Result[W, F],
-    function: Callable[[U, V, W], Y],
-) -> Result[Y, F]:
-    """Applies a three-argument function to the values of three Result Monads if all are Ok.
-
-    If several are Err, the first Err takes precedence.
-
-    Examples
-    --------
-    >>> map3(Ok(1), Ok(2), Ok(3), lambda a, b, c: a + b + c)
-    Ok(6)
-    """
-    if isinstance(first, Err):
-        return first  # type: ignore[return-value]
-    if isinstance(second, Err):
-        return second  # type: ignore[return-value]
-    if isinstance(third, Err):
-        return third  # type: ignore[return-value]
-    return Ok(function(first.value, second.value, third.value))
-
-
-@overload
-def result_safe(function: Callable[[], U]) -> Result[U, Exception]: ...
-
-
-@overload
-def result_safe(
-    function: Callable[[], U], *, exceptions: tuple[type[X], ...]
-) -> Result[U, X]: ...
-
-
-def result_safe(
-    function: Callable[[], U],
-    *,
-    exceptions: tuple[type[BaseException], ...] = (Exception,),
-) -> Result[U, BaseException]:
-    """Calls function and wraps its return value in Ok, or a raised exception in Err.
-
-    Parameters
-    ----------
-    function: Callable[[], U]
-        Zero-argument function which may raise an exception.
-    exceptions: tuple[type[X], ...]
-        The exception types to catch (default: `Exception`). Any other exception propagates.
-
-    Returns
-    -------
-    result: Result[U, X]
-
-    Examples
-    --------
-    >>> result_safe(lambda: 1)
-    Ok(1)
-    >>> result_safe(lambda: 1 / 0)
-    Err(ZeroDivisionError('division by zero'))
-    >>> result_safe(lambda: int("x"), exceptions=(ValueError,)).is_err()
-    True
-    """
-    try:
-        return Ok(function())
-    except exceptions as e:
-        return Err(e)
-
-
-# Imported last: option.py imports Ok/Err from this module, so the cycle resolves once at import
-# time instead of on every call.
-from pymoliath.option import Nil, Option, Some  # noqa: E402
+type Result[T, E] = Ok[T, E] | Err[T, E]

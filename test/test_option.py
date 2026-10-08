@@ -1,20 +1,16 @@
+import copy
+import math
+import pickle
 import unittest
+from decimal import Decimal
 from typing import Any, Callable
 from unittest.mock import MagicMock, Mock
 
 from pymoliath.errors import UnwrapError
 from pymoliath.option import (
-    OPTION_TYPES,
     Nil,
     Option,
     Some,
-    from_optional,
-    is_nil,
-    is_option,
-    is_some,
-    map2,
-    map3,
-    safe,
 )
 from pymoliath.result import Err, Ok, Result
 from pymoliath.util import compose
@@ -61,7 +57,7 @@ class TestOption(unittest.TestCase):
         self.assertEqual(some_value, some_value.bind(lambda x: Some(x)))
         self.assertEqual(nothing_value, nothing_value.bind(lambda _: Nil()))
 
-    def test_some_monad_associativity_law(self):
+    def test_monad_associativity_law(self):
         """Associativity law: (m >>= f) >>= g ≡ m >>= (x -> f x >>= g)
         https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
 
@@ -173,22 +169,14 @@ class TestOption(unittest.TestCase):
             w.apply(v.apply(u.apply(Some(composition)))), w.apply(v).apply(u)
         )
 
-    def test_map2_and_map3(self):
-        self.assertEqual(Some(3), map2(Some(1), Some(2), lambda a, b: a + b))
-        self.assertEqual(Nil(), map2(Some(1), Nil(), lambda a, b: a))
-        self.assertEqual(
-            Some(6), map3(Some(1), Some(2), Some(3), lambda a, b, c: a + b + c)
-        )
-        self.assertEqual(Nil(), map3(Some(1), Some(2), Nil(), lambda a, b, c: a))
-
-    def test_maybe_monad_representation(self):
+    def test_str(self):
         some = Some("a")
         nothing = Nil()
 
         self.assertEqual(str(some), "Some(a)")
         self.assertEqual(str(nothing), "Nil()")
 
-    def test_maybe_optional_instances(self):
+    def test_variants_are_instances(self):
         self.assertTrue(isinstance(Some("a"), (Some, Nil)))  # pyright: ignore[reportUnnecessaryIsInstance]
         self.assertTrue(isinstance(Nil(), (Some, Nil)))  # pyright: ignore[reportUnnecessaryIsInstance]
 
@@ -197,34 +185,27 @@ class TestOption(unittest.TestCase):
         empty: Option[int] = Nil()
         self.assertIs(empty, Nil())
 
-    def test_maybe_from_and_to_optional(self):
-        maybe_dict: Option[dict[Any, Any]] = from_optional({})
-        maybe_string: Option[str] = from_optional("")
-        maybe_none: Option[str] = from_optional(None)
+    def test_from_and_to_optional(self):
+        maybe_dict: Option[dict[Any, Any]] = Some.from_optional({})
+        maybe_string: Option[str] = Some.from_optional("")
+        maybe_none: Option[str] = Some.from_optional(None)
 
         self.assertEqual({}, maybe_dict.to_optional())
         self.assertEqual("", maybe_string.to_optional())
         self.assertEqual(None, maybe_none.to_optional())
 
-    def test_maybe_is_nothing_is_some(self):
+    def test_is_nil_and_is_some(self):
         some = Some(10)
         nothing = Nil()
-        maybe_none = from_optional(None)
-        maybe_value = from_optional(10)
+        maybe_none = Some.from_optional(None)
+        maybe_value = Some.from_optional(10)
 
-        self.assertTrue(some.is_some() and not some.is_nothing())
-        self.assertTrue(nothing.is_nothing() and not nothing.is_some())
-        self.assertTrue(maybe_value.is_some() and not maybe_value.is_nothing())
-        self.assertTrue(maybe_none.is_nothing() and not maybe_none.is_some())
+        self.assertTrue(some.is_some() and not some.is_nil())
+        self.assertTrue(nothing.is_nil() and not nothing.is_some())
+        self.assertTrue(maybe_value.is_some() and not maybe_value.is_nil())
+        self.assertTrue(maybe_none.is_nil() and not maybe_none.is_some())
 
-    def test_maybe_monad_unwrap(self):
-        some_value = Some(10)
-        nothing = Nil()
-
-        self.assertEqual(10, some_value.unwrap_or(20))
-        self.assertEqual(20, nothing.unwrap_or(20))
-
-    def test_maybe_monad_filter(self):
+    def test_filter(self):
         some_value = Some(10)
         nothing = Nil()
 
@@ -232,7 +213,7 @@ class TestOption(unittest.TestCase):
         self.assertEqual(Nil(), some_value.filter(lambda v: v > 10))
         self.assertEqual(Nil(), nothing.filter(lambda v: v < 10))
 
-    def test_option_monad_is_some_and(self):
+    def test_is_some_and(self):
         some_value = Some(10)
         nothing = Nil()
 
@@ -240,14 +221,14 @@ class TestOption(unittest.TestCase):
         self.assertFalse(some_value.is_some_and(lambda v: v > 10))
         self.assertFalse(nothing.is_some_and(lambda v: v > 5))
 
-    def test_option_monad_map_or(self):
+    def test_map_or(self):
         some_value = Some(10)
         nothing = Nil()
 
         self.assertEqual(11, some_value.map_or(0, lambda v: v + 1))
         self.assertEqual(0, nothing.map_or(0, lambda v: v + 1))
 
-    def test_option_monad_and_or(self):
+    def test_and_or(self):
         some_value = Some(10)
         nothing = Nil()
 
@@ -256,7 +237,7 @@ class TestOption(unittest.TestCase):
         self.assertEqual(some_value, some_value.or_(Some(20)))
         self.assertEqual(Some(20), nothing.or_(Some(20)))
 
-    def test_option_monad_zip(self):
+    def test_zip(self):
         some_value = Some(10)
         nothing = Nil()
 
@@ -264,12 +245,12 @@ class TestOption(unittest.TestCase):
         self.assertEqual(Nil(), some_value.zip(Nil()))
         self.assertEqual(Nil(), nothing.zip(Some("a")))
 
-    def test_option_monad_flatten(self):
+    def test_flatten(self):
         self.assertEqual(Some(10), Some(Some(10)).flatten())
         self.assertEqual(Nil(), Some(Nil()).flatten())
         self.assertEqual(Nil(), Nil().flatten())
 
-    def test_option_monad_ok_or(self):
+    def test_ok_or(self):
         some_value = Some(10)
         nothing = Nil()
 
@@ -278,18 +259,18 @@ class TestOption(unittest.TestCase):
         self.assertEqual(Ok(10), some_value.ok_or_else(lambda: "error"))
         self.assertEqual(Err("error"), nothing.ok_or_else(lambda: "error"))
 
-    def test_safe_function(self):
+    def test_safe(self):
         exception_function = MagicMock(side_effect=Exception("error"))
-        maybe_unsafe = safe(lambda: exception_function())
-        maybe_safe = safe(lambda: 10)
+        maybe_unsafe = Some.safe(lambda: exception_function())
+        maybe_safe = Some.safe(lambda: 10)
 
         self.assertEqual(Nil(), maybe_unsafe)
         self.assertEqual(Some(10), maybe_safe)
-        self.assertEqual(Nil(), safe(lambda: int("x"), exceptions=(ValueError,)))
+        self.assertEqual(Nil(), Some.safe(lambda: int("x"), exceptions=(ValueError,)))
         with self.assertRaises(KeyError):
-            safe(lambda: {}["missing"], exceptions=(ValueError,))
+            Some.safe(lambda: {}["missing"], exceptions=(ValueError,))
 
-    def test_maybe_unwrap(self):
+    def test_unwrap(self):
         some = Some("a")
         nothing = Nil()
 
@@ -302,7 +283,7 @@ class TestOption(unittest.TestCase):
         self.assertEqual("a", some.unwrap_or_else(lambda: "b"))
         self.assertEqual(10, nothing.unwrap_or_else(lambda: 10))
 
-    def test_maybe_inspect(self):
+    def test_inspect(self):
         some = Some("a")
         nothing = Nil()
         print_mock = Mock()
@@ -311,7 +292,7 @@ class TestOption(unittest.TestCase):
         self.assertEqual(nothing, nothing.inspect(print_mock))
         print_mock.assert_called_once_with("a")
 
-    def test_maybe_functions(self):
+    def test_match(self):
         some = Some("a")
         nothing = Nil()
 
@@ -330,7 +311,7 @@ class TestOption(unittest.TestCase):
             ),
         )
 
-    def test_option_supports_structural_pattern_matching(self):
+    def test_supports_structural_pattern_matching(self):
         def describe(value: Option[int]) -> str:
             # No `case _:` fallback: Option is a closed union (Some[T] | Nil),
             # so this is statically exhaustive without one.
@@ -378,15 +359,6 @@ class TestOptionValueSemantics(unittest.TestCase):
         self.assertEqual("Some(1)", str(Some(1)))
         self.assertEqual("Nil()", repr(Nil()))
 
-    def test_runtime_checks(self):
-        value: Option[int] = Some(1)
-        self.assertTrue(is_some(value))
-        self.assertFalse(is_nil(value))
-        self.assertTrue(is_nil(Nil()))
-        self.assertTrue(is_option(Nil()))
-        self.assertFalse(is_option(None))
-        self.assertIsInstance(Some(1), OPTION_TYPES)
-
 
 class TestOptionFeatures(unittest.TestCase):
     def test_map_or_else(self):
@@ -413,3 +385,45 @@ class TestOptionFeatures(unittest.TestCase):
         self.assertEqual(Ok(Nil()), Nil().transpose())
         error: Option[Result[int, str]] = Some(Err("e"))
         self.assertEqual(Err("e"), error.transpose())
+
+
+class TestOptionCopyAndPickle(unittest.TestCase):
+    def test_some_round_trips(self):
+        some = Some([1, 2])
+        for clone in (
+            copy.copy(some),
+            copy.deepcopy(some),
+            pickle.loads(pickle.dumps(some)),
+        ):
+            self.assertEqual(some, clone)
+        self.assertIsNot(some.value, copy.deepcopy(some).value)
+
+    def test_nil_stays_a_singleton(self):
+        for clone in (
+            copy.copy(Nil()),
+            copy.deepcopy(Nil()),
+            pickle.loads(pickle.dumps(Nil())),
+        ):
+            self.assertIs(Nil(), clone)
+
+
+class TestOptionMoreValueSemantics(unittest.TestCase):
+    def test_nan_and_decimal_equality(self):
+        self.assertNotEqual(Some(float("nan")), Some(float("nan")))
+        self.assertTrue(math.isnan(Some(float("nan")).unwrap()))
+        self.assertEqual(Some(Decimal("1.0")), Some(Decimal("1.00")))
+
+    def test_variants_are_final(self):
+        self.assertTrue(getattr(Some, "__final__", False))
+        self.assertTrue(getattr(Nil, "__final__", False))
+
+    def test_from_optional(self):
+        self.assertIs(Nil(), Some.from_optional(None))
+        self.assertEqual(Some(0), Some.from_optional(0))
+
+    def test_keyword_arguments(self):
+        empty: Option[int] = Nil()
+        self.assertEqual(Some(2), Some(2).filter(predicate=lambda x: x > 1))
+        self.assertEqual(0, empty.unwrap_or_else(function=lambda: 0))
+        self.assertEqual(Err("missing"), empty.ok_or(error="missing"))
+        self.assertEqual(Err("missing"), empty.ok_or_else(function=lambda: "missing"))

@@ -3,14 +3,13 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from pymoliath.aio import AsyncMaybe
-from pymoliath.aio.async_maybe import map2
 from pymoliath.maybe import Just, Nothing
 
 
 class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
     async def test_directly_awaitable(self):
         """The AsyncMaybe itself is awaitable - no .run()/execute call needed."""
-        self.assertEqual(Just(10), await AsyncMaybe.from_value(10))
+        self.assertEqual(Just(10), await AsyncMaybe.from_just(10))
 
     async def test_from_maybe(self):
         self.assertEqual(Just(10), await AsyncMaybe.from_maybe(Just(10)))
@@ -30,7 +29,7 @@ class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
             calls.append(value)
             return value + 1
 
-        pipeline = AsyncMaybe.from_value(1).map(track).map(track)
+        pipeline = AsyncMaybe.from_just(1).map(track).map(track)
         self.assertEqual([], calls)
 
         result = await pipeline
@@ -47,21 +46,21 @@ class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
         result = (
             await AsyncMaybe.from_maybe(Nothing())
             .map(track)
-            .bind(lambda v: AsyncMaybe.from_value(track(v)))
+            .bind(lambda v: AsyncMaybe.from_just(track(v)))
         )
 
         self.assertEqual([], calls)
         self.assertEqual(Nothing(), result)
 
     async def test_map_sync_function(self):
-        result = await AsyncMaybe.from_value(10).map(lambda x: x * 2)
+        result = await AsyncMaybe.from_just(10).map(lambda x: x * 2)
         self.assertEqual(Just(20), result)
 
     async def test_map_async_function(self):
         async def double(x: int) -> int:
             return x * 2
 
-        result = await AsyncMaybe.from_value(10).map(double)
+        result = await AsyncMaybe.from_just(10).map(double)
         self.assertEqual(Just(20), result)
 
     async def test_map_on_nothing(self):
@@ -69,47 +68,45 @@ class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Nothing(), result)
 
     async def test_bind_returning_async_maybe(self):
-        result = await AsyncMaybe.from_value(10).bind(
-            lambda x: AsyncMaybe.from_value(x + 1)
+        result = await AsyncMaybe.from_just(10).bind(
+            lambda x: AsyncMaybe.from_just(x + 1)
         )
         self.assertEqual(Just(11), result)
 
     async def test_bind_returning_plain_maybe(self):
-        result = await AsyncMaybe.from_value(10).bind(lambda x: Just(x + 1))
+        result = await AsyncMaybe.from_just(10).bind(lambda x: Just(x + 1))
         self.assertEqual(Just(11), result)
 
-        result_nothing = await AsyncMaybe.from_value(10).bind(lambda _: Nothing())
+        result_nothing = await AsyncMaybe.from_just(10).bind(lambda _: Nothing())
         self.assertEqual(Nothing(), result_nothing)
 
     async def test_bind_returning_awaitable_maybe(self):
         async def to_maybe(x: int) -> Just[int]:
             return Just(x + 1)
 
-        result = await AsyncMaybe.from_value(10).bind(to_maybe)
+        result = await AsyncMaybe.from_just(10).bind(to_maybe)
         self.assertEqual(Just(11), result)
 
     async def test_bind_on_nothing(self):
         result = await AsyncMaybe.from_maybe(Nothing()).bind(
-            lambda x: AsyncMaybe.from_value(x + 1)
+            lambda x: AsyncMaybe.from_just(x + 1)
         )
         self.assertEqual(Nothing(), result)
 
     async def test_filter_sync(self):
         self.assertEqual(
-            Just(10), await AsyncMaybe.from_value(10).filter(lambda x: x > 5)
+            Just(10), await AsyncMaybe.from_just(10).filter(lambda x: x > 5)
         )
         self.assertEqual(
-            Nothing(), await AsyncMaybe.from_value(10).filter(lambda x: x > 50)
+            Nothing(), await AsyncMaybe.from_just(10).filter(lambda x: x > 50)
         )
 
     async def test_filter_async(self):
         async def is_positive(x: int) -> bool:
             return x > 0
 
-        self.assertEqual(Just(10), await AsyncMaybe.from_value(10).filter(is_positive))
-        self.assertEqual(
-            Nothing(), await AsyncMaybe.from_value(-10).filter(is_positive)
-        )
+        self.assertEqual(Just(10), await AsyncMaybe.from_just(10).filter(is_positive))
+        self.assertEqual(Nothing(), await AsyncMaybe.from_just(-10).filter(is_positive))
 
     async def test_filter_on_nothing(self):
         result = await AsyncMaybe.from_maybe(Nothing()).filter(lambda x: True)
@@ -117,7 +114,7 @@ class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
 
     async def test_inspect_called_only_on_just(self):
         just_mock = Mock()
-        await AsyncMaybe.from_value(10).inspect(just_mock)
+        await AsyncMaybe.from_just(10).inspect(just_mock)
         just_mock.assert_called_once_with(10)
 
         nothing_mock = Mock()
@@ -126,7 +123,7 @@ class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
 
     async def test_inspect_async(self):
         async_mock = AsyncMock()
-        result = await AsyncMaybe.from_value(10).inspect(async_mock)
+        result = await AsyncMaybe.from_just(10).inspect(async_mock)
         async_mock.assert_called_once_with(10)
         self.assertEqual(Just(10), result)
 
@@ -134,57 +131,46 @@ class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
         def f(x: int) -> int:
             return x * 2
 
-        result = await AsyncMaybe.from_value(10).apply(AsyncMaybe.from_value(f))
+        result = await AsyncMaybe.from_just(10).apply(AsyncMaybe.from_just(f))
         self.assertEqual(Just(20), result)
-
-    async def test_map2(self):
-        def add(a: int, b: int) -> int:
-            return a + b
-
-        self.assertEqual(
-            Just(3), await map2(AsyncMaybe.from_value(1), AsyncMaybe.from_value(2), add)
-        )
-        empty: AsyncMaybe[int] = AsyncMaybe.from_maybe(Nothing())
-        self.assertEqual(Nothing(), await map2(empty, AsyncMaybe.from_value(2), add))
-        self.assertEqual(Nothing(), await map2(AsyncMaybe.from_value(1), empty, add))
 
     async def test_apply_function_side_wins(self):
         def f(x: int) -> int:
             return x * 2
 
         self.assertEqual(
-            Just(20), await AsyncMaybe.from_value(10).apply(AsyncMaybe.from_value(f))
+            Just(20), await AsyncMaybe.from_just(10).apply(AsyncMaybe.from_just(f))
         )
 
     async def test_and(self):
-        result = await AsyncMaybe.from_value(10).and_(AsyncMaybe.from_value("a"))
+        result = await AsyncMaybe.from_just(10).and_(AsyncMaybe.from_just("a"))
         self.assertEqual(Just("a"), result)
 
         result_nothing = await AsyncMaybe.from_maybe(Nothing()).and_(
-            AsyncMaybe.from_value("a")
+            AsyncMaybe.from_just("a")
         )
         self.assertEqual(Nothing(), result_nothing)
 
     async def test_or(self):
-        result = await AsyncMaybe.from_value(10).or_(AsyncMaybe.from_value(20))
+        result = await AsyncMaybe.from_just(10).or_(AsyncMaybe.from_just(20))
         self.assertEqual(Just(10), result)
 
         result_fallback = await AsyncMaybe.from_maybe(Nothing()).or_(
-            AsyncMaybe.from_value(20)
+            AsyncMaybe.from_just(20)
         )
         self.assertEqual(Just(20), result_fallback)
 
     async def test_zip(self):
-        result = await AsyncMaybe.from_value(10).zip(AsyncMaybe.from_value("a"))
+        result = await AsyncMaybe.from_just(10).zip(AsyncMaybe.from_just("a"))
         self.assertEqual(Just((10, "a")), result)
 
-        result_nothing = await AsyncMaybe.from_value(10).zip(
+        result_nothing = await AsyncMaybe.from_just(10).zip(
             AsyncMaybe.from_maybe(Nothing())
         )
         self.assertEqual(Nothing(), result_nothing)
 
     async def test_flatten(self):
-        nested = AsyncMaybe.from_value(AsyncMaybe.from_value(10))
+        nested = AsyncMaybe.from_just(AsyncMaybe.from_just(10))
         self.assertEqual(Just(10), await nested.flatten())
 
         nested_nothing = AsyncMaybe.from_maybe(Nothing())
@@ -198,7 +184,7 @@ class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
             calls.append(value)
             return value
 
-        pipeline = AsyncMaybe.from_value(10).map(track)
+        pipeline = AsyncMaybe.from_just(10).map(track)
 
         self.assertEqual(Just(10), await pipeline)
         self.assertEqual(Just(10), await pipeline)
@@ -208,11 +194,35 @@ class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
         def increment(x: int) -> int:
             return x + 1
 
-        function: AsyncMaybe[Callable[[int], int]] = AsyncMaybe.from_value(increment)
+        function: AsyncMaybe[Callable[[int], int]] = AsyncMaybe.from_just(increment)
         failed: AsyncMaybe[Callable[[int], int]] = AsyncMaybe.from_maybe(Nothing())
-        value: AsyncMaybe[int] = AsyncMaybe.from_value(1)
+        value: AsyncMaybe[int] = AsyncMaybe.from_just(1)
         error: AsyncMaybe[int] = AsyncMaybe.from_maybe(Nothing())
 
         self.assertEqual(Just(2), await function.apply2(value))
         self.assertEqual(Nothing(), await function.apply2(error))
         self.assertEqual(Nothing(), await failed.apply2(error))
+
+    async def test_from_just_from_nothing_and_run(self):
+        self.assertEqual(Just(1), await AsyncMaybe.from_just(1))
+        self.assertEqual(Nothing(), await AsyncMaybe.from_nothing())
+        self.assertEqual(Just(1), await AsyncMaybe.from_just(1).run())
+
+    async def test_and_then_is_bind(self):
+        self.assertEqual(
+            Just(2), await AsyncMaybe.from_just(1).and_then(lambda x: Just(x + 1))
+        )
+
+    async def test_or_else_computes_the_fallback_lazily(self):
+        empty: AsyncMaybe[int] = AsyncMaybe.from_nothing()
+        self.assertEqual(Just(1), await empty.or_else(lambda: AsyncMaybe.from_just(1)))
+        self.assertEqual(Just(2), await empty.or_else(lambda: Just(2)))
+
+        fallback = Mock(return_value=Just(1))
+        self.assertEqual(Just(3), await AsyncMaybe.from_just(3).or_else(fallback))
+        fallback.assert_not_called()
+
+    async def test_filter_takes_a_predicate(self):
+        self.assertEqual(
+            Nothing(), await AsyncMaybe.from_just(1).filter(predicate=lambda x: x > 1)
+        )

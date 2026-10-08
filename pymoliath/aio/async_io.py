@@ -8,21 +8,21 @@ directly to the plain value once awaited, rather than to a wrapper like `Just`/`
 ```python
 import asyncio
 
-asyncio.run(AsyncIO(lambda: 10).map(lambda x: x + 1))  # 11
+asyncio.run(AsyncIO(lambda: 10).map(lambda x: x + 1).run())  # 11
 
 
 async def fetch(x: int) -> int: ...
 
 
-asyncio.run(AsyncIO.from_value(10).map(fetch))  # async callback, auto-detected
-asyncio.run(AsyncIO.from_value(10).bind(lambda x: AsyncIO.from_value(x + 1)))  # 11
+asyncio.run(AsyncIO.from_value(10).map(fetch).run())  # async callback, auto-detected
+asyncio.run(AsyncIO.from_value(10).bind(lambda x: AsyncIO.from_value(x + 1)).run())  # 11
 
 
 async def fetch_ten() -> int:
     return 10
 
 
-asyncio.run(AsyncIO.from_coroutine(fetch_ten))  # 10
+asyncio.run(AsyncIO.from_coroutine(fetch_ten).run())  # 10
 ```
 """
 
@@ -77,7 +77,7 @@ class AsyncIO(Generic[TypeSource]):
         --------
         >>> import asyncio
         >>> async def run(): return 10
-        >>> asyncio.run(AsyncIO(run))
+        >>> asyncio.run(AsyncIO(run).run())
         10
         """
         self._run = run
@@ -88,10 +88,30 @@ class AsyncIO(Generic[TypeSource]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncIO.from_value(10))
+        >>> async def main():
+        ...     return await AsyncIO.from_value(10)
+        >>> asyncio.run(main())
         10
         """
         return self._run().__await__()
+
+    async def run(self) -> TypeSource:
+        """Runs the pipeline and resolves to its result, as a coroutine.
+
+        Equivalent to awaiting it directly. Use `run()` where a coroutine is required, e.g.
+        `asyncio.run(value.run())` (before Python 3.14 `asyncio.run` only accepts coroutines).
+
+        Returns
+        -------
+        result: TypeSource
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncIO.from_value(10).run())
+        10
+        """
+        return await self
 
     @staticmethod
     def from_value(value: TypeSource) -> AsyncIO[TypeSource]:
@@ -109,7 +129,7 @@ class AsyncIO(Generic[TypeSource]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncIO.from_value(10))
+        >>> asyncio.run(AsyncIO.from_value(10).run())
         10
         """
 
@@ -135,7 +155,7 @@ class AsyncIO(Generic[TypeSource]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncIO.from_io(IO(lambda: 10)))
+        >>> asyncio.run(AsyncIO.from_io(IO(lambda: 10)).run())
         10
         """
 
@@ -165,7 +185,7 @@ class AsyncIO(Generic[TypeSource]):
         --------
         >>> import asyncio
         >>> async def fetch_ten() -> int: return 10
-        >>> asyncio.run(AsyncIO.from_coroutine(fetch_ten))
+        >>> asyncio.run(AsyncIO.from_coroutine(fetch_ten).run())
         10
         """
 
@@ -193,7 +213,7 @@ class AsyncIO(Generic[TypeSource]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncIO.from_value(5).map(lambda x: x + 1))
+        >>> asyncio.run(AsyncIO.from_value(5).map(lambda x: x + 1).run())
         6
         """
 
@@ -226,7 +246,7 @@ class AsyncIO(Generic[TypeSource]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncIO.from_value(5).bind(lambda x: AsyncIO.from_value(x + 1)))
+        >>> asyncio.run(AsyncIO.from_value(5).bind(lambda x: AsyncIO.from_value(x + 1)).run())
         6
         """
 
@@ -264,7 +284,7 @@ class AsyncIO(Generic[TypeSource]):
         >>> import asyncio
         >>> val = AsyncIO.from_value(10)
         >>> func = AsyncIO.from_value(lambda x: x * 2)
-        >>> asyncio.run(val.apply(func))
+        >>> asyncio.run(val.apply(func).run())
         20
         """
 
@@ -297,7 +317,7 @@ class AsyncIO(Generic[TypeSource]):
         >>> import asyncio
         >>> func = AsyncIO.from_value(lambda x: x * 2)
         >>> val = AsyncIO.from_value(10)
-        >>> asyncio.run(func.apply2(val))
+        >>> asyncio.run(func.apply2(val).run())
         20
         """
 

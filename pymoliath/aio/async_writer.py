@@ -9,14 +9,14 @@ exactly what sync `Writer.run()` already returns.
 ```python
 import asyncio
 
-asyncio.run(AsyncWriter.from_value(10, ["created"]))  # (10, ['created'])
-asyncio.run(AsyncWriter.from_value(10, ["created"]).map(lambda x: x + 1))  # (11, ['created'])
+asyncio.run(AsyncWriter.from_value(10, ["created"]).run())  # (10, ['created'])
+asyncio.run(AsyncWriter.from_value(10, ["created"]).map(lambda x: x + 1).run())  # (11, ['created'])
 
 
 async def fetch(x: int) -> int: ...
 
 
-asyncio.run(AsyncWriter.from_value(10, []).map(fetch))  # async callback, auto-detected
+asyncio.run(AsyncWriter.from_value(10, []).map(fetch).run())  # async callback, auto-detected
 ```
 """
 
@@ -94,7 +94,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         --------
         >>> import asyncio
         >>> async def run(): return (10, ["created"])
-        >>> asyncio.run(AsyncWriter(run))
+        >>> asyncio.run(AsyncWriter(run).run())
         (10, ['created'])
         """
         self._run = run
@@ -105,10 +105,30 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncWriter.from_value(10, ["created"]))
+        >>> async def main():
+        ...     return await AsyncWriter.from_value(10, ["created"])
+        >>> asyncio.run(main())
         (10, ['created'])
         """
         return self._run().__await__()
+
+    async def run(self) -> Tuple[TypeSource, TypeMonoid]:
+        """Runs the pipeline and resolves to its result, as a coroutine.
+
+        Equivalent to awaiting it directly. Use `run()` where a coroutine is required, e.g.
+        `asyncio.run(value.run())` (before Python 3.14 `asyncio.run` only accepts coroutines).
+
+        Returns
+        -------
+        result: Tuple[TypeSource, TypeMonoid]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncWriter.from_value(10, ["created"]).run())
+        (10, ['created'])
+        """
+        return await self
 
     @staticmethod
     def from_value(
@@ -130,7 +150,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncWriter.from_value(10, ["created"]))
+        >>> asyncio.run(AsyncWriter.from_value(10, ["created"]).run())
         (10, ['created'])
         """
 
@@ -158,7 +178,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncWriter.from_writer(Writer(10, ["created"])))
+        >>> asyncio.run(AsyncWriter.from_writer(Writer(10, ["created"])).run())
         (10, ['created'])
         """
 
@@ -189,7 +209,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         --------
         >>> import asyncio
         >>> async def fetch() -> tuple: return (10, ["created"])
-        >>> asyncio.run(AsyncWriter.from_coroutine(fetch))
+        >>> asyncio.run(AsyncWriter.from_coroutine(fetch).run())
         (10, ['created'])
         """
 
@@ -219,7 +239,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncWriter.from_value(10, ["created"]).map(lambda x: x + 1))
+        >>> asyncio.run(AsyncWriter.from_value(10, ["created"]).map(lambda x: x + 1).run())
         (11, ['created'])
         """
 
@@ -237,6 +257,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
             Union[
                 AsyncWriter[TypeResult, TypeMonoid],
                 Writer[TypeResult, TypeMonoid],
+                Tuple[TypeResult, TypeMonoid],
                 Awaitable[Tuple[TypeResult, TypeMonoid]],
             ],
         ],
@@ -245,10 +266,10 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
 
         Parameters
         ----------
-        function: Callable[[TypeSource], AsyncWriter[TypeResult, TypeMonoid] | Writer[TypeResult, TypeMonoid] | Awaitable[Tuple[TypeResult, TypeMonoid]]]
+        function: Callable[[TypeSource], AsyncWriter[TypeResult, TypeMonoid] | Writer[TypeResult, TypeMonoid] | Tuple[TypeResult, TypeMonoid] | Awaitable[Tuple[TypeResult, TypeMonoid]]]
             Function applied to the resolved value, returning another AsyncWriter, a plain Writer,
-            or an awaitable resolving to a (value, monoid) pair - whichever shape is returned is
-            auto-detected.
+            a plain (value, monoid) pair, or an awaitable resolving to one - whichever shape is
+            returned is auto-detected.
 
         Returns
         -------
@@ -260,7 +281,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         >>> import asyncio
         >>> writer: AsyncWriter[int, list] = AsyncWriter.from_value(10, ["created"])
         >>> chained = writer.bind(lambda x: AsyncWriter.from_value(x + 1, ["incremented"]))
-        >>> asyncio.run(chained)
+        >>> asyncio.run(chained.run())
         (11, ['created', 'incremented'])
         """
 
@@ -299,7 +320,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         >>> import asyncio
         >>> val: AsyncWriter[int, list] = AsyncWriter.from_value(10, ["value"])
         >>> func: AsyncWriter[Callable[[int], int], list] = AsyncWriter.from_value(lambda x: x * 2, ["func"])
-        >>> asyncio.run(val.apply(func))
+        >>> asyncio.run(val.apply(func).run())
         (20, ['value', 'func'])
         """
 
@@ -336,7 +357,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         >>> import asyncio
         >>> func: AsyncWriter[Callable[[int], int], list] = AsyncWriter.from_value(lambda x: x * 2, ["func"])
         >>> val: AsyncWriter[int, list] = AsyncWriter.from_value(10, ["value"])
-        >>> asyncio.run(func.apply2(val))
+        >>> asyncio.run(func.apply2(val).run())
         (20, ['func', 'value'])
         """
 
@@ -368,7 +389,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         --------
         >>> import asyncio
         >>> writer: AsyncWriter[int, list] = AsyncWriter.from_value(10, ["created"])
-        >>> asyncio.run(writer.tell(["logged"]))
+        >>> asyncio.run(writer.tell(["logged"]).run())
         (10, ['created', 'logged'])
         """
 
@@ -397,7 +418,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         --------
         >>> import asyncio
         >>> writer: AsyncWriter[int, list] = AsyncWriter.from_value(10, ["created"])
-        >>> asyncio.run(writer.listen())
+        >>> asyncio.run(writer.listen().run())
         ((10, ['created']), ['created'])
         """
 
@@ -432,7 +453,7 @@ class AsyncWriter(Generic[TypeSource, TypeMonoid]):
         >>> writer: AsyncWriter[Tuple[int, Callable[[list], list]], list] = AsyncWriter.from_value(
         ...     (10, lambda log: [entry.upper() for entry in log]), ["created"]
         ... )
-        >>> asyncio.run(writer.pass_())
+        >>> asyncio.run(writer.pass_().run())
         (10, ['CREATED'])
         """
 

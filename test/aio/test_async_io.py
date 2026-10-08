@@ -106,6 +106,9 @@ class TestAsyncIO(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(10, await pipeline)
         self.assertEqual([10, 10], calls)
 
+    async def test_run_returns_a_coroutine(self):
+        self.assertEqual(1, await AsyncIO.from_value(1).run())
+
 
 if __name__ == "__main__":
     unittest.main()

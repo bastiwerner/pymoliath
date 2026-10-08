@@ -4,6 +4,7 @@
 """
 
 from . import aio, continuation, util
+from .continuation import Continuation
 from .errors import UnwrapError
 from .either import Either, Left, Right
 from .exception import Failure, Success, Try
@@ -20,6 +21,7 @@ from .writer import Writer
 __all__ = [
     "aio",
     "continuation",
+    "Continuation",
     "Either",
     "either",
     "Err",

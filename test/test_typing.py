@@ -15,16 +15,18 @@ bare `Ok(1)`/`Err("e")`/`Nil()` are assignable to any matching `Result`/`Option`
 import asyncio
 from collections.abc import Callable
 
-from typing_extensions import Never, assert_never, assert_type
+from typing_extensions import Never, assert_type
 
+from pymoliath.aio.async_either import AsyncEither
 from pymoliath.aio.async_maybe import AsyncMaybe
+from pymoliath.aio.async_option import AsyncOption
 from pymoliath.aio.async_result import AsyncResult
 from pymoliath.aio.async_try import AsyncTry
 from pymoliath.either import Either, Left, Right
 from pymoliath.exception import Failure, Success, Try
 from pymoliath.maybe import Just, Maybe, Nothing
-from pymoliath.option import Nil, Option, Some, is_some
-from pymoliath.result import Err, Ok, Result, is_err, is_ok, map2, result_safe
+from pymoliath.option import Nil, Option, Some
+from pymoliath.result import Err, Ok, Result
 
 
 def parse(value: str) -> Result[int, str]:
@@ -204,7 +206,7 @@ def test_async_bind_keeps_the_error_type() -> None:
 
     # A Maybe[int] from a function (an annotated `= Nothing()` would narrow to `Nothing`).
     nothing = lookup(0)
-    fallback = AsyncMaybe.from_maybe(nothing).or_(AsyncMaybe.from_value(20))
+    fallback = AsyncMaybe.from_maybe(nothing).or_(AsyncMaybe.from_just(20))
     assert_type(fallback, AsyncMaybe[int])
 
     failure: Try[str] = Failure(ValueError("x"))
@@ -232,36 +234,13 @@ def test_variant_methods_keep_the_precise_type() -> None:
     assert_type(Some(1).map(lambda x: x / 2), Some[float])
     assert_type(Nil().map(lambda x: x), Nil)
     assert_type(Success(1).map(lambda x: str(x)), Try[str])  # map catches exceptions
-    assert_type(Right(1).map(lambda x: str(x)), Right[str, Never])
+    assert_type(Right(1).map(lambda x: str(x)), Right[Never, str])
 
 
-def test_narrowing() -> None:
-    result = parse("4")
-    if is_ok(result):
-        assert_type(result, Ok[int, str])
-        assert_type(result.value, int)
-    if is_err(result):
-        assert_type(result.error, str)
-
-    match result:
-        case Ok(value):
-            assert_type(value, int)
-        case Err(error):
-            assert_type(error, str)
-        case _:
-            assert_never(result)
-
-    option = find(4)
-    if is_some(option):
-        assert_type(option.value, int)
-
-
-def test_flatten_map2_and_apply() -> None:
+def test_flatten_and_apply() -> None:
     nested: Result[Result[int, str], str] = Ok(Ok(1))
     assert_type(nested.flatten(), Result[int, str])
     assert_type(Some(Some(1)).flatten(), Option[int])
-
-    assert_type(map2(parse("1"), parse("2"), lambda a, b: a / b), Result[float, str])
 
     def show(value: int) -> str:
         return str(value)
@@ -286,9 +265,9 @@ def unwrap_is_never() -> None:
 
 def test_unwrap_and_safe() -> None:
     assert_type(parse("1").unwrap(), int)
-    assert_type(result_safe(lambda: 1), Result[int, Exception])
+    assert_type(Ok.safe(lambda: 1), Result[int, Exception])
     assert_type(
-        result_safe(lambda: int("x"), exceptions=(ValueError, KeyError)),
+        Ok.safe(lambda: int("x"), exceptions=(ValueError, KeyError)),
         Result[int, ValueError | KeyError],
     )
 
@@ -299,3 +278,75 @@ def test_fixed_types_reject_mismatches() -> None:
     find(1).unwrap_or("text")  # pyright: ignore[reportArgumentType]
     Ok(1).and_(parse("1"))  # pyright: ignore[reportArgumentType]
     parse("1").or_(Ok("text"))  # pyright: ignore[reportArgumentType]
+
+
+def test_isinstance_narrows_to_a_variant() -> None:
+    result = parse("4")
+    if isinstance(result, Ok):
+        assert_type(result, Ok[int, str])
+        assert_type(result.value, int)
+    else:
+        assert_type(result, Err[int, str])
+        assert_type(result.error, str)
+
+    if isinstance(result, Err):
+        raise ValueError(result.error)
+    assert_type(result.value, int)  # narrowed to Ok after the early exit
+
+    option = find(4)
+    if isinstance(option, Some):
+        assert_type(option.value, int)
+    else:
+        assert_type(option, Nil)
+
+
+def maybe_int() -> int | None:
+    return None
+
+
+def test_variant_constructors() -> None:
+    assert_type(Some(1), Some[int])
+    assert_type(Just(1), Just[int])
+    assert_type(Success(1), Success[int])
+    assert_type(Failure(ValueError()), Failure[Never])
+    assert_type(Right(1), Right[Never, int])
+    assert_type(Left("e"), Left[str, Never])
+    assert_type(Ok(1).err(), Nil)
+    assert_type(Err("e").ok(), Nil)
+    assert_type(Right(1).left(), Nothing)
+
+
+def test_static_constructors() -> None:
+    assert_type(Ok.from_option(Some(1), "x"), Result[int, str])
+    assert_type(Right.from_maybe(Just(1), "x"), Either[str, int])
+    assert_type(Some.from_optional(None), Nil)
+    assert_type(Some.from_optional(maybe_int()), Option[int])
+    assert_type(Just.from_optional(None), Nothing)
+    assert_type(Just.from_optional(maybe_int()), Maybe[int])
+    assert_type(Some.safe(lambda: 1), Option[int])
+    assert_type(Just.safe(lambda: 1), Maybe[int])
+    assert_type(Success.safe(lambda: 1), Try[int])
+    assert_type(Right.safe(lambda: 1), Either[Exception, int])
+
+
+def test_uniform_parameter_names() -> None:
+    assert_type(Err("e").unwrap_or_else(function=len), int)
+    assert_type(Left("e").unwrap_or_else(function=len), int)
+    assert_type(Nil().unwrap_or_else(function=lambda: 0), int)
+    assert_type(Some(1).filter(predicate=lambda x: x > 0), Option[int])
+    assert_type(attempt(1).filter(lambda x: x > 0), Try[int])
+    assert_type(attempt(1).or_else(lambda e: Success(0)), Try[int])
+
+
+def test_async_constructors_and_aliases() -> None:
+    assert_type(AsyncOption.from_some(1), AsyncOption[int])
+    assert_type(AsyncMaybe.from_just(1), AsyncMaybe[int])
+    empty: AsyncOption[int] = AsyncOption.from_nil()
+    assert_type(empty.or_else(lambda: Some(1)), AsyncOption[int])
+    async_result = AsyncResult.from_result(parse("4"))
+    assert_type(async_result.and_then(halve), AsyncResult[float, str])
+    # The fallback returns a bare Ok, so the recovered value can no longer fail: Never.
+    assert_type(async_result.or_else(lambda e: Ok(len(e))), AsyncResult[int, Never])
+    assert_type(async_result.filter(lambda x: x > 0, "negative"), AsyncResult[int, str])
+    assert_type(AsyncTry.from_success(1).filter(lambda x: x > 0), AsyncTry[int])
+    assert_type(AsyncEither.from_either(divide(1)), AsyncEither[str, float])

@@ -7,22 +7,22 @@
 ```python
 import asyncio
 
-asyncio.run(AsyncEither.from_right(10).map(lambda x: x + 1))  # Right(11)
-asyncio.run(AsyncEither.from_left("error").map(lambda x: x + 1))  # Left(error), map is never called
+asyncio.run(AsyncEither.from_right(10).map(lambda x: x + 1).run())  # Right(11)
+asyncio.run(AsyncEither.from_left("error").map(lambda x: x + 1).run())  # Left(error), map is never called
 
 
 async def fetch(x: int) -> int: ...
 
 
-asyncio.run(AsyncEither.from_right(10).map(fetch))  # async callback, auto-detected
-asyncio.run(AsyncEither.from_right(10).bind(lambda x: AsyncEither.from_right(x + 1)))  # Right(11)
+asyncio.run(AsyncEither.from_right(10).map(fetch).run())  # async callback, auto-detected
+asyncio.run(AsyncEither.from_right(10).bind(lambda x: AsyncEither.from_right(x + 1)).run())  # Right(11)
 
 
 async def fetch_ten() -> int:
     return 10
 
 
-asyncio.run(AsyncEither.from_coroutine(fetch_ten))  # Right(10)
+asyncio.run(AsyncEither.from_coroutine(fetch_ten).run())  # Right(10)
 ```
 """
 
@@ -47,10 +47,6 @@ V = TypeVar("V")
 W = TypeVar("W")
 # Like Right's Left type: `Never` unless the context (e.g. an annotation) asks for another one.
 W_Never = TypeVar("W_Never", default=Never)
-# Function-scoped TypeVars for `map2`.
-A = TypeVar("A")
-B = TypeVar("B")
-C = TypeVar("C")
 
 
 class AsyncEither(Generic[L, R]):
@@ -69,6 +65,11 @@ class AsyncEither(Generic[L, R]):
     functions or `async def` functions - whichever is returned is auto-detected at the point it's
     called (awaited only if it actually is an awaitable), so real async I/O can be mixed freely
     with plain transforms in the same chain.
+
+    `from_left` leaves the success type open, like a bare `Left`: it is solved from context, but
+    the two type checkers disagree on it without any (pyright: Unknown, mypy: Never). Annotate the
+    target where there is no context, e.g.
+    `failed: AsyncEither[str, int] = AsyncEither.from_left("e")`.
     """
 
     __slots__ = ("_run",)
@@ -88,7 +89,7 @@ class AsyncEither(Generic[L, R]):
         --------
         >>> import asyncio
         >>> async def run(): return Right(10)
-        >>> asyncio.run(AsyncEither(run))
+        >>> asyncio.run(AsyncEither(run).run())
         Right(10)
         """
         self._run = run
@@ -99,10 +100,30 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_right(10))
+        >>> async def main():
+        ...     return await AsyncEither.from_right(10)
+        >>> asyncio.run(main())
         Right(10)
         """
         return self._run().__await__()
+
+    async def run(self) -> Either[L, R]:
+        """Runs the pipeline and resolves to its result, as a coroutine.
+
+        Equivalent to awaiting it directly. Use `run()` where a coroutine is required, e.g.
+        `asyncio.run(value.run())` (before Python 3.14 `asyncio.run` only accepts coroutines).
+
+        Returns
+        -------
+        result: Either[L, R]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_right(10).run())
+        Right(10)
+        """
+        return await self
 
     @staticmethod
     def from_right(value: V) -> AsyncEither[W_Never, V]:
@@ -120,7 +141,7 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_right(10))
+        >>> asyncio.run(AsyncEither.from_right(10).run())
         Right(10)
         """
 
@@ -148,7 +169,7 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_left("error"))
+        >>> asyncio.run(AsyncEither.from_left("error").run())
         Left('error')
         """
 
@@ -176,9 +197,9 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_either(Right(10)))
+        >>> asyncio.run(AsyncEither.from_either(Right(10)).run())
         Right(10)
-        >>> asyncio.run(AsyncEither.from_either(Left("error")))
+        >>> asyncio.run(AsyncEither.from_either(Left("error")).run())
         Left('error')
         """
 
@@ -209,7 +230,7 @@ class AsyncEither(Generic[L, R]):
         --------
         >>> import asyncio
         >>> async def fetch_ten() -> int: return 10
-        >>> asyncio.run(AsyncEither.from_coroutine(fetch_ten))
+        >>> asyncio.run(AsyncEither.from_coroutine(fetch_ten).run())
         Right(10)
         """
 
@@ -237,17 +258,18 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_right(5).map(lambda x: x + 1))
+        >>> asyncio.run(AsyncEither.from_right(5).map(lambda x: x + 1).run())
         Right(6)
-        >>> asyncio.run(AsyncEither.from_left("error").map(lambda x: x + 1))
+        >>> asyncio.run(AsyncEither.from_left("error").map(lambda x: x + 1).run())
         Left('error')
         """
 
         async def run() -> Either[L, U]:
             """Awaits self, then applies `function`, short-circuiting on Left."""
             match either := await self:
-                case Left(value):
-                    return Left(value)
+                case Left():
+                    failed: Left[L, Any] = either
+                    return failed
                 case Right(value):
                     return Right(await _resolve(function(value)))
                 case _:
@@ -273,9 +295,9 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_left("error").map_left(str.upper))
+        >>> asyncio.run(AsyncEither.from_left("error").map_left(str.upper).run())
         Left('ERROR')
-        >>> asyncio.run(AsyncEither.from_right(10).map_left(str.upper))
+        >>> asyncio.run(AsyncEither.from_right(10).map_left(str.upper).run())
         Right(10)
         """
 
@@ -284,8 +306,9 @@ class AsyncEither(Generic[L, R]):
             match either := await self:
                 case Left(value):
                     return Left(await _resolve(function(value)))
-                case Right(value):
-                    return Right(value)
+                case Right():
+                    succeeded: Right[Any, R] = either
+                    return succeeded
                 case _:
                     assert_never(either)
 
@@ -316,17 +339,18 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_right(5).bind(lambda x: AsyncEither.from_right(x + 1)))
+        >>> asyncio.run(AsyncEither.from_right(5).bind(lambda x: AsyncEither.from_right(x + 1)).run())
         Right(6)
-        >>> asyncio.run(AsyncEither.from_left("error").bind(lambda x: AsyncEither.from_right(x + 1)))
+        >>> asyncio.run(AsyncEither.from_left("error").bind(lambda x: AsyncEither.from_right(x + 1)).run())
         Left('error')
         """
 
         async def run() -> Either[L, U]:
             """Awaits self, then chains into `function`'s result, short-circuiting on Left."""
             match either := await self:
-                case Left(value):
-                    return Left(value)
+                case Left():
+                    failed: Left[L, Any] = either
+                    return failed
                 case Right(value):
                     result = function(value)
                     if isinstance(result, AsyncEither):
@@ -336,6 +360,31 @@ class AsyncEither(Generic[L, R]):
                     assert_never(either)
 
         return AsyncEither(run)
+
+    def and_then(
+        self,
+        function: Callable[
+            [R], AsyncEither[L, U] | Either[L, U] | Awaitable[Either[L, U]]
+        ],
+    ) -> AsyncEither[L, U]:
+        """Alias of `bind`, named like in Rust.
+
+        Parameters
+        ----------
+        function: Callable[[R], AsyncEither[L, U] | Either[L, U] | Awaitable[Either[L, U]]]
+            Function applied to the resolved value, as for `bind`.
+
+        Returns
+        -------
+        async_either: AsyncEither[L, U]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_right(5).and_then(lambda x: AsyncEither.from_right(x + 1)).run())
+        Right(6)
+        """
+        return self.bind(function)
 
     def bind_left(
         self,
@@ -362,9 +411,9 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_left("error").bind_left(lambda e: AsyncEither.from_right(0)))
+        >>> asyncio.run(AsyncEither.from_left("error").bind_left(lambda e: AsyncEither.from_right(0)).run())
         Right(0)
-        >>> asyncio.run(AsyncEither.from_right(10).bind_left(lambda e: AsyncEither.from_right(0)))
+        >>> asyncio.run(AsyncEither.from_right(10).bind_left(lambda e: AsyncEither.from_right(0)).run())
         Right(10)
         """
 
@@ -376,18 +425,44 @@ class AsyncEither(Generic[L, R]):
                     if isinstance(result, AsyncEither):
                         return await result
                     return await _resolve(result)
-                case Right(value):
-                    return Right(value)
+                case Right():
+                    succeeded: Right[Any, R] = either
+                    return succeeded
                 case _:
                     assert_never(either)
 
         return AsyncEither(run)
 
+    def or_else(
+        self,
+        function: Callable[
+            [L], AsyncEither[F, R] | Either[F, R] | Awaitable[Either[F, R]]
+        ],
+    ) -> AsyncEither[F, R]:
+        """Alias of `bind_left`, named like in Rust.
+
+        Parameters
+        ----------
+        function: Callable[[L], AsyncEither[F, R] | Either[F, R] | Awaitable[Either[F, R]]]
+            Function applied to the resolved error, as for `bind_left`.
+
+        Returns
+        -------
+        async_either: AsyncEither[F, R]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_left("e").or_else(lambda e: AsyncEither.from_right(0)).run())
+        Right(0)
+        """
+        return self.bind_left(function)
+
     def apply(self, function: AsyncEither[L, Callable[[R], U]]) -> AsyncEither[L, U]:
         """Applies the function wrapped in `function` to this AsyncEither's value (<*>).
 
         If both fail, the Left of `function` takes precedence, as in `Either.apply`. For functions of
-        several arguments, use the module-level `map2`.
+        several arguments, curry them and use `apply2`.
 
         Parameters
         ----------
@@ -404,7 +479,7 @@ class AsyncEither(Generic[L, R]):
         >>> import asyncio
         >>> val = AsyncEither.from_right(10)
         >>> func = AsyncEither.from_right(lambda x: x * 2)
-        >>> asyncio.run(val.apply(func))
+        >>> asyncio.run(val.apply(func).run())
         Right(20)
         """
         return function.bind(lambda inner: self.map(inner))
@@ -416,7 +491,7 @@ class AsyncEither(Generic[L, R]):
 
         The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both fail, the
         Left of this (the function side) takes precedence. Curried functions of several arguments
-        can be applied one argument at a time; `map2` takes them uncurried.
+        can be applied one argument at a time.
 
         Parameters
         ----------
@@ -431,10 +506,49 @@ class AsyncEither(Generic[L, R]):
         --------
         >>> import asyncio
         >>> func = AsyncEither.from_right(lambda y: 10 + y)
-        >>> asyncio.run(func.apply2(AsyncEither.from_right(5)))
+        >>> asyncio.run(func.apply2(AsyncEither.from_right(5)).run())
         Right(15)
         """
         return self.bind(lambda inner: value.map(inner))
+
+    def filter(
+        self, predicate: Callable[[R], bool | Awaitable[bool]], left_value: L
+    ) -> AsyncEither[L, R]:
+        """Keeps the Right value if the predicate holds for it, otherwise resolves to
+        Left(left_value).
+
+        Parameters
+        ----------
+        predicate: Callable[[R], bool | Awaitable[bool]]
+            Sync or async predicate applied to the resolved value if Right.
+        left_value: L
+            Left value used if the predicate does not hold.
+
+        Returns
+        -------
+        async_either: AsyncEither[L, R]
+            Resolves to the Right, to Left(left_value) if the predicate fails, or to the original
+            Left without calling `predicate`.
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> asyncio.run(AsyncEither.from_right(-1).filter(lambda x: x > 0, "negative").run())
+        Left('negative')
+        >>> asyncio.run(AsyncEither.from_right(1).filter(lambda x: x > 0, "negative").run())
+        Right(1)
+        """
+
+        async def run() -> Either[L, R]:
+            """Awaits self, then keeps the Right value only if `predicate` holds."""
+            outcome = await self
+            if isinstance(outcome, Right) and not await _resolve(
+                predicate(outcome.value)
+            ):
+                return Left(left_value)
+            return outcome
+
+        return AsyncEither(run)
 
     def and_(self, other: AsyncEither[L, U]) -> AsyncEither[L, U]:
         """Returns `other` if this AsyncEither resolves to Right, otherwise the original Left.
@@ -451,9 +565,9 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_right(1).and_(AsyncEither.from_right(2)))
+        >>> asyncio.run(AsyncEither.from_right(1).and_(AsyncEither.from_right(2)).run())
         Right(2)
-        >>> asyncio.run(AsyncEither.from_left("error").and_(AsyncEither.from_right(2)))
+        >>> asyncio.run(AsyncEither.from_left("error").and_(AsyncEither.from_right(2)).run())
         Left('error')
         """
         return self.bind(lambda _: other)
@@ -473,9 +587,9 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_right(1).or_(AsyncEither.from_right(2)))
+        >>> asyncio.run(AsyncEither.from_right(1).or_(AsyncEither.from_right(2)).run())
         Right(1)
-        >>> asyncio.run(AsyncEither.from_left("error").or_(AsyncEither.from_right(2)))
+        >>> asyncio.run(AsyncEither.from_left("error").or_(AsyncEither.from_right(2)).run())
         Right(2)
         """
 
@@ -484,8 +598,9 @@ class AsyncEither(Generic[L, R]):
             match either := await self:
                 case Left():
                     return await other
-                case Right(value):
-                    return Right(value)
+                case Right():
+                    succeeded: Right[Any, R] = either
+                    return succeeded
                 case _:
                     assert_never(either)
 
@@ -506,17 +621,18 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_right(1).zip(AsyncEither.from_right(2)))
+        >>> asyncio.run(AsyncEither.from_right(1).zip(AsyncEither.from_right(2)).run())
         Right((1, 2))
-        >>> asyncio.run(AsyncEither.from_left("error").zip(AsyncEither.from_right(2)))
+        >>> asyncio.run(AsyncEither.from_left("error").zip(AsyncEither.from_right(2)).run())
         Left('error')
         """
 
         async def run() -> Either[L, tuple[R, U]]:
             """Awaits both self and `other`, combining their values if both are Right."""
             match either := await self:
-                case Left(value):
-                    return Left(value)
+                case Left():
+                    failed: Left[L, Any] = either
+                    return failed
                 case Right(value):
                     return (await other).map(lambda other_value: (value, other_value))
                 case _:
@@ -539,15 +655,16 @@ class AsyncEither(Generic[L, R]):
         --------
         >>> import asyncio
         >>> nested = AsyncEither.from_right(AsyncEither.from_right(1))
-        >>> asyncio.run(nested.flatten())
+        >>> asyncio.run(nested.flatten().run())
         Right(1)
         """
 
         async def run() -> Either[L, U]:
             """Awaits self, then awaits the nested AsyncEither if Right."""
             match either := await self:
-                case Left(value):
-                    return Left(value)
+                case Left():
+                    failed: Left[L, Any] = either
+                    return failed
                 case Right(nested):
                     return await nested
                 case _:
@@ -572,7 +689,7 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_right(10).inspect(lambda x: print(f"Value: {x}")))
+        >>> asyncio.run(AsyncEither.from_right(10).inspect(lambda x: print(f"Value: {x}")).run())
         Value: 10
         Right(10)
         """
@@ -603,7 +720,7 @@ class AsyncEither(Generic[L, R]):
         Examples
         --------
         >>> import asyncio
-        >>> asyncio.run(AsyncEither.from_left("error").inspect_left(lambda e: print(f"Left: {e}")))
+        >>> asyncio.run(AsyncEither.from_left("error").inspect_left(lambda e: print(f"Left: {e}")).run())
         Left: error
         Left('error')
         """
@@ -636,21 +753,3 @@ class AsyncEither(Generic[L, R]):
         'AsyncEither(<function...>)'
         """
         return str(self)
-
-
-def map2(
-    first: AsyncEither[W, A], second: AsyncEither[W, B], function: Callable[[A, B], C]
-) -> AsyncEither[W, C]:
-    """Combines the values of two AsyncEithers with a two-argument function once both are awaited.
-
-    The first Left wins: if `first` fails, `second` is not awaited.
-
-    Examples
-    --------
-    >>> import asyncio
-    >>> asyncio.run(map2(AsyncEither.from_right(1), AsyncEither.from_right(2), lambda a, b: a + b))
-    Right(3)
-    >>> asyncio.run(map2(AsyncEither.from_left("first"), AsyncEither.from_left("second"), lambda a, b: a + b))
-    Left('first')
-    """
-    return first.bind(lambda a: second.map(lambda b: function(a, b)))

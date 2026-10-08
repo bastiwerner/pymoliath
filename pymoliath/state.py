@@ -90,7 +90,7 @@ class State(Generic[TypeState, TypeSource]):
         >>> state.run(0)
         (1, 0)
         """
-        if not isinstance(value, Callable):  # pyright: ignore[reportUnnecessaryIsInstance]
+        if not callable(value):
             raise TypeError("State Monad value must be of type Callable")
         self._value = value
 
@@ -150,7 +150,7 @@ class State(Generic[TypeState, TypeSource]):
         (2, 1)
         """
 
-        def mapper(state: TypeState):
+        def mapper(state: TypeState) -> Tuple[TypeState, TypeResult]:
             """Runs the state monad with `state`, then binds `function` to the resulting value and new state."""
             new_state, value = self.run(state)
             return function(value).run(new_state)

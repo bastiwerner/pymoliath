@@ -1,25 +1,22 @@
+import copy
+import math
+import pickle
 import unittest
+from decimal import Decimal
 from collections.abc import Callable
 from unittest.mock import Mock
 
 from pymoliath.either import (
-    EITHER_TYPES,
     Either,
     Left,
     Right,
-    either_safe,
-    is_either,
-    is_left,
-    is_right,
-    map2,
-    map3,
 )
 from pymoliath.errors import UnwrapError
-from pymoliath.maybe import Just, Nothing
+from pymoliath.maybe import Just, Maybe, Nothing
 from pymoliath.util import compose
 
 
-class TestEitherResultMonad(unittest.TestCase):
+class TestEither(unittest.TestCase):
     """
     Monad operations:
     ≡       Identical to
@@ -56,7 +53,7 @@ class TestEitherResultMonad(unittest.TestCase):
         self.assertEqual(right_value, right_value.bind(lambda x: Right(x)))
         self.assertEqual(left_value, left_value.bind(lambda x: Left(x)))
 
-    def test_either_monad_associativity_law(self):
+    def test_monad_associativity_law(self):
         """Associativity law: (m >>= f) >>= g ≡ m >>= (x -> f x >>= g)
         https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
 
@@ -154,56 +151,44 @@ class TestEitherResultMonad(unittest.TestCase):
             w.apply(v.apply(u.apply(Right(composition)))), w.apply(v).apply(u)
         )
 
-    def test_apply_left_precedence(self):
+    def test_apply_function_side_wins(self):
         value: Either[str, int] = Left("value")
         function: Either[str, Callable[[int], int]] = Left("function")
         self.assertEqual(Left("function"), value.apply(function))
 
-    def test_map2_and_map3(self):
-        one: Either[str, int] = Right(1)
-        first: Either[str, int] = Left("first")
-        second: Either[str, int] = Left("second")
-        self.assertEqual(Right(3), map2(one, Right(2), lambda a, b: a + b))
-        self.assertEqual(Left("first"), map2(first, second, lambda a, b: a))
-        self.assertEqual(
-            Right(6), map3(one, Right(2), Right(3), lambda a, b, c: a + b + c)
-        )
-
-    def test_either_monad_representation(self):
+    def test_str(self):
         right_value = Right("a")
         left_value = Left("b")
 
         self.assertEqual(str(right_value), "Right(a)")
         self.assertEqual(str(left_value), "Left(b)")
 
-    def test_either_is_left_is_right(self):
+    def test_is_left_is_right(self):
         right = Right(10)
         left = Left("error")
 
         self.assertTrue(right.is_right() and not right.is_left())
         self.assertTrue(left.is_left() and not left.is_right())
 
-    def test_safe_function_for_error_handling_with_either_monad_returns_correct_either_monad(
-        self,
-    ):
+    def test_safe(self):
         def unsafe_function():
             raise Exception("error")
 
         def safe_function():
             return 10
 
-        unsafe_either_result: Either[Exception, int] = either_safe(unsafe_function)
-        safe_either_result: Either[Exception, int] = either_safe(safe_function)
+        unsafe_either_result: Either[Exception, int] = Right.safe(unsafe_function)
+        safe_either_result: Either[Exception, int] = Right.safe(safe_function)
 
         self.assertTrue(unsafe_either_result.is_left_and(lambda e: str(e) == "error"))
         self.assertEqual(Right(10), safe_either_result)
         self.assertTrue(
-            either_safe(lambda: int("x"), exceptions=(ValueError,)).is_left()
+            Right.safe(lambda: int("x"), exceptions=(ValueError,)).is_left()
         )
         with self.assertRaises(KeyError):
-            either_safe(lambda: {}["missing"], exceptions=(ValueError,))
+            Right.safe(lambda: {}["missing"], exceptions=(ValueError,))
 
-    def test_either_monad_unwrap(self):
+    def test_unwrap(self):
         right_value: Either[str, str] = Right("right")
         left_value: Either[str, str] = Left("left")
 
@@ -219,7 +204,7 @@ class TestEitherResultMonad(unittest.TestCase):
         foo: Either[str, int] = Left("foo")
         self.assertEqual(3, foo.unwrap_or_else(lambda x: len(x)))
 
-    def test_either_inspect(self):
+    def test_inspect(self):
         right_value = Right("right")
         left_value = Left("left")
         print_mock = Mock()
@@ -233,7 +218,7 @@ class TestEitherResultMonad(unittest.TestCase):
         )
         print_mock.assert_called_with("left")
 
-    def test_either_monad_map_and_bind(self):
+    def test_map_and_bind(self):
         right: Either[str, str] = Right("hello")
 
         self.assertEqual(
@@ -245,7 +230,7 @@ class TestEitherResultMonad(unittest.TestCase):
             ),
         )
 
-    def test_either_monad_match_function(self):
+    def test_match(self):
         right_value = Right("right")
         left_value = Left("left")
 
@@ -256,7 +241,7 @@ class TestEitherResultMonad(unittest.TestCase):
             left_value.match(left=lambda e: e == "left", right=lambda v: v == "right")
         )
 
-    def test_either_monad_is_right_and_is_left_and(self):
+    def test_is_right_and_is_left_and(self):
         right_value = Right(10)
         left_value = Left("error")
 
@@ -266,14 +251,14 @@ class TestEitherResultMonad(unittest.TestCase):
         self.assertTrue(left_value.is_left_and(lambda e: e == "error"))
         self.assertFalse(left_value.is_right_and(lambda v: v > 5))
 
-    def test_either_monad_map_or(self):
+    def test_map_or(self):
         right_value = Right(10)
         left_value = Left("error")
 
         self.assertEqual(11, right_value.map_or(0, lambda v: v + 1))
         self.assertEqual(0, left_value.map_or(0, lambda v: v + 1))
 
-    def test_either_monad_and_or(self):
+    def test_and_or(self):
         right_value = Right(10)
         left_value: Either[str, int] = Left("error")
 
@@ -282,7 +267,7 @@ class TestEitherResultMonad(unittest.TestCase):
         self.assertEqual(right_value, right_value.or_(Right(20)))
         self.assertEqual(Right(20), left_value.or_(Right(20)))
 
-    def test_either_monad_zip(self):
+    def test_zip(self):
         right_value: Either[str, int] = Right(10)
         left_value: Either[str, int] = Left("error")
 
@@ -290,12 +275,12 @@ class TestEitherResultMonad(unittest.TestCase):
         self.assertEqual(Left("error"), right_value.zip(Left("error")))
         self.assertEqual(left_value, left_value.zip(Right("a")))
 
-    def test_either_monad_flatten(self):
+    def test_flatten(self):
         self.assertEqual(Right(10), Right(Right(10)).flatten())
         self.assertEqual(Left("error"), Right(Left("error")).flatten())
         self.assertEqual(Left("error"), Left("error").flatten())
 
-    def test_either_monad_right_and_left(self):
+    def test_right_and_left_to_maybe(self):
         right_value = Right(10)
         left_value = Left("error")
 
@@ -304,9 +289,9 @@ class TestEitherResultMonad(unittest.TestCase):
         self.assertEqual(Nothing(), left_value.right())
         self.assertEqual(Just("error"), left_value.left())
 
-    def test_either_supports_structural_pattern_matching(self):
+    def test_supports_structural_pattern_matching(self):
         def describe(value: Either[str, int]) -> str:
-            # No `case _:` fallback: Either is a closed union (Left[L] | Right[R]),
+            # No `case _:` fallback: Either is a closed union (Left[L, R] | Right[L, R]),
             # so this is statically exhaustive without one.
             match value:
                 case Left(e):
@@ -338,7 +323,9 @@ class TestEitherResultMonad(unittest.TestCase):
 
 
 class TestEitherValueSemantics(unittest.TestCase):
-    def test_equality_and_hash(self):
+    def test_equality_compares_values_not_strings(self):
+        self.assertEqual(Right(Decimal("1.0")), Right(Decimal("1.00")))
+        self.assertEqual(Left(Decimal("1.0")), Left(Decimal("1.00")))
         self.assertEqual(Right({"a": 1, "b": 2}), Right({"b": 2, "a": 1}))
         self.assertNotEqual(Right(1), Right("1"))
         self.assertNotEqual(Right(1), Left(1))
@@ -351,6 +338,27 @@ class TestEitherValueSemantics(unittest.TestCase):
         self.assertEqual("Left('e')", repr(Left("e")))
         self.assertEqual("Left(e)", str(Left("e")))
 
+    def test_nan_follows_ieee_semantics(self):
+        self.assertNotEqual(Right(float("nan")), Right(float("nan")))
+        self.assertTrue(math.isnan(Right(float("nan")).unwrap()))
+
+    def test_variants_are_final(self):
+        self.assertTrue(getattr(Left, "__final__", False))
+        self.assertTrue(getattr(Right, "__final__", False))
+
+    def test_copy_and_pickle_round_trip(self):
+        for value in (Right(1), Right([1, 2]), Left("e")):
+            with self.subTest(value=value):
+                self.assertEqual(value, copy.copy(value))
+                self.assertEqual(value, copy.deepcopy(value))
+                self.assertEqual(value, pickle.loads(pickle.dumps(value)))
+
+    def test_is_frozen(self):
+        with self.assertRaises(AttributeError):  # dataclasses.FrozenInstanceError
+            Right(1).value = 2  # type: ignore[misc]
+        with self.assertRaises(AttributeError):
+            Left("e").value = "x"  # type: ignore[misc]
+
     def test_unwrap_chains_the_original_exception(self):
         error = ValueError("boom")
         failure: Either[ValueError, int] = Left(error)
@@ -358,16 +366,33 @@ class TestEitherValueSemantics(unittest.TestCase):
             failure.unwrap()
         self.assertIs(error, raised.exception.__cause__)
 
-    def test_runtime_checks(self):
-        value: Either[str, int] = Right(1)
-        self.assertTrue(is_right(value))
-        self.assertFalse(is_left(value))
-        self.assertTrue(is_either(Left(1)))
-        self.assertFalse(is_either(1))
-        self.assertIsInstance(Right(1), EITHER_TYPES)
-
 
 class TestEitherFeatures(unittest.TestCase):
+    def test_renamed_parameters_by_keyword(self):
+        value: Either[str, int] = Right(-1)
+        error: Either[str, int] = Left("abc")
+        self.assertEqual(3, error.unwrap_or_else(function=len))
+        self.assertEqual(-1, value.unwrap_or_else(function=len))
+        self.assertEqual(
+            Left("neg"), value.filter(predicate=lambda x: x > 0, left_value="neg")
+        )
+        self.assertEqual(
+            Right(1), Right.from_maybe(maybe=Just(1), left_value="missing")
+        )
+        self.assertEqual(
+            3, error.map_or_else(default_function=len, function=lambda x: x * 2)
+        )
+
+    def test_transpose(self):
+        self.assertEqual(Just(Right(1)), Right(Just(1)).transpose())
+        self.assertEqual(Nothing(), Right(Nothing()).transpose())
+        error: Either[str, Maybe[int]] = Left("e")
+        self.assertEqual(Just(Left("e")), error.transpose())
+
+    def test_from_maybe(self):
+        self.assertEqual(Right(1), Right.from_maybe(Just(1), "missing"))
+        self.assertEqual(Left("missing"), Right.from_maybe(Nothing(), "missing"))
+
     def test_swap_and_merge(self):
         self.assertEqual(Left(1), Right(1).swap())
         self.assertEqual(Right("e"), Left("e").swap())
@@ -388,3 +413,10 @@ class TestEitherFeatures(unittest.TestCase):
         self.assertEqual(Right(2), value.and_then(lambda x: Right(x + 1)))
         error: Either[str, int] = Left("abc")
         self.assertEqual(Right(3), error.or_else(lambda e: Right(len(e))))
+
+    def test_bare_left_recovers_without_annotation(self):
+        # The Right type of a bare Left is Never; recovery methods accept any type.
+        self.assertEqual(10, Left("e").unwrap_or(10))
+        self.assertEqual(1, Left("abc").unwrap_or_else(lambda e: len(e) - 2))
+        self.assertEqual(Right(1), Left("e").or_(Right(1)))
+        self.assertEqual("default", Right(1).unwrap_left_or("default"))

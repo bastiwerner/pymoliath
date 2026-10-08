@@ -1,24 +1,21 @@
+import copy
+import math
+import pickle
 import unittest
+from decimal import Decimal
 from collections.abc import Callable
 from unittest.mock import Mock
 
 from pymoliath import Right, Left, Ok, Err
 from pymoliath.exception import (
-    TRY_TYPES,
     Try,
     Success,
     Failure,
-    is_failure,
-    is_success,
-    is_try,
-    map2,
-    map3,
-    safe,
 )
 from pymoliath.util import compose
 
 
-class TestTryMonad(unittest.TestCase):
+class TestTry(unittest.TestCase):
     """
     Monad operations:
     ≡       Identical to
@@ -57,7 +54,7 @@ class TestTryMonad(unittest.TestCase):
         self.assertEqual(success_value, success_value.bind(lambda x: Success(x)))
         self.assertEqual(failure, failure.bind(lambda x: Failure(x)))
 
-    def test_either_monad_associativity_law(self):
+    def test_monad_associativity_law(self):
         """Associativity law: (m >>= f) >>= g ≡ m >>= (x -> f x >>= g)
         https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
 
@@ -157,47 +154,34 @@ class TestTryMonad(unittest.TestCase):
             w.apply(v.apply(u.apply(Success(composition)))), w.apply(v).apply(u)
         )
 
-    def test_map2_and_map3(self):
-        self.assertEqual(Success(3), map2(Success(1), Success(2), lambda a, b: a + b))
-        self.assertEqual(
-            Failure(ValueError("first")),
-            map2(Failure(ValueError("first")), Failure(ValueError("second")), max),
-        )
-        self.assertEqual(
-            Success(6),
-            map3(Success(1), Success(2), Success(3), lambda a, b, c: a + b + c),
-        )
-
-    def test_either_monad_representation(self):
+    def test_str(self):
         success_value = Success("a")
         failure_value = Failure(TypeError("b"))
 
         self.assertEqual(str(success_value), "Success(a)")
         self.assertEqual(str(failure_value), f"Failure({TypeError('b')})")
 
-    def test_either_try_is_left_is_right_is_success_if_failure(self):
+    def test_is_success_and_is_failure(self):
         success = Success(10)
         failure = Failure(TypeError("error"))
 
         self.assertTrue(success.is_success() and not success.is_failure())
         self.assertTrue(failure.is_failure() and not failure.is_success())
 
-    def test_safe_function_for_error_handling_with_either_monad_returns_correct_either_monad(
-        self,
-    ):
+    def test_safe(self):
         def unsafe_function():
             raise Exception("error")
 
         def safe_function():
             return 10
 
-        unsafe_try_result: Try[int] = safe(unsafe_function)
-        safe_try_result: Try[int] = safe(safe_function)
+        unsafe_try_result: Try[int] = Success.safe(unsafe_function)
+        safe_try_result: Try[int] = Success.safe(safe_function)
 
         self.assertEqual(Failure(Exception("error")), unsafe_try_result)
         self.assertEqual(Success(10), safe_try_result)
 
-    def test_try_monad_unwrap(self):
+    def test_unwrap(self):
         success_value = Success(10)
         failure: Try[int] = Failure(TypeError("error"))
 
@@ -219,7 +203,15 @@ class TestTryMonad(unittest.TestCase):
         foo: Try[int] = Failure(Exception("foo"))
         self.assertEqual(3, foo.unwrap_or_else(lambda x: len(str(x))))
 
-    def test_exception_inspect(self):
+    def test_bare_failure_recovers_without_annotation(self):
+        # A bare Failure is a Failure[Never]; its recovery methods accept any type.
+        self.assertEqual(10, Failure(TypeError("error")).unwrap_or(10))
+        self.assertEqual(
+            3, Failure(Exception("foo")).unwrap_or_else(lambda e: len(str(e)))
+        )
+        self.assertEqual(Success(20), Failure(Exception("error")).or_(Success(20)))
+
+    def test_inspect(self):
         success = Success(10)
         exception = TypeError("error")
         failure = Failure(exception)
@@ -234,7 +226,7 @@ class TestTryMonad(unittest.TestCase):
         )
         print_mock.assert_called_with(exception)
 
-    def test_try_monad_match_function(self):
+    def test_match(self):
         right_value = Success("success")
         left_value = Failure(Exception("error"))
 
@@ -251,7 +243,7 @@ class TestTryMonad(unittest.TestCase):
             )
         )
 
-    def test_try_supports_structural_pattern_matching(self):
+    def test_supports_structural_pattern_matching(self):
         def describe(value: Try[int]) -> str:
             # No `case _:` fallback: Try is a closed union (Success[T] | Failure),
             # so this is statically exhaustive without one.
@@ -264,7 +256,7 @@ class TestTryMonad(unittest.TestCase):
         self.assertEqual("success 10", describe(Success(10)))
         self.assertEqual("failure boom", describe(Failure(Exception("boom"))))
 
-    def test_try_monad_to_either_monad(self):
+    def test_to_either(self):
         success = Success(10)
         failure = Failure(Exception("error"))
 
@@ -272,14 +264,14 @@ class TestTryMonad(unittest.TestCase):
         # Left/Err compare exceptions by identity, so compare the messages.
         self.assertEqual(Left("error"), failure.to_either().map_left(str))
 
-    def test_try_monad_to_result_monad(self):
+    def test_to_result(self):
         success = Success(10)
         failure = Failure(Exception("error"))
 
         self.assertEqual(Ok(10), success.to_result())
         self.assertEqual(Err("error"), failure.to_result().map_err(str))
 
-    def test_try_monad_is_success_and_is_failure_and(self):
+    def test_is_success_and_and_is_failure_and(self):
         success_value = Success(10)
         failure_value = Failure(Exception("error"))
 
@@ -289,23 +281,23 @@ class TestTryMonad(unittest.TestCase):
         self.assertTrue(failure_value.is_failure_and(lambda e: str(e) == "error"))
         self.assertFalse(failure_value.is_success_and(lambda v: v > 5))
 
-    def test_try_monad_map_or(self):
+    def test_map_or(self):
         success_value = Success(10)
         failure_value = Failure(Exception("error"))
 
         self.assertEqual(11, success_value.map_or(0, lambda v: v + 1))
         self.assertEqual(0, failure_value.map_or(0, lambda v: v + 1))
 
-    def test_try_monad_and_or(self):
+    def test_and_or(self):
         success_value = Success(10)
-        failure_value: Try[int] = Failure(Exception("error"))
+        failure_value = Failure(Exception("error"))
 
         self.assertEqual(Success(20), success_value.and_(Success(20)))
         self.assertEqual(failure_value, failure_value.and_(Success(20)))
         self.assertEqual(success_value, success_value.or_(Success(20)))
         self.assertEqual(Success(20), failure_value.or_(Success(20)))
 
-    def test_try_monad_zip(self):
+    def test_zip(self):
         success_value = Success(10)
         failure_value = Failure(Exception("error"))
 
@@ -313,7 +305,7 @@ class TestTryMonad(unittest.TestCase):
         self.assertEqual(failure_value, success_value.zip(failure_value))
         self.assertEqual(failure_value, failure_value.zip(Success("a")))
 
-    def test_try_monad_flatten(self):
+    def test_flatten(self):
         self.assertEqual(Success(10), Success(Success(10)).flatten())
         self.assertEqual(
             Failure(Exception("error")),
@@ -323,12 +315,15 @@ class TestTryMonad(unittest.TestCase):
             Failure(Exception("error")), Failure(Exception("error")).flatten()
         )
 
-    def test_try_either_monad(self):
+    def test_catches_exceptions_of_applied_functions(self):
         def divide(dividen: int, divisor: int):
             return dividen / divisor
 
         def try_divide(dividen: int, divisor: int) -> Try[float]:
-            return map2(Success(dividen), Success(divisor), divide)
+            curried: Try[Callable[[int], Callable[[int], float]]] = Success(
+                lambda a: lambda b: divide(a, b)
+            )
+            return curried.apply2(Success(dividen)).apply2(Success(divisor))
 
         def try_divide_map(dividen: int, divisor: int) -> Try[float]:
             return Success(divide).map(lambda f: f(dividen, divisor))
@@ -402,18 +397,12 @@ class TestTryValueSemantics(unittest.TestCase):
         with self.assertRaises(ValueError):
             Failure(ValueError("boom")).unwrap()
 
-    def test_runtime_checks(self):
-        value: Try[int] = Success(1)
-        self.assertTrue(is_success(value))
-        self.assertFalse(is_failure(value))
-        self.assertTrue(is_try(Failure(ValueError())))
-        self.assertFalse(is_try(1))
-        self.assertIsInstance(Success(1), TRY_TYPES)
-
     def test_safe_narrows_the_caught_exceptions(self):
-        self.assertTrue(safe(lambda: int("x"), exceptions=(ValueError,)).is_failure())
+        self.assertTrue(
+            Success.safe(lambda: int("x"), exceptions=(ValueError,)).is_failure()
+        )
         with self.assertRaises(KeyError):
-            safe(lambda: {}["missing"], exceptions=(ValueError,))
+            Success.safe(lambda: {}["missing"], exceptions=(ValueError,))
 
 
 class TestTryFeatures(unittest.TestCase):
@@ -424,3 +413,86 @@ class TestTryFeatures(unittest.TestCase):
 
     def test_and_then(self):
         self.assertEqual(Success(2), Success(1).and_then(lambda x: Success(x + 1)))
+
+
+class TestTryRecovery(unittest.TestCase):
+    def test_map_failure(self):
+        success: Try[int] = Success(1)
+        failure: Try[int] = Failure(ValueError("boom"))
+
+        self.assertEqual(success, success.map_failure(lambda e: TypeError(str(e))))
+        self.assertEqual(
+            Failure(TypeError("boom")), failure.map_failure(lambda e: TypeError(str(e)))
+        )
+
+        def raises(error: Exception) -> Exception:
+            raise KeyError("inner")
+
+        self.assertEqual(Failure(KeyError("inner")), failure.map_failure(raises))
+
+    def test_bind_failure(self):
+        success: Try[int] = Success(1)
+        failure: Try[int] = Failure(ValueError("boom"))
+
+        self.assertEqual(success, success.bind_failure(lambda e: Success(0)))
+        self.assertEqual(
+            Success(4), failure.bind_failure(lambda e: Success(len(str(e))))
+        )
+        self.assertEqual(
+            Failure(TypeError("again")),
+            failure.bind_failure(lambda e: Failure(TypeError("again"))),
+        )
+
+        def raises(error: Exception) -> Try[int]:
+            raise KeyError("inner")
+
+        self.assertEqual(Failure(KeyError("inner")), failure.bind_failure(raises))
+
+    def test_or_else(self):
+        failure: Try[int] = Failure(ValueError("boom"))
+        self.assertEqual(Success(4), failure.or_else(lambda e: Success(len(str(e)))))
+        self.assertEqual(Success(1), Success(1).or_else(lambda e: Success(0)))
+
+    def test_filter(self):
+        self.assertEqual(Success(10), Success(10).filter(lambda x: x > 5))
+        self.assertEqual(
+            Failure(ValueError("predicate does not hold for 1")),
+            Success(1).filter(lambda x: x > 5),
+        )
+        self.assertEqual(
+            Failure(ZeroDivisionError("division by zero")),
+            Success(1).filter(lambda x: x / 0 > 0),
+        )
+        failure: Try[int] = Failure(ValueError("boom"))
+        self.assertEqual(failure, failure.filter(lambda x: x > 5))
+
+    def test_keyword_arguments(self):
+        failure: Try[int] = Failure(ValueError("boom"))
+        self.assertEqual(4, failure.unwrap_or_else(function=lambda e: len(str(e))))
+        self.assertEqual(Success(2), Success(2).filter(predicate=lambda x: x > 1))
+
+
+class TestTryCopyAndPickle(unittest.TestCase):
+    def test_round_trips(self):
+        for value in (Success([1, 2]), Failure(ValueError("boom"))):
+            for clone in (
+                copy.copy(value),
+                copy.deepcopy(value),
+                pickle.loads(pickle.dumps(value)),
+            ):
+                self.assertEqual(value, clone)
+
+
+class TestTryMoreValueSemantics(unittest.TestCase):
+    def test_nan_and_decimal_equality(self):
+        self.assertNotEqual(Success(float("nan")), Success(float("nan")))
+        self.assertTrue(math.isnan(Success(float("nan")).unwrap()))
+        self.assertEqual(Success(Decimal("1.0")), Success(Decimal("1.00")))
+
+    def test_variants_are_final(self):
+        self.assertTrue(getattr(Success, "__final__", False))
+        self.assertTrue(getattr(Failure, "__final__", False))
+
+    def test_unhashable_failure_args(self):
+        with self.assertRaises(TypeError):
+            hash(Failure(ValueError([1])))

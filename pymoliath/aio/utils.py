@@ -1,5 +1,5 @@
 import inspect
-from typing import Awaitable, TypeVar, Union, cast
+from typing import Awaitable, TypeVar, Union
 
 TypeResult = TypeVar("TypeResult")
 
@@ -13,4 +13,4 @@ async def resolve(value: Union[TypeResult, Awaitable[TypeResult]]) -> TypeResult
     """
     if inspect.isawaitable(value):
         return await value
-    return cast(TypeResult, value)
+    return value

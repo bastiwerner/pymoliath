@@ -49,7 +49,9 @@ class TestSlots(unittest.TestCase):
     def test_rejects_arbitrary_attribute_assignment(self):
         for name, instance in self.instances().items():
             with self.subTest(name):
-                with self.assertRaises(AttributeError):
+                # Before Python 3.14, a frozen slotted dataclass raises TypeError here (a CPython bug
+                # in the generated __setattr__); either way the assignment is rejected.
+                with self.assertRaises((AttributeError, TypeError)):
                     instance.new_attribute = 1  # pyright: ignore[reportAttributeAccessIssue]
 
 

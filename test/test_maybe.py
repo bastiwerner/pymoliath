@@ -1,21 +1,17 @@
+import copy
+import math
+import pickle
 import unittest
+from decimal import Decimal
 from typing import Any, Callable
 from unittest.mock import MagicMock, Mock
 
 from pymoliath.either import Either, Left, Right
 from pymoliath.errors import UnwrapError
 from pymoliath.maybe import (
-    MAYBE_TYPES,
     Just,
     Maybe,
     Nothing,
-    from_optional,
-    is_just,
-    is_maybe,
-    is_nothing,
-    map2,
-    map3,
-    safe,
 )
 from pymoliath.util import compose
 
@@ -61,7 +57,7 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(just_value, just_value.bind(lambda x: Just(x)))
         self.assertEqual(nothing_value, nothing_value.bind(lambda _: Nothing()))
 
-    def test_just_monad_associativity_law(self):
+    def test_monad_associativity_law(self):
         """Associativity law: (m >>= f) >>= g ≡ m >>= (x -> f x >>= g)
         https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
 
@@ -173,21 +169,14 @@ class TestMaybe(unittest.TestCase):
             w.apply(v.apply(u.apply(Just(composition)))), w.apply(v).apply(u)
         )
 
-    def test_map2_and_map3(self):
-        self.assertEqual(Just(3), map2(Just(1), Just(2), lambda a, b: a + b))
-        self.assertEqual(Nothing(), map2(Just(1), Nothing(), lambda a, b: a))
-        self.assertEqual(
-            Just(6), map3(Just(1), Just(2), Just(3), lambda a, b, c: a + b + c)
-        )
-
-    def test_maybe_monad_representation(self):
+    def test_str(self):
         just = Just("a")
         nothing = Nothing()
 
         self.assertEqual(str(just), "Just(a)")
         self.assertEqual(str(nothing), "Nothing()")
 
-    def test_maybe_optional_instances(self):
+    def test_variants_are_instances(self):
         self.assertTrue(isinstance(Just("a"), (Just, Nothing)))  # pyright: ignore[reportUnnecessaryIsInstance]
         self.assertTrue(isinstance(Nothing(), (Just, Nothing)))  # pyright: ignore[reportUnnecessaryIsInstance]
 
@@ -196,34 +185,34 @@ class TestMaybe(unittest.TestCase):
         empty: Maybe[int] = Nothing()
         self.assertIs(empty, Nothing())
 
-    def test_maybe_from_and_to_optional(self):
-        maybe_dict: Maybe[dict[Any, Any]] = from_optional({})
-        maybe_string: Maybe[str] = from_optional("")
-        maybe_none: Maybe[str] = from_optional(None)
+    def test_from_and_to_optional(self):
+        maybe_dict: Maybe[dict[Any, Any]] = Just.from_optional({})
+        maybe_string: Maybe[str] = Just.from_optional("")
+        maybe_none: Maybe[str] = Just.from_optional(None)
 
         self.assertEqual({}, maybe_dict.to_optional())
         self.assertEqual("", maybe_string.to_optional())
         self.assertEqual(None, maybe_none.to_optional())
 
-    def test_maybe_is_nothing_is_just(self):
+    def test_is_nothing_and_is_just(self):
         just = Just(10)
         nothing = Nothing()
-        maybe_none = from_optional(None)
-        maybe_value = from_optional(10)
+        maybe_none = Just.from_optional(None)
+        maybe_value = Just.from_optional(10)
 
         self.assertTrue(just.is_just() and not just.is_nothing())
         self.assertTrue(nothing.is_nothing() and not nothing.is_just())
         self.assertTrue(maybe_value.is_just() and not maybe_value.is_nothing())
         self.assertTrue(maybe_none.is_nothing() and not maybe_none.is_just())
 
-    def test_maybe_monad_unwrap(self):
+    def test_unwrap_or(self):
         just_value = Just(10)
         nothing = Nothing()
 
         self.assertEqual(10, just_value.unwrap_or(20))
         self.assertEqual(20, nothing.unwrap_or(20))
 
-    def test_maybe_monad_filter(self):
+    def test_filter(self):
         just_value = Just(10)
         nothing = Nothing()
 
@@ -231,7 +220,7 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(Nothing(), just_value.filter(lambda v: v > 10))
         self.assertEqual(Nothing(), nothing.filter(lambda v: v < 10))
 
-    def test_maybe_monad_is_just_and(self):
+    def test_is_just_and(self):
         just_value = Just(10)
         nothing = Nothing()
 
@@ -239,14 +228,14 @@ class TestMaybe(unittest.TestCase):
         self.assertFalse(just_value.is_just_and(lambda v: v > 10))
         self.assertFalse(nothing.is_just_and(lambda v: v > 5))
 
-    def test_maybe_monad_map_or(self):
+    def test_map_or(self):
         just_value = Just(10)
         nothing = Nothing()
 
         self.assertEqual(11, just_value.map_or(0, lambda v: v + 1))
         self.assertEqual(0, nothing.map_or(0, lambda v: v + 1))
 
-    def test_maybe_monad_and_or(self):
+    def test_and_or(self):
         just_value = Just(10)
         nothing = Nothing()
 
@@ -255,7 +244,7 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(just_value, just_value.or_(Just(20)))
         self.assertEqual(Just(20), nothing.or_(Just(20)))
 
-    def test_maybe_monad_zip(self):
+    def test_zip(self):
         just_value = Just(10)
         nothing = Nothing()
 
@@ -263,12 +252,12 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(Nothing(), just_value.zip(Nothing()))
         self.assertEqual(Nothing(), nothing.zip(Just("a")))
 
-    def test_maybe_monad_flatten(self):
+    def test_flatten(self):
         self.assertEqual(Just(10), Just(Just(10)).flatten())
         self.assertEqual(Nothing(), Just(Nothing()).flatten())
         self.assertEqual(Nothing(), Nothing().flatten())
 
-    def test_maybe_monad_right_or(self):
+    def test_right_or(self):
         just_value = Just(10)
         nothing_value = Nothing()
 
@@ -277,18 +266,20 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(Right(10), just_value.right_or_else(lambda: "error"))
         self.assertEqual(Left("error"), nothing_value.right_or_else(lambda: "error"))
 
-    def test_safe_function(self):
+    def test_safe(self):
         exception_function = MagicMock(side_effect=Exception("error"))
-        maybe_unsafe = safe(lambda: exception_function())
-        maybe_safe = safe(lambda: 10)
+        maybe_unsafe = Just.safe(lambda: exception_function())
+        maybe_safe = Just.safe(lambda: 10)
 
         self.assertEqual(Nothing(), maybe_unsafe)
         self.assertEqual(Just(10), maybe_safe)
-        self.assertEqual(Nothing(), safe(lambda: int("x"), exceptions=(ValueError,)))
+        self.assertEqual(
+            Nothing(), Just.safe(lambda: int("x"), exceptions=(ValueError,))
+        )
         with self.assertRaises(KeyError):
-            safe(lambda: {}["missing"], exceptions=(ValueError,))
+            Just.safe(lambda: {}["missing"], exceptions=(ValueError,))
 
-    def test_maybe_unwrap(self):
+    def test_unwrap(self):
         just = Just("a")
         nothing = Nothing()
 
@@ -301,7 +292,7 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual("a", just.unwrap_or_else(lambda: "b"))
         self.assertEqual(10, nothing.unwrap_or_else(lambda: 10))
 
-    def test_maybe_inspect(self):
+    def test_inspect(self):
         just = Just("a")
         nothing = Nothing()
         print_mock = Mock()
@@ -310,7 +301,7 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(nothing, nothing.inspect(print_mock))
         print_mock.assert_called_once_with("a")
 
-    def test_maybe_functions(self):
+    def test_match(self):
         just = Just("a")
         nothing = Nothing()
 
@@ -331,7 +322,7 @@ class TestMaybe(unittest.TestCase):
             ),
         )
 
-    def test_maybe_supports_structural_pattern_matching(self):
+    def test_supports_structural_pattern_matching(self):
         def describe(value: Maybe[int]) -> str:
             # No `case _:` fallback: Maybe is a closed union (Just[T] | Nothing),
             # so this is statically exhaustive without one.
@@ -379,14 +370,6 @@ class TestMaybeValueSemantics(unittest.TestCase):
         self.assertEqual("Just(1)", str(Just(1)))
         self.assertEqual("Nothing()", repr(Nothing()))
 
-    def test_runtime_checks(self):
-        value: Maybe[int] = Just(1)
-        self.assertTrue(is_just(value))
-        self.assertFalse(is_nothing(value))
-        self.assertTrue(is_maybe(Nothing()))
-        self.assertFalse(is_maybe(None))
-        self.assertIsInstance(Just(1), MAYBE_TYPES)
-
 
 class TestMaybeFeatures(unittest.TestCase):
     def test_map_or_else(self):
@@ -411,3 +394,47 @@ class TestMaybeFeatures(unittest.TestCase):
         self.assertEqual(Right(Nothing()), Nothing().transpose())
         error: Maybe[Either[str, int]] = Just(Left("e"))
         self.assertEqual(Left("e"), error.transpose())
+
+
+class TestMaybeCopyAndPickle(unittest.TestCase):
+    def test_just_round_trips(self):
+        just = Just([1, 2])
+        for clone in (
+            copy.copy(just),
+            copy.deepcopy(just),
+            pickle.loads(pickle.dumps(just)),
+        ):
+            self.assertEqual(just, clone)
+        self.assertIsNot(just.value, copy.deepcopy(just).value)
+
+    def test_nothing_stays_a_singleton(self):
+        for clone in (
+            copy.copy(Nothing()),
+            copy.deepcopy(Nothing()),
+            pickle.loads(pickle.dumps(Nothing())),
+        ):
+            self.assertIs(Nothing(), clone)
+
+
+class TestMaybeMoreValueSemantics(unittest.TestCase):
+    def test_nan_and_decimal_equality(self):
+        self.assertNotEqual(Just(float("nan")), Just(float("nan")))
+        self.assertTrue(math.isnan(Just(float("nan")).unwrap()))
+        self.assertEqual(Just(Decimal("1.0")), Just(Decimal("1.00")))
+
+    def test_variants_are_final(self):
+        self.assertTrue(getattr(Just, "__final__", False))
+        self.assertTrue(getattr(Nothing, "__final__", False))
+
+    def test_from_optional(self):
+        self.assertIs(Nothing(), Just.from_optional(None))
+        self.assertEqual(Just(0), Just.from_optional(0))
+
+    def test_keyword_arguments(self):
+        empty: Maybe[int] = Nothing()
+        self.assertEqual(Just(2), Just(2).filter(predicate=lambda x: x > 1))
+        self.assertEqual(0, empty.unwrap_or_else(function=lambda: 0))
+        self.assertEqual(Left("missing"), empty.right_or(left_value="missing"))
+        self.assertEqual(
+            Left("missing"), empty.right_or_else(function=lambda: "missing")
+        )

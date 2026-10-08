@@ -71,6 +71,8 @@ from typing import (
     overload,
 )
 
+from typing_extensions import TypeIs
+
 from pymoliath.list import ListMonad, TypeHashable, TypeMonoid, TypeOrd
 from pymoliath.option import Nil, Option, Some
 from pymoliath.util import curry
@@ -79,6 +81,13 @@ TypeSource = TypeVar("TypeSource")
 TypeRight = TypeVar("TypeRight")
 TypeResult = TypeVar("TypeResult")
 TypePure = TypeVar("TypePure")
+
+
+def _is_thunk(
+    value: Union[TypeSource, Callable[[], TypeSource]],
+) -> TypeIs[Callable[[], TypeSource]]:
+    """Whether a constructor argument is a computation (a callable) rather than a plain value."""
+    return callable(value)
 
 
 class LazyMonad(Generic[TypeSource]):
@@ -110,10 +119,12 @@ class LazyMonad(Generic[TypeSource]):
         >>> lazy_fn.run()
         10
         """
-        if isinstance(value, Callable):
+        if _is_thunk(value):
             self._computation = value
         else:
-            self._computation = lambda: value
+            # A plain value. Typed as Any: checkers cannot rule out a callable TypeSource here.
+            plain: Any = value
+            self._computation = lambda: plain
 
     def map(
         self: LazyMonad[TypeSource], function: Callable[[TypeSource], TypeResult]
@@ -306,10 +317,14 @@ class Sequence(Generic[TypeSource]):
         >>> seq.run()
         [1, 2, 3]
         """
-        if isinstance(value, Callable):
-            self._pipeline: Callable[[], Iterator[TypeSource]] = lambda: iter(value())
+        self._pipeline: Callable[[], Iterator[TypeSource]]
+        if _is_thunk(value):
+            source = value
+            self._pipeline = lambda: iter(source())
         else:
-            self._pipeline = lambda: iter(value)
+            # A plain iterable. Typed as Any: checkers cannot rule out a callable iterable here.
+            iterable: Any = value
+            self._pipeline = lambda: iter(iterable)
 
     def __iter__(self: Sequence[TypeSource]) -> Iterator[TypeSource]:
         """Returns a fresh iterator over the Sequence's pipeline, pulling from the source.

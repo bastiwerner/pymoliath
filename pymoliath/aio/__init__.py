@@ -17,7 +17,7 @@ the computation is only triggered when the final `AsyncX` is awaited.
 Usage examples for each `AsyncX` are provided alongside their sync counterparts
 in each monad's `docs/` page (see the Components section below).
 
-- **Directly awaitable.** Awaiting an `AsyncX` (e.g., `await AsyncMaybe.from_value(1).map(f)`)
+- **Directly awaitable.** Awaiting an `AsyncX` (e.g., `await AsyncMaybe.from_just(1).map(f)`)
   executes the entire pipeline and resolves to the underlying sync monad
   (`Just`/`Nothing`, `Left`/`Right`, `Ok`/`Err`, `Some`/`Nil`, `Success`/`Failure`).
   This ensures that short-circuiting and pattern matching behave identically to the
@@ -32,11 +32,16 @@ in each monad's `docs/` page (see the Components section below).
   This allows real async I/O to compose fluently with pure transformations in the
   same chain. Similarly, `bind` accepts callbacks returning another `AsyncX`,
   a plain sync monad, or an awaitable resolving to one.
-- **Flexible Construction.** Every `AsyncX` can be instantiated from an
-  already-resolved value/sync monad (`from_value`, `from_maybe`, `from_either`,
-  etc.) or from an async callable (`from_coroutine`). The instance remains
-  re-awaitable and re-runnable as long as the underlying callable produces a
-  fresh awaitable on each call.
+- **Flexible Construction.** Every sum-type `AsyncX` has one constructor per variant, named
+  after it (`AsyncResult.from_ok`/`from_err`, `AsyncEither.from_right`/`from_left`,
+  `AsyncOption.from_some`/`from_nil`, `AsyncMaybe.from_just`/`from_nothing`,
+  `AsyncTry.from_success`/`from_failure`), one from the sync monad (`from_result`,
+  `from_either`, `from_option`, `from_maybe`, `from_try`) and one from an async callable
+  (`from_coroutine`). The instance remains re-awaitable and re-runnable as long as the
+  underlying callable produces a fresh awaitable on each call.
+- **Running.** `await an_async_x` resolves it inside a coroutine. `an_async_x.run()` returns a
+  coroutine, for APIs such as `asyncio.run` that require one (before Python 3.14):
+  `asyncio.run(AsyncResult.from_ok(1).run())`.
 - **Minimalist API Surface.** To keep the API clean, terminal methods like
   `unwrap*`, `match`, `is_*`, and cross-conversions between `Maybe`/`Result`/`Either`
   are not duplicated on the `Async*` classes. Since awaiting an `AsyncX`
