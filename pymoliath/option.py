@@ -85,7 +85,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Never, Self, final, overload
+from typing import TYPE_CHECKING, Any, Never, Self, final, overload
 
 from typing_extensions import Generic, TypeVar
 
@@ -885,12 +885,8 @@ class Nil(_OptionImpl[Never]):
     True
     """
 
-    _instance: ClassVar[Nil | None] = None
-
     def __new__(cls) -> Nil:
-        if cls._instance is None:
-            cls._instance = object.__new__(cls)
-        return cls._instance
+        return _NIL
 
     def map(self, function: Callable[[Never], U]) -> Nil:
         return self
@@ -985,5 +981,5 @@ type Option[T] = Some[T] | Nil
 # faster); the instance stays frozen, so assignment still raises FrozenInstanceError.
 _set_some_value: Callable[[Some[Any], Any], None] = Some.__dict__["value"].__set__
 
-# The Nil singleton, returned directly on hot paths instead of going through Nil.__new__.
-_NIL = Nil()
+# The one Nil instance, which `Nil()` returns.
+_NIL: Nil = object.__new__(Nil)

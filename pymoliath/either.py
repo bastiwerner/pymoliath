@@ -106,18 +106,6 @@ from pymoliath.errors import UnwrapError
 if TYPE_CHECKING:
     from pymoliath.maybe import Just, Maybe, Nothing
 
-# `Nothing()` is a singleton, but constructing it still runs `__new__` and `__init__`. Hot paths
-# (`Left.right()`, `Right.left()`) return this cached reference instead. It is filled on first use
-# because maybe.py may still be initializing while this module is imported.
-_nothing: Nothing | None = None
-
-
-def _load_nothing() -> Nothing:
-    global _nothing
-    _nothing = _maybe.Nothing()
-    return _nothing
-
-
 # Both parameters are covariant, so `Right[Never, int]` is an `Either[str, int]`. Like in Rust the
 # receiver fixes the types a method accepts (`unwrap_or(default: R)`, `bind` returning
 # `Either[L, U]`), which puts a covariant parameter in an input position. That is sound here: the
@@ -986,7 +974,7 @@ class Left(_EitherImpl[LeftT, RightT]):
         return _maybe.Just(failed)
 
     def right(self) -> Nothing:
-        return _nothing or _load_nothing()
+        return _maybe.Nothing()
 
     def left(self) -> Just[LeftT]:
         return _maybe.Just(self.value)
@@ -1140,7 +1128,7 @@ class Right(_EitherImpl[LeftT, RightT]):
         return _maybe.Just(self.value)
 
     def left(self) -> Nothing:
-        return _nothing or _load_nothing()
+        return _maybe.Nothing()
 
     def unwrap(self) -> RightT:
         return self.value

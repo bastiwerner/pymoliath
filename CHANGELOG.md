@@ -123,7 +123,7 @@ Benchmarks (`bench/bench_result.py`, pyperf, Python 3.14) against 2.0.0:
 
 - The behaviour lives in the variants, so methods no longer re-dispatch through a `match`, and
   short-circuit paths return the instance itself instead of allocating.
-- `Nil()` / `Nothing()` are cached singletons on the hot paths.
+- `Nil()` / `Nothing()` return their single module-level instance directly (no lazy check).
 - The variants set their field directly in a hand-written `__init__` instead of the frozen
   dataclass one (about 30% faster construction; still frozen).
 - `compose` reads each function's signature once, when composing; `curry` reads a plain function's

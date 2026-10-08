@@ -114,18 +114,6 @@ from pymoliath.errors import UnwrapError
 if TYPE_CHECKING:
     from pymoliath.option import Nil, Option, Some
 
-# `Nil()` is a singleton, but constructing it still runs `__new__` and `__init__`. Hot paths
-# (`Ok.err()`, `Err.ok()`) return this cached reference instead. It is filled on first use because
-# option.py may still be initializing while this module is imported.
-_nil: Nil | None = None
-
-
-def _load_nil() -> Nil:
-    global _nil
-    _nil = _option.Nil()
-    return _nil
-
-
 # Both parameters are covariant, so `Ok[int, Never]` is a `Result[int, str]`. Like in Rust the
 # receiver fixes the types a method accepts (`unwrap_or(default: T)`, `bind` returning
 # `Result[U, E]`), which puts a covariant parameter in an input position. That is sound here: the
@@ -999,7 +987,7 @@ class Ok(_ResultImpl[OkT, ErrT]):
         return _option.Some(self.value)
 
     def err(self) -> Nil:
-        return _nil or _load_nil()
+        return _option.Nil()
 
     def unwrap(self) -> OkT:
         return self.value
@@ -1130,7 +1118,7 @@ class Err(_ResultImpl[OkT, ErrT]):
         return _option.Some(failed)
 
     def ok(self) -> Nil:
-        return _nil or _load_nil()
+        return _option.Nil()
 
     def err(self) -> Some[ErrT]:
         return _option.Some(self.error)

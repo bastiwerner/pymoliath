@@ -85,7 +85,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar, Never, Self, final, overload
+from typing import TYPE_CHECKING, Any, Never, Self, final, overload
 
 from typing_extensions import Generic, TypeVar
 
@@ -883,12 +883,8 @@ class Nothing(_MaybeImpl[Never]):
     True
     """
 
-    _instance: ClassVar[Nothing | None] = None
-
     def __new__(cls) -> Nothing:
-        if cls._instance is None:
-            cls._instance = object.__new__(cls)
-        return cls._instance
+        return _NOTHING
 
     def map(self, function: Callable[[Never], U]) -> Nothing:
         return self
@@ -983,5 +979,5 @@ type Maybe[T] = Just[T] | Nothing
 # faster); the instance stays frozen, so assignment still raises FrozenInstanceError.
 _set_just_value: Callable[[Just[Any], Any], None] = Just.__dict__["value"].__set__
 
-# The Nothing singleton, returned directly on hot paths instead of going through Nothing.__new__.
-_NOTHING = Nothing()
+# The one Nothing instance, which `Nothing()` returns.
+_NOTHING: Nothing = object.__new__(Nothing)
