@@ -28,28 +28,23 @@ asyncio.run(AsyncTry.from_coroutine(fetch_ten))  # Success(10)
 
 from __future__ import annotations
 
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Generator,
-    Generic,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from collections.abc import Awaitable, Callable, Generator
+from typing import Any, Generic, TypeVar, assert_never
 
 from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.exception import Failure, Success, Try
 from pymoliath.util import curry
 
-TypeSource = TypeVar("TypeSource")
-TypeResult = TypeVar("TypeResult")
-TypePure = TypeVar("TypePure")
+T = TypeVar("T")
+U = TypeVar("U")
+
+# Function-scoped TypeVar for the static constructors: the class-scoped T would be Unknown when
+# called on the unspecialized class (`AsyncTry.from_success(1)`).
+V = TypeVar("V")
 
 
-class AsyncTry(Generic[TypeSource]):
-    """Async Try Monad: a deferred computation which resolves to a Try[TypeSource] once awaited.
+class AsyncTry(Generic[T]):
+    """Async Try Monad: a deferred computation which resolves to a Try[T] once awaited.
 
     Directly awaitable - nothing in a chain of map/bind/map_failure/... runs until the AsyncTry
     itself is awaited (`await an_async_try`), same lazy-pipeline design as AsyncMaybe
@@ -71,12 +66,12 @@ class AsyncTry(Generic[TypeSource]):
 
     __slots__ = ("_run",)
 
-    def __init__(self, run: Callable[[], Awaitable[Try[TypeSource]]]) -> None:
+    def __init__(self, run: Callable[[], Awaitable[Try[T]]]) -> None:
         """AsyncTry constructor which takes a zero-argument async callable resolving to a Try.
 
         Parameters
         ----------
-        run: Callable[[], Awaitable[Try[TypeSource]]]
+        run: Callable[[], Awaitable[Try[T]]]
             Zero-argument callable returning a fresh awaitable each call, resolving to a Try.
             To stay re-awaitable, `run` must produce a *new* awaitable every call rather than
             handing back an already-created (and possibly already-consumed) coroutine object -
@@ -91,8 +86,8 @@ class AsyncTry(Generic[TypeSource]):
         """
         self._run = run
 
-    def __await__(self) -> Generator[Any, None, Try[TypeSource]]:
-        """Runs the pipeline and resolves to the final Try[TypeSource].
+    def __await__(self) -> Generator[Any, None, Try[T]]:
+        """Runs the pipeline and resolves to the final Try[T].
 
         Examples
         --------
@@ -103,17 +98,17 @@ class AsyncTry(Generic[TypeSource]):
         return self._run().__await__()
 
     @staticmethod
-    def from_success(value: TypeSource) -> AsyncTry[TypeSource]:
+    def from_success(value: V) -> AsyncTry[V]:
         """Lifts a plain value into an already-Success AsyncTry.
 
         Parameters
         ----------
-        value: TypeSource
+        value: V
             Value to be wrapped as Success once awaited.
 
         Returns
         -------
-        async_try: AsyncTry[TypeSource]
+        async_try: AsyncTry[V]
 
         Examples
         --------
@@ -122,14 +117,16 @@ class AsyncTry(Generic[TypeSource]):
         Success(10)
         """
 
-        async def run() -> Try[TypeSource]:
+        async def run() -> Try[V]:
             """Resolves immediately to Success(value)."""
             return Success(value)
 
         return AsyncTry(run)
 
     @staticmethod
-    def from_failure(exception: Exception) -> AsyncTry[TypeSource]:
+    # V is deliberately only in the return type: like a bare Failure, the Success type is left open
+    # to be solved from context.
+    def from_failure(exception: Exception) -> AsyncTry[V]:  # pyright: ignore[reportInvalidTypeVarUse]
         """Lifts an Exception into an already-Failure AsyncTry.
 
         Parameters
@@ -139,7 +136,7 @@ class AsyncTry(Generic[TypeSource]):
 
         Returns
         -------
-        async_try: AsyncTry[TypeSource]
+        async_try: AsyncTry[V]
 
         Examples
         --------
@@ -148,24 +145,24 @@ class AsyncTry(Generic[TypeSource]):
         Failure(boom)
         """
 
-        async def run() -> Try[TypeSource]:
+        async def run() -> Try[V]:
             """Resolves immediately to Failure(exception)."""
             return Failure(exception)
 
         return AsyncTry(run)
 
     @staticmethod
-    def from_try(try_value: Try[TypeSource]) -> AsyncTry[TypeSource]:
+    def from_try(try_value: Try[V]) -> AsyncTry[V]:
         """Lifts an existing sync Try (Success or Failure) into an AsyncTry.
 
         Parameters
         ----------
-        try_value: Try[TypeSource]
+        try_value: Try[V]
             Try to be wrapped, resolved unchanged once awaited.
 
         Returns
         -------
-        async_try: AsyncTry[TypeSource]
+        async_try: AsyncTry[V]
 
         Examples
         --------
@@ -176,7 +173,7 @@ class AsyncTry(Generic[TypeSource]):
         Failure(boom)
         """
 
-        async def run() -> Try[TypeSource]:
+        async def run() -> Try[V]:
             """Resolves immediately to `try_value`."""
             return try_value
 
@@ -184,8 +181,8 @@ class AsyncTry(Generic[TypeSource]):
 
     @staticmethod
     def from_coroutine(
-        coroutine_function: Callable[[], Awaitable[TypeSource]],
-    ) -> AsyncTry[TypeSource]:
+        coroutine_function: Callable[[], Awaitable[V]],
+    ) -> AsyncTry[V]:
         """Wraps a zero-argument async callable producing a raw value as a Success once awaited.
 
         Does not catch exceptions raised by `coroutine_function` - only map/bind/map_failure/
@@ -193,14 +190,14 @@ class AsyncTry(Generic[TypeSource]):
 
         Parameters
         ----------
-        coroutine_function: Callable[[], Awaitable[TypeSource]]
+        coroutine_function: Callable[[], Awaitable[V]]
             Zero-argument callable returning a fresh awaitable each call (e.g. an `async def`
             function, not an already-created coroutine object, so the AsyncTry stays
             re-awaitable).
 
         Returns
         -------
-        async_try: AsyncTry[TypeSource]
+        async_try: AsyncTry[V]
 
         Examples
         --------
@@ -210,25 +207,23 @@ class AsyncTry(Generic[TypeSource]):
         Success(10)
         """
 
-        async def run() -> Try[TypeSource]:
+        async def run() -> Try[V]:
             """Awaits `coroutine_function` and wraps its result as Success."""
             return Success(await coroutine_function())
 
         return AsyncTry(run)
 
-    def map(
-        self, function: Callable[[TypeSource], Union[TypeResult, Awaitable[TypeResult]]]
-    ) -> AsyncTry[TypeResult]:
+    def map(self, function: Callable[[T], U | Awaitable[U]]) -> AsyncTry[U]:
         """AsyncTry functor interface (>=, map).
 
         Parameters
         ----------
-        function: Callable[[TypeSource], Union[TypeResult, Awaitable[TypeResult]]]
+        function: Callable[[T], U | Awaitable[U]]
             Sync or async function applied to the resolved value if Success.
 
         Returns
         -------
-        async_try: AsyncTry[TypeResult]
+        async_try: AsyncTry[U]
             Returns a new AsyncTry which resolves to Success with the function result, to Failure
             if `function` raises, or to the original Failure unchanged without calling `function`,
             if this AsyncTry resolves to Failure.
@@ -244,34 +239,35 @@ class AsyncTry(Generic[TypeSource]):
         Failure(boom)
         """
 
-        async def run() -> Try[TypeResult]:
+        async def run() -> Try[U]:
             """Awaits self, then applies `function`, short-circuiting on Failure."""
-            outcome = await self
-            match outcome:
-                case Failure():
-                    return outcome
+            match outcome := await self:
+                case Failure(exception):
+                    return Failure(exception)
                 case Success(value):
                     try:
                         return Success(await _resolve(function(value)))
                     except Exception as e:
                         return Failure(e)
+                case _:
+                    assert_never(outcome)
 
         return AsyncTry(run)
 
     def map_failure(
         self,
-        function: Callable[[Exception], Union[Exception, Awaitable[Exception]]],
-    ) -> AsyncTry[TypeSource]:
+        function: Callable[[Exception], Exception | Awaitable[Exception]],
+    ) -> AsyncTry[T]:
         """Calls `function` on the resolved Failure's exception, otherwise leaves Success untouched.
 
         Parameters
         ----------
-        function: Callable[[Exception], Union[Exception, Awaitable[Exception]]]
+        function: Callable[[Exception], Exception | Awaitable[Exception]]
             Sync or async function applied to the resolved exception if Failure.
 
         Returns
         -------
-        async_try: AsyncTry[TypeSource]
+        async_try: AsyncTry[T]
             Returns a new AsyncTry which resolves to Failure with the function result, to Failure
             of any exception `function` itself raises, or to the original Success unchanged
             without calling `function`, if this AsyncTry resolves to Success.
@@ -285,39 +281,40 @@ class AsyncTry(Generic[TypeSource]):
         Success(10)
         """
 
-        async def run() -> Try[TypeSource]:
+        async def run() -> Try[T]:
             """Awaits self, then applies `function` to the exception, short-circuiting on Success."""
-            outcome = await self
-            match outcome:
-                case Success():
-                    return outcome
+            match outcome := await self:
+                case Success(value):
+                    return Success(value)
                 case Failure(exc):
                     try:
                         return Failure(await _resolve(function(exc)))
                     except Exception as e:
                         return Failure(e)
+                case _:
+                    assert_never(outcome)
 
         return AsyncTry(run)
 
     def bind(
         self,
         function: Callable[
-            [TypeSource],
-            Union[AsyncTry[TypeResult], Try[TypeResult], Awaitable[Try[TypeResult]]],
+            [T],
+            AsyncTry[U] | Try[U] | Awaitable[Try[U]],
         ],
-    ) -> AsyncTry[TypeResult]:
+    ) -> AsyncTry[U]:
         """AsyncTry bind interface (>>=, bind, flatMap).
 
         Parameters
         ----------
-        function: Callable[[TypeSource], AsyncTry[TypeResult] | Try[TypeResult] | Awaitable[Try[TypeResult]]]
+        function: Callable[[T], AsyncTry[U] | Try[U] | Awaitable[Try[U]]]
             Function applied to the resolved value if Success, returning another AsyncTry, a plain
             Try, or an awaitable resolving to a Try - whichever shape is returned is
             auto-detected.
 
         Returns
         -------
-        async_try: AsyncTry[TypeResult]
+        async_try: AsyncTry[U]
             Returns a new AsyncTry with the function result if Success, a Failure of any exception
             `function` raises, or the original Failure unchanged without calling `function`.
 
@@ -330,12 +327,11 @@ class AsyncTry(Generic[TypeSource]):
         Failure(boom)
         """
 
-        async def run() -> Try[TypeResult]:
+        async def run() -> Try[U]:
             """Awaits self, then chains into `function`'s result, short-circuiting on Failure."""
-            outcome = await self
-            match outcome:
-                case Failure():
-                    return outcome
+            match outcome := await self:
+                case Failure(exception):
+                    return Failure(exception)
                 case Success(value):
                     try:
                         result = function(value)
@@ -344,6 +340,8 @@ class AsyncTry(Generic[TypeSource]):
                         return await _resolve(result)
                     except Exception as e:
                         return Failure(e)
+                case _:
+                    assert_never(outcome)
 
         return AsyncTry(run)
 
@@ -351,21 +349,21 @@ class AsyncTry(Generic[TypeSource]):
         self,
         function: Callable[
             [Exception],
-            Union[AsyncTry[TypeSource], Try[TypeSource], Awaitable[Try[TypeSource]]],
+            AsyncTry[T] | Try[T] | Awaitable[Try[T]],
         ],
-    ) -> AsyncTry[TypeSource]:
+    ) -> AsyncTry[T]:
         """Calls `function` with the resolved Failure's exception, otherwise leaves Success untouched.
 
         Parameters
         ----------
-        function: Callable[[Exception], AsyncTry[TypeSource] | Try[TypeSource] | Awaitable[Try[TypeSource]]]
+        function: Callable[[Exception], AsyncTry[T] | Try[T] | Awaitable[Try[T]]]
             Function applied to the resolved exception if Failure, returning another AsyncTry, a
             plain Try, or an awaitable resolving to a Try - whichever shape is returned is
             auto-detected.
 
         Returns
         -------
-        async_try: AsyncTry[TypeSource]
+        async_try: AsyncTry[T]
             Returns a new AsyncTry with the function result if Failure, a Failure of any exception
             `function` raises, or the original Success unchanged without calling `function`.
 
@@ -378,12 +376,11 @@ class AsyncTry(Generic[TypeSource]):
         Success(10)
         """
 
-        async def run() -> Try[TypeSource]:
+        async def run() -> Try[T]:
             """Awaits self, then chains into `function`'s result, short-circuiting on Success."""
-            outcome = await self
-            match outcome:
-                case Success():
-                    return outcome
+            match outcome := await self:
+                case Success(value):
+                    return Success(value)
                 case Failure(exc):
                     try:
                         result = function(exc)
@@ -392,24 +389,24 @@ class AsyncTry(Generic[TypeSource]):
                         return await _resolve(result)
                     except Exception as e:
                         return Failure(e)
+                case _:
+                    assert_never(outcome)
 
         return AsyncTry(run)
 
-    def apply(
-        self, applicative: AsyncTry[Callable[..., TypeResult]]
-    ) -> AsyncTry[TypeResult]:
+    def apply(self, applicative: AsyncTry[Callable[..., U]]) -> AsyncTry[U]:
         """AsyncTry applicative interface for AsyncTrys containing a value (<*>).
 
         Parameters
         ----------
-        applicative: AsyncTry[TypeApplicative] (TypeApplicative: any callable type)
+        applicative: AsyncTry[Callable[..., U]]
             Applicative AsyncTry which contains a function and will be applied to the AsyncTry
             containing a value.
 
         Returns
         -------
-        async_try: AsyncTry[TypeResult]
-            Applies an AsyncTry containing a value of type TypeSource to an AsyncTry containing
+        async_try: AsyncTry[U]
+            Applies an AsyncTry containing a value of type T to an AsyncTry containing
             a function.
 
         Examples
@@ -422,28 +419,28 @@ class AsyncTry(Generic[TypeSource]):
         """
 
         def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> AsyncTry[TypeResult]:
+            applicative_function: Callable[..., U],
+        ) -> AsyncTry[U]:
             """Maps the applicative's function, curried, over this AsyncTry's value."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
 
     def apply2(
-        self: AsyncTry[Callable[..., TypeResult]],
+        self: AsyncTry[Callable[..., U]],
         applicative_value: AsyncTry[Any],
-    ) -> AsyncTry[TypeResult]:
+    ) -> AsyncTry[U]:
         """AsyncTry applicative interface for AsyncTrys containing a function (<*>).
 
         Parameters
         ----------
-        applicative_value: AsyncTry[TypePure]
+        applicative_value: AsyncTry[U]
             AsyncTry value which will be applied to the AsyncTry containing a function.
 
         Returns
         -------
-        async_try: AsyncTry[TypeResult]
-            Applies an AsyncTry containing a function to an AsyncTry of type TypePure (value or
+        async_try: AsyncTry[U]
+            Applies an AsyncTry containing a function to an AsyncTry of type U (value or
             function).
 
         Examples
@@ -456,24 +453,24 @@ class AsyncTry(Generic[TypeSource]):
         """
 
         def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> AsyncTry[TypeResult]:
+            applicative_function: Callable[..., U],
+        ) -> AsyncTry[U]:
             """Maps the curried applicative function, held by this AsyncTry, over `applicative_value`."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
 
-    def and_(self, other: AsyncTry[TypeResult]) -> AsyncTry[TypeResult]:
+    def and_(self, other: AsyncTry[U]) -> AsyncTry[U]:
         """Returns `other` if this AsyncTry resolves to Success, otherwise the original Failure.
 
         Parameters
         ----------
-        other: AsyncTry[TypeResult]
+        other: AsyncTry[U]
             AsyncTry to be returned if this AsyncTry resolves to Success.
 
         Returns
         -------
-        async_try: AsyncTry[TypeResult]
+        async_try: AsyncTry[U]
 
         Examples
         --------
@@ -485,17 +482,17 @@ class AsyncTry(Generic[TypeSource]):
         """
         return self.bind(lambda _: other)
 
-    def or_(self, other: AsyncTry[TypeSource]) -> AsyncTry[TypeSource]:
+    def or_(self, other: AsyncTry[T]) -> AsyncTry[T]:
         """Returns this AsyncTry if it resolves to Success, otherwise `other`.
 
         Parameters
         ----------
-        other: AsyncTry[TypeSource]
+        other: AsyncTry[T]
             AsyncTry to be returned if this AsyncTry resolves to Failure.
 
         Returns
         -------
-        async_try: AsyncTry[TypeSource]
+        async_try: AsyncTry[T]
 
         Examples
         --------
@@ -506,28 +503,29 @@ class AsyncTry(Generic[TypeSource]):
         Success(2)
         """
 
-        async def run() -> Try[TypeSource]:
+        async def run() -> Try[T]:
             """Awaits self, falling back to `other` if this AsyncTry resolves to Failure."""
-            outcome = await self
-            match outcome:
-                case Success():
-                    return outcome
+            match outcome := await self:
+                case Success(value):
+                    return Success(value)
                 case Failure():
                     return await other
+                case _:
+                    assert_never(outcome)
 
         return AsyncTry(run)
 
-    def zip(self, other: AsyncTry[TypePure]) -> AsyncTry[Tuple[TypeSource, TypePure]]:
+    def zip(self, other: AsyncTry[U]) -> AsyncTry[tuple[T, U]]:
         """Combines this AsyncTry with another into an AsyncTry of a tuple, or Failure if either is Failure.
 
         Parameters
         ----------
-        other: AsyncTry[TypePure]
+        other: AsyncTry[U]
             AsyncTry to be zipped with this AsyncTry.
 
         Returns
         -------
-        async_try: AsyncTry[Tuple[TypeSource, TypePure]]
+        async_try: AsyncTry[tuple[T, U]]
 
         Examples
         --------
@@ -538,24 +536,25 @@ class AsyncTry(Generic[TypeSource]):
         Failure(boom)
         """
 
-        async def run() -> Try[Tuple[TypeSource, TypePure]]:
+        async def run() -> Try[tuple[T, U]]:
             """Awaits both self and `other`, combining their values if both are Success."""
-            outcome = await self
-            match outcome:
-                case Failure():
-                    return outcome
+            match outcome := await self:
+                case Failure(exception):
+                    return Failure(exception)
                 case Success(value):
                     other_outcome = await other
                     return other_outcome.map(lambda o: (value, o))
+                case _:
+                    assert_never(outcome)
 
         return AsyncTry(run)
 
-    def flatten(self: AsyncTry[AsyncTry[TypeResult]]) -> AsyncTry[TypeResult]:
+    def flatten(self: AsyncTry[AsyncTry[U]]) -> AsyncTry[U]:
         """Flattens a nested AsyncTry by one level.
 
         Returns
         -------
-        async_try: AsyncTry[TypeResult]
+        async_try: AsyncTry[U]
             Returns the nested AsyncTry's eventual result, or the original Failure without
             awaiting it, if this AsyncTry resolves to Failure.
 
@@ -567,30 +566,29 @@ class AsyncTry(Generic[TypeSource]):
         Success(1)
         """
 
-        async def run() -> Try[TypeResult]:
+        async def run() -> Try[U]:
             """Awaits self, then awaits the nested AsyncTry if Success."""
-            outcome = await self
-            match outcome:
-                case Failure():
-                    return outcome
+            match outcome := await self:
+                case Failure(exception):
+                    return Failure(exception)
                 case Success(inner):
                     return await inner
+                case _:
+                    assert_never(outcome)
 
         return AsyncTry(run)
 
-    def inspect(
-        self, function: Callable[[TypeSource], Union[None, Awaitable[None]]]
-    ) -> AsyncTry[TypeSource]:
-        """Inspect the AsyncTry's resolved value of TypeSource.
+    def inspect(self, function: Callable[[T], None | Awaitable[None]]) -> AsyncTry[T]:
+        """Inspect the AsyncTry's resolved value of T.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], Union[None, Awaitable[None]]]
+        function: Callable[[T], None | Awaitable[None]]
             Sync or async inspection function called with the resolved value if Success.
 
         Returns
         -------
-        async_try: AsyncTry[TypeSource]
+        async_try: AsyncTry[T]
 
         Examples
         --------
@@ -600,31 +598,32 @@ class AsyncTry(Generic[TypeSource]):
         Success(42)
         """
 
-        async def run() -> Try[TypeSource]:
+        async def run() -> Try[T]:
             """Awaits self, calling `function` for its side effect only if Success."""
-            outcome = await self
-            match outcome:
+            match outcome := await self:
                 case Success(value):
                     await _resolve(function(value))
                 case Failure():
                     pass
+                case _:
+                    assert_never(outcome)
             return outcome
 
         return AsyncTry(run)
 
     def inspect_failure(
-        self, function: Callable[[Exception], Union[None, Awaitable[None]]]
-    ) -> AsyncTry[TypeSource]:
+        self, function: Callable[[Exception], None | Awaitable[None]]
+    ) -> AsyncTry[T]:
         """Inspect the AsyncTry's resolved Failure exception.
 
         Parameters
         ----------
-        function: Callable[[Exception], Union[None, Awaitable[None]]]
+        function: Callable[[Exception], None | Awaitable[None]]
             Sync or async inspection function called with the resolved exception if Failure.
 
         Returns
         -------
-        async_try: AsyncTry[TypeSource]
+        async_try: AsyncTry[T]
 
         Examples
         --------
@@ -634,14 +633,15 @@ class AsyncTry(Generic[TypeSource]):
         Failure(boom)
         """
 
-        async def run() -> Try[TypeSource]:
+        async def run() -> Try[T]:
             """Awaits self, calling `function` for its side effect only if Failure."""
-            outcome = await self
-            match outcome:
+            match outcome := await self:
                 case Failure(exc):
                     await _resolve(function(exc))
                 case Success():
                     pass
+                case _:
+                    assert_never(outcome)
             return outcome
 
         return AsyncTry(run)

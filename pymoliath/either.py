@@ -10,11 +10,30 @@ allowing for a functional approach to error handling by chaining operations with
 
 This implementation is heavily inspired by the Haskell `Either` type and the Rust `Result` type.
 
-The `Either` type is a sum type that can be either `Left` or `Right`.
-In this implementation, it is represented as a Union type in Python.
+The `Either` type is a sealed sum type that can be either `Left` or `Right`. Like Rust's
+`Result`, both variants carry both type parameters:
 
 ```python
-Either = Left[TypeLeft] | Right[TypeRight]
+type Either[L, R] = Left[L, R] | Right[R, L]
+```
+
+A bare `Right(10)` is a `Right[int, Never]`. A bare `Left("e")` leaves its Right type open
+(`Left[str, Unknown]`) so it can be solved from context, e.g. in
+`lambda x: Right(x) if x > 0 else Left("negative")`.
+
+## Typing like in Rust
+
+Because both variants know the full `Either[L, R]`, lambdas passed to `map`/`bind`/... are
+inferred cleanly and a `match` over `Left`/`Right` is exhaustive. The one trade-off is invariance:
+a bare `Right(10)` without any context is a `Right[int, Never]` and not assignable to an
+`Either[str, int]`. Construct values directly in a `return` or an annotated assignment, just as
+Rust needs a type annotation there:
+
+```python
+value: Either[str, int] = Right(10)
+
+def parse(text: str) -> Either[str, int]:
+    return Right(int(text)) if text.isdigit() else Left("not a number")
 ```
 
 ## Practical Examples and Benefits:
@@ -30,6 +49,7 @@ The Either Monad is particularly useful in scenarios where a function might fail
 
 This approach turns "nested if" logic into a linear pipeline of transformations.
 
+```python
 # Without Either (Imperative)
 try:
     user = get_user(user_id)
@@ -45,11 +65,14 @@ except PermissionDeniedError:
 
 # With Either (Functional)
 (get_user(user_id)
-    .map(get_profile)
-    .map(get_permission)
+    .bind(get_profile)
+    .bind(get_permission)
     .unwrap_or_else(lambda error: f"Error: {error}"))
+```
 
-Structural pattern matching provides a clean, declarative way to handle the contents of an `Either` monad. Because the `Left` and `Right` classes are designed to be compatible with Python's `match` statement, you can easily branch your logic based on whether the operation succeeded or failed without manually checking for specific error codes or using complex `if-is_left()` logic.
+Structural pattern matching provides a clean, declarative way to handle the contents of an
+`Either` monad. `Left` and `Right` are the only variants (the Either is sealed), so a `match` over
+both is exhaustive and type checkers narrow the value in each branch.
 
 ```python
 match either_value:
@@ -64,1358 +87,790 @@ match either_value:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Generic,
-    Tuple,
-    TypeAlias,
-    TypeVar,
+    Never,
+    assert_never,
     cast,
+    final,
     overload,
 )
+
+from typing_extensions import TypeVar
 
 from pymoliath.util import curry
 
 if TYPE_CHECKING:
     from pymoliath.maybe import Maybe
 
-TypeLeft = TypeVar("TypeLeft")
-TypeRight = TypeVar("TypeRight")
-TypeResult = TypeVar("TypeResult")
-TypePure = TypeVar("TypePure")
+# Old-style TypeVars are invariant by default, which is what Either needs anyway
+# (L and R also appear in parameter positions, e.g. unwrap_or and bind).
+L = TypeVar("L")
+R = TypeVar("R")
+U = TypeVar("U")
+F = TypeVar("F")
+
+# L with a default of Never (PEP 696): a bare `Right(10)` is a `Right[int, Never]`, so - like in
+# Rust - it needs an annotation before it can be combined with fallible code.
+L_Never = TypeVar("L_Never", default=Never)
 
 
-class Right(Generic[TypeRight]):
-    """
-    The Right side of the Either Monad.
+class _EitherImpl(Generic[L, R]):
+    """Shared implementation of the Either Monad - `Left` and `Right` are its only subclasses."""
 
-    The Either Monad represents values with two possibilities: either Left[A] or Right[B].
-    The Right instance represents the successful path of the computation.
-    """
+    __slots__ = ()
 
-    __slots__ = ("_right_value",)
-    __match_args__ = ("_right_value",)
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        # Runtime "sealed": only Left and Right (defined in this module) may subclass.
+        super().__init_subclass__(**kwargs)
+        if cls.__module__ != __name__:
+            raise TypeError("Either cannot be subclassed; use Left or Right")
 
-    def __init__(self, value: TypeRight) -> None:
-        """
-        Initialize the Right Monad.
+    def _as_either(self) -> Either[L, R]:
+        # Safe: Left and Right are the only subclasses (see __init_subclass__).
+        return cast("Either[L, R]", self)
 
-        Parameters
-        ----------
-        value: TypeRight
-            The value to be stored in the Right container.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> print(val)
-        Right(10)
-        """
-        self._right_value = value
-
-    def map(
-        self, function: Callable[[TypeRight], TypeResult]
-    ) -> Either[Any, TypeResult]:
-        """
-        Apply a function to the wrapped value.
-
-        If the value is Right, the function is applied to the internal value.
-        If the value is Left, the Left container is returned unchanged.
+    def map(self, function: Callable[[R], U]) -> Either[L, U]:
+        """Calls function on a wrapped Right value, otherwise leaving the Left value untouched.
 
         Parameters
         ----------
-        function: Callable[[TypeRight], TypeResult]
-            A function that accepts a value of type TypeRight and returns a TypeResult.
+        function: Callable[[R], U]
+            Function which takes a value of R and returns a value of type U.
 
         Returns
         -------
-        Either[TypeLeft, TypeResult]
-            A new Either Monad containing the result of the function application.
+        either: Either[L, U]
+            Returns a Right with the function result or otherwise the Left.
 
         Examples
-        -------
-        >>> val = Right(10)
+        --------
+        >>> val: Either[str, int] = Right(10)
         >>> val.map(lambda x: x + 5)
         Right(15)
-        """
-        return Right(function(self._right_value))
-
-    def map_left(
-        self, function: Callable[[Any], TypeResult]
-    ) -> Either[TypeResult, TypeRight]:
-        """
-        Apply a function to the Left value.
-
-        Since this instance is Right, the operation is ignored and the
-        Right instance is returned unchanged.
-
-        Parameters
-        ----------
-        function: Callable[[Any], TypeResult]
-            A function that accepts a TypeLeft value and returns a TypeResult.
-
-        Returns
-        -------
-        Either[TypeResult, TypeRight]
-            The current Right instance.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.map_left(lambda x: x + 1)
-        Right(10)
-        """
-        return self
-
-    def bind(
-        self, function: Callable[[TypeRight], Either[Any, TypeResult]]
-    ) -> Either[Any, TypeResult]:
-        """
-        Chain a computation that produces a new Either Monad.
-
-        If this is Right, the provided function is executed with the internal
-        value, and the resulting Either Monad is returned.
-
-        Parameters
-        ----------
-        function: Callable[[TypeRight], Either[TypeLeft, TypeResult]]
-            A function that takes a value of type TypeRight and returns
-            an Either Monad.
-
-        Returns
-        -------
-        Either[TypeLeft, TypeResult]
-            The result of the bound function.
-
-        Examples
-        -------
-        >>> def get_next(x):
-        ...     return Right(x + 1)
-        >>> val = Right(10)
-        >>> val.bind(get_next)
-        Right(11)
-        """
-        return function(self._right_value)
-
-    def bind_left(
-        self, function: Callable[[Any], Either[TypeResult, TypeRight]]
-    ) -> Either[TypeResult, TypeRight]:
-        """
-        Chain a computation that produces a new Either Monad on the Left side.
-
-        Since this is Right, the operation is ignored and the
-        Right instance is returned unchanged.
-
-        Parameters
-        ----------
-        function: Callable[[Any], Either[TypeResult, TypeRight]]
-            A function that takes a value of type TypeLeft and returns
-            an Either Monad.
-
-        Returns
-        -------
-        Either[TypeResult, TypeRight]
-            The current Right instance.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.bind_left(lambda x: Left("Error"))
-        Right(10)
-        """
-        return self
-
-    def apply(
-        self, applicative: Either[Any, Callable[..., TypeResult]]
-    ) -> Either[Any, TypeResult]:
-        """
-        Apply an applicative functor containing a function to the Right value.
-
-        Parameters
-        ----------
-        applicative: Either[TypeLeft, Callable[..., TypeResult]]
-            An Either Monad containing a function to be applied.
-
-        Returns
-        -------
-        Either[Any, TypeResult]
-            The result of applying the function contained in the applicative.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> func_monad = Right(lambda x: x * 2)
-        >>> val.apply(func_monad)
-        Right(20)
-        """
-
-        def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> Either[Any, TypeResult]:
-            """Maps the applicative's function, curried, over this Right value."""
-            return self.map(curry(applicative_function))
-
-        return applicative.bind(binder)
-
-    def apply2(
-        self: Right[Callable[..., TypeResult]],
-        applicative_value: Either[Any, Any],
-    ) -> Either[Any, TypeResult]:
-        """
-        Apply a function stored in this Right to a value inside another Either Monad.
-
-        Parameters
-        ----------
-        applicative_value: Either[TypeLeft, TypePure]
-            The Either Monad containing the value to be processed.
-
-        Returns
-        -------
-        Either[Any, TypeResult]
-            The result of applying the function to the inner value.
-
-        Examples
-        -------
-        >>> func = lambda x: x + 1
-        >>> val = Right(func)
-        >>> other_val = Right(10)
-        >>> val.apply2(other_val)
-        Right(11)
-        """
-
-        def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> Either[Any, TypeResult]:
-            """Maps the applicative's function, curried, over the applicative_value."""
-            return applicative_value.map(curry(applicative_function))
-
-        return self.bind(binder)
-
-    def is_right_and(self, function: Callable[[TypeRight], bool]) -> bool:
-        """
-        Check if the monad is Right and satisfies a predicate.
-
-        Parameters
-        ----------
-        function: Callable[[TypeRight], bool]
-            A predicate function applied to the contained Right value.
-
-        Returns
-        -------
-        bool
-            True if the monad is Right AND the predicate returns True.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.is_right_and(lambda x: x > 5)
-        True
-        """
-        return function(self._right_value)
-
-    def is_left_and(self, function: Callable[[Any], bool]) -> bool:
-        """
-        Check if the monad is Left and satisfies a predicate.
-
-        Since this is a Right instance, this always returns False.
-
-        Parameters
-        ----------
-        function: Callable[[TypeLeft], bool]
-            A predicate function for the Left value.
-
-        Returns
-        -------
-        bool
-            Always False.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.is_left_and(lambda x: x < 0)
-        False
-        """
-        return False
-
-    def map_or(
-        self, default_value: TypeResult, function: Callable[[TypeRight], TypeResult]
-    ) -> TypeResult:
-        """
-        Apply a function to the Right value, or return a default if Left.
-
-        Because this is a Right instance, the function is applied to the
-        internal value.
-
-        Parameters
-        ----------
-        default_value: TypeResult
-            The value to return if the monad were Left.
-        function: Callable[[TypeRight], TypeResult]
-            The function to apply to the Right value.
-
-        Returns
-        -------
-        TypeResult
-            The result of applying the function.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.map_or(0, lambda x: x + 5)
-        15
-        """
-        return function(self._right_value)
-
-    def and_(self, other: Either[Any, TypeResult]) -> Either[Any, TypeResult]:
-        """
-        Chain with another Either Monad.
-
-        Returns the other Monad if this is Right.
-
-        Parameters
-        ----------
-        other: Either[TypeLeft, TypeResult]
-            The other Either Monad to return.
-
-        Returns
-        -------
-        Either[Any, TypeResult]
-            The 'other' Monad.
-
-        Examples
-        -------
-        >>> val1 = Right(1)
-        >>> val2 = Right(2)
-        >>> val1.and_(val2)
-        Right(2)
-        """
-        return other
-
-    def or_(self, other: Either[Any, TypeRight]) -> Either[Any, TypeRight]:
-        """
-        Fallback to another Either Monad.
-
-        Returns this instance if it is Right.
-
-        Parameters
-        ----------
-        other: Either[TypeLeft, TypeRight]
-            The fallback Either Monad.
-
-        Returns
-        -------
-        Either[Any, TypeRight]
-            The current Right instance.
-
-        Examples
-        -------
-        >>> val1 = Right(1)
-        >>> val2 = Right(2)
-        >>> val1.or_(val2)
-        Right(1)
-        """
-        return self
-
-    def zip(
-        self, other: Either[Any, TypePure]
-    ) -> Either[Any, Tuple[TypeRight, TypePure]]:
-        """
-        Combine this Right value with another Either Monad into a tuple.
-
-        Parameters
-        ----------
-        other: Either[TypeLeft, TypePure]
-            The other Either Monad to zip with.
-
-        Returns
-        -------
-        Either[Any, Tuple[TypeRight, TypePure]]
-            A Right containing a tuple of both values.
-
-        Examples
-        -------
-        >>> val1 = Right(1)
-        >>> val2 = Right(2)
-        >>> val1.zip(val2)
-        Right((1, 2))
-        """
-        return other.map(lambda o: (self._right_value, o))
-
-    @overload
-    def flatten(self: Right[Right[TypeResult]]) -> Either[Any, TypeResult]: ...
-
-    @overload
-    def flatten(self: Right[Left[TypeLeft]]) -> Either[TypeLeft, Any]: ...
-
-    def flatten(self) -> Either[Any, Any]:
-        """
-        Flatten a nested Either Monad by removing one layer of wrapping.
-
-        Returns
-        -------
-        Either[Any, Any]
-            The inner value of the nested Monad.
-
-        Examples
-        -------
-        >>> val = Right(Right(10))
-        >>> val.flatten()
-        Right(10)
-        """
-        return cast(Either[Any, Any], self._right_value)
-
-    def right(self) -> Maybe[TypeRight]:
-        """
-        Convert the Right value to a Maybe Monad.
-
-        Returns
-        -------
-        Maybe[TypeRight]
-            A Just containing the Right value.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.right()
-        Just(10)
-        """
-        from pymoliath.maybe import Just
-
-        return Just(self._right_value)
-
-    def left(self) -> Maybe[Any]:
-        """
-        Convert the Left value to a Maybe Monad.
-
-        Since this is Right, it returns Nothing.
-
-        Returns
-        -------
-        Maybe[Any]
-            Nothing.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.left()
-        Nothing()
-        """
-        from pymoliath.maybe import Nothing
-
-        return Nothing()
-
-    def unwrap(self) -> TypeRight:
-        """
-        Extract the value from the Right Monad.
-
-        Returns
-        -------
-        TypeRight
-            The wrapped value.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.unwrap()
-        10
-        """
-        return self._right_value
-
-    def unwrap_or(self, default_value: TypeRight) -> TypeRight:
-        """
-        Extract the value or return a default if Left.
-
-        Returns
-        -------
-        TypeRight
-            The internal Right value.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.unwrap_or(5)
-        10
-        """
-        return self._right_value
-
-    def unwrap_or_else(self, left_function: Callable[[Any], TypeRight]) -> TypeRight:
-        """
-        Extract the value or apply a function if Left.
-
-        Returns
-        -------
-        TypeRight
-            The internal Right value.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.unwrap_or_else(lambda _: 0)
-        10
-        """
-        return self._right_value
-
-    def unwrap_left_or(self, default_value: TypeLeft) -> TypeLeft:
-        """
-        Extract the Left value or return a default.
-
-        Since this is Right, the default value is returned.
-
-        Parameters
-        ----------
-        default_value: TypeLeft
-            The default value of type TypeLeft.
-
-        Returns
-        -------
-        TypeLeft
-            The default value.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.unwrap_left_or("Default")
-        'Default'
-        """
-        return default_value
-
-    def inspect(self, function: Callable[[TypeRight], None]) -> Either[Any, TypeRight]:
-        """
-        Perform a side-effecting action on the Right value.
-
-        Parameters
-        ----------
-        function: Callable[[TypeRight], None]
-            The inspection function to run.
-
-        Returns
-        -------
-        Either[Any, TypeRight]
-            The current Right instance.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.inspect(lambda x: print(f"Value: {x}"))
-        Value: 10
-        Right(10)
-        """
-        function(self._right_value)
-        return self
-
-    def inspect_left(self, function: Callable[[Any], None]) -> Either[Any, TypeRight]:
-        """
-        Perform a side-effecting action on the Left value.
-
-        Since this is Right, the function is not executed.
-
-        Parameters
-        ----------
-        function: Callable[[Any], None]
-            The inspection function for the Left value.
-
-        Returns
-        -------
-        Either[Any, TypeRight]
-            The current Right instance.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.inspect_left(lambda x: print(f"Left: {x}"))
-        Right(10)
-        """
-        return self
-
-    def match(
-        self,
-        left_function: Callable[[Any], TypeResult],
-        right_function: Callable[[TypeRight], TypeResult],
-    ) -> TypeResult:
-        """
-        Handle the value using Railroad Oriented Programming.
-
-        Parameters
-        ----------
-        left_function: Callable[[Any], TypeResult]
-            Callback for the Left case.
-        right_function: Callable[[TypeRight], TypeResult]
-            Callback for the Right case.
-
-        Returns
-        -------
-        TypeResult
-            The result of the right_function.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.match(lambda x: "Error", lambda x: f"Success: {x}")
-        'Success: 10'
-        """
-        return right_function(self._right_value)
-
-    def is_left(self) -> bool:
-        """
-        Check if the monad is a Left type.
-
-        Returns
-        -------
-        bool
-            False.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.is_left()
-        False
-        """
-        return False
-
-    def is_right(self) -> bool:
-        """
-        Check if the monad is a Right type.
-
-        Returns
-        -------
-        bool
-            True.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> val.is_right()
-        True
-        """
-        return True
-
-    def __str__(self) -> str:
-        """
-        Returns the string representation of the Right Monad.
-
-        Returns
-        -------
-        str
-            The string representation.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> str(val)
-        'Right(10)'
-        """
-        return f"Right({self._right_value})"
-
-    def __eq__(self, __o: object) -> bool:
-        """
-        Compare this Right Monad with another object.
-
-        Returns
-        -------
-        bool
-            True if the other object is a Right Monad and has the same string representation.
-
-        Examples
-        -------
-        >>> val1 = Right(10)
-        >>> val2 = Right(10)
-        >>> val1 == val2
-        True
-        """
-        return isinstance(__o, Right) and str(self) == str(__o)
-
-    def __repr__(self) -> str:
-        """
-        Returns the official string representation of the Right Monad.
-
-        Returns
-        -------
-        str
-            The official string representation.
-
-        Examples
-        -------
-        >>> val = Right(10)
-        >>> repr(val)
-        'Right(10)'
-        """
-        return str(self)
-
-
-class Left(Generic[TypeLeft]):
-    """
-    The Left side of the Either Monad.
-
-    The Either Monad represents values with two possibilities: either Left[A] or Right[B].
-    The Left instance represents the error or alternative path of the computation.
-    """
-
-    __slots__ = ("_left_value",)
-    __match_args__ = ("_left_value",)
-
-    def __init__(self, value: TypeLeft):
-        """
-        Initialize the Left Monad.
-
-        Parameters
-        ----------
-        value: TypeLeft
-            The value to be stored in the Left container.
-
-        Examples
-        -------
-        Create a Left instance with an error message.
-        >>> val = Left("Error Message")
-        >>> print(val)
-        Left(Error Message)
-        """
-        self._left_value = value
-
-    def map(
-        self, function: Callable[[Any], TypeResult]
-    ) -> Either[TypeLeft, TypeResult]:
-        """
-        Apply a function to the Right value.
-
-        Since this is Left, the function is ignored and the
-        Left instance is returned unchanged.
-
-        Parameters
-        ----------
-        function: Callable[[Any], TypeResult]
-            Function to be applied to the Right value.
-
-        Returns
-        -------
-        Either[TypeLeft, TypeResult]
-            The current Left instance.
-
-        Examples
-        -------
-        Attempting to map over a Left instance returns the Left instance unchanged.
-        >>> val = Left("Error")
-        >>> val.map(lambda x: x + 1)
+        >>> err: Either[str, int] = Left("Error")
+        >>> err.map(lambda x: x + 5)
         Left(Error)
         """
-        return self
+        match e := self._as_either():
+            case Left(value):
+                return Left(value)
+            case Right(value):
+                return Right(function(value))
+            case _:
+                assert_never(e)
 
-    def map_left(
-        self, function: Callable[[TypeLeft], TypeResult]
-    ) -> Either[TypeResult, Any]:
-        """
-        Apply a function to the wrapped Left value.
+    def map_left(self, function: Callable[[L], F]) -> Either[F, R]:
+        """Calls function on a wrapped Left value, otherwise leaving the Right value untouched.
 
         Parameters
         ----------
-        function: Callable[[TypeLeft], TypeResult]
-            Function which takes a value of TypeLeft and returns a TypeResult.
+        function: Callable[[L], F]
+            Function which takes a value of L and returns a value of F.
 
         Returns
         -------
-        Either[TypeResult, Any]
-            A new Left instance containing the result of the function.
+        either: Either[F, R]
+            Returns a Left with the function result or otherwise the Right.
 
         Examples
-        -------
-        Transform the inner value of a Left instance.
-        >>> val = Left("Error")
+        --------
+        >>> val: Either[str, int] = Right(10)
         >>> val.map_left(lambda x: x.upper())
+        Right(10)
+        >>> err: Either[str, int] = Left("Error")
+        >>> err.map_left(lambda x: x.upper())
         Left(ERROR)
         """
-        return Left(function(self._left_value))
+        match e := self._as_either():
+            case Left(value):
+                return Left(function(value))
+            case Right(value):
+                return Right(value)
+            case _:
+                assert_never(e)
 
-    def bind(
-        self, function: Callable[[Any], Either[TypeLeft, TypeResult]]
-    ) -> Either[TypeLeft, TypeResult]:
-        """
-        Chain a computation that produces a new Either Monad.
-
-        Since this is Left, the operation is ignored and the
-        Left instance is returned unchanged.
-
-        Parameters
-        ----------
-        function: Callable[[Any], Either[TypeLeft, TypeResult]]
-            Function which would be called with the Right value.
-
-        Returns
-        -------
-        Either[TypeLeft, TypeResult]
-            The current Left instance.
-
-        Examples
-        -------
-        Binding a function to a Left instance returns the original Left instance.
-        >>> val = Left("Error")
-        >>> val.bind(lambda _: Left("New Error"))
-        Left(Error)
-        """
-        return self
-
-    def bind_left(
-        self, function: Callable[[TypeLeft], Either[TypeResult, Any]]
-    ) -> Either[TypeResult, Any]:
-        """
-        Chain a computation that produces a new Either Monad on the Left side.
+    def bind(self, function: Callable[[R], Either[L, U]]) -> Either[L, U]:
+        """Calls function if the Either Monad is Right, otherwise returns the Left.
 
         Parameters
         ----------
-        function: Callable[[TypeLeft], Either[TypeResult, Any]]
-            Function which takes a value of TypeLeft and returns a new Either Monad.
+        function: Callable[[R], Either[L, U]]
+            Function which takes a value of R and returns a new Either Monad.
 
         Returns
         -------
-        Either[TypeResult, Any]
-            The result of the function call.
+        either: Either[L, U]
+            Returns the function result if Right, otherwise the Left.
 
         Examples
+        --------
+        >>> def get_next(x: int) -> Either[str, int]:
+        ...     return Right(x + 1) if x < 10 else Left("too big")
+        >>> val: Either[str, int] = Right(5)
+        >>> val.bind(get_next)
+        Right(6)
+        >>> big: Either[str, int] = Right(10)
+        >>> big.bind(get_next)
+        Left(too big)
+        """
+        match e := self._as_either():
+            case Left(value):
+                return Left(value)
+            case Right(value):
+                return function(value)
+            case _:
+                assert_never(e)
+
+    def bind_left(self, function: Callable[[L], Either[F, R]]) -> Either[F, R]:
+        """Calls function if the Either Monad is Left, otherwise returns the Right.
+
+        Parameters
+        ----------
+        function: Callable[[L], Either[F, R]]
+            Function which takes a value of L and returns a new Either Monad.
+
+        Returns
         -------
-        Chain a computation specifically on the Left side of the Monad.
-        >>> val = Left("Error")
+        either: Either[F, R]
+            Returns the function result if Left, otherwise the Right.
+
+        Examples
+        --------
+        >>> val: Either[str, int] = Right(10)
         >>> val.bind_left(lambda err: Left(f"{err} bind"))
+        Right(10)
+        >>> err: Either[str, int] = Left("Error")
+        >>> err.bind_left(lambda err: Left(f"{err} bind"))
         Left(Error bind)
         """
-        return function(self._left_value)
+        match e := self._as_either():
+            case Left(value):
+                return function(value)
+            case Right(value):
+                return Right(value)
+            case _:
+                assert_never(e)
 
-    def apply(
-        self, applicative: Either[TypeLeft, Callable[..., TypeResult]]
-    ) -> Either[TypeLeft, TypeResult]:
-        """
-        Apply an applicative functor for the Right case.
+    def apply(self, applicative: Either[F, Callable[..., U]]) -> Either[L | F, U]:
+        """Applies the passed applicative wrapping a function if the Either Monad is Right,
+        otherwise returns the (first) Left. Functions of several arguments are curried.
 
-        Since this is Left, the operation is ignored and the
-        Left instance is returned unchanged.
+        Unlike `bind`, the Left types of both sides may differ (the result carries either), so
+        bare applicatives such as `Right(lambda x: x)` combine without annotations.
 
         Parameters
         ----------
-        applicative: Either[TypeLeft, Callable[..., TypeResult]]
-            Applicative Either Monad containing a function.
+        applicative: Either[F, Callable[[R], U]]
+            Applicative Either Monad which contains a function.
 
         Returns
         -------
-        Either[TypeLeft, TypeResult]
-            The current Left instance.
+        either: Either[L | F, U]
+            Returns an Either Monad from the applied function if Right, otherwise a Left.
 
         Examples
-        -------
-        Applying an applicative to a Left instance returns the Left instance.
-        >>> val = Left("Error")
-        >>> val.apply(Right(lambda x: x))
-        Left(Error)
+        --------
+        >>> val: Either[str, int] = Right(10)
+        >>> func: Either[str, Callable[[int], int]] = Right(lambda x: x * 2)
+        >>> val.apply(func)
+        Right(20)
         """
-        return self
+        applicative_: Either[L | F, Callable[..., U]] = cast(Any, applicative)
+        self_: Either[L | F, R] = cast(Any, self)
+        return applicative_.bind(lambda function: self_.map(curry(function)))
 
-    def apply2(self, applicative_value: Either[TypeLeft, Any]) -> Either[TypeLeft, Any]:
-        """
-        Apply a value from another Either Monad when this is Right.
-
-        Since this is Left, the operation is ignored and the
-        Left instance is returned unchanged.
+    def apply2(
+        self: _EitherImpl[L, Callable[..., U]], applicative_value: Either[F, Any]
+    ) -> Either[L | F, U]:
+        """Applies the function wrapped in this Either Monad to the passed Either Monad wrapping a
+        value if both are Right, otherwise returns the (first) Left. Functions of several arguments
+        are curried. As with `apply`, the Left types of both sides may differ.
 
         Parameters
         ----------
-        applicative_value: Either[TypeLeft, Any]
+        applicative_value: Either[F, Any]
             Either Monad which contains a value.
 
         Returns
         -------
-        Either[TypeLeft, Any]
-            The current Left instance.
+        either: Either[L | F, U]
+            Returns an Either Monad from the applied function if Right, otherwise a Left.
 
         Examples
-        -------
-        Applying a value from another Monad to a Left instance returns the Left instance.
-        >>> val = Left("Error")
-        >>> val.apply2(Right(10))
-        Left(Error)
+        --------
+        >>> func: Either[str, Callable[[int], int]] = Right(lambda x: x + 1)
+        >>> val: Either[str, int] = Right(10)
+        >>> func.apply2(val)
+        Right(11)
         """
-        return self
+        self_: Either[L | F, Callable[..., U]] = cast(Any, self)
+        value_: Either[L | F, Any] = cast(Any, applicative_value)
+        return self_.bind(lambda function: value_.map(curry(function)))
 
-    def is_right_and(self, function: Callable[[Any], bool]) -> bool:
-        """
-        Check if the monad is Right and satisfies a predicate.
-
-        Since this is Left, this always returns False.
+    def is_right_and(self, function: Callable[[R], bool]) -> bool:
+        """Returns True if the Either Monad is Right and the predicate returns True for the value.
 
         Parameters
         ----------
-        function: Callable[[Any], bool]
-            Predicate function for the Right value.
+        function: Callable[[R], bool]
+            Predicate function applied to the Right value.
 
         Returns
         -------
-        bool
-            False.
+        result: bool
+            Returns the predicate result if Right, otherwise False.
 
         Examples
-        -------
-        Check if a Left instance satisfies a Right-specific predicate.
-        >>> val = Left("Error")
-        >>> val.is_right_and(lambda x: x == "Error")
-        False
+        --------
+        >>> val: Either[str, int] = Right(10)
+        >>> val.is_right_and(lambda x: x > 5)
+        True
         """
-        return False
+        match e := self._as_either():
+            case Left():
+                return False
+            case Right(value):
+                return function(value)
+            case _:
+                assert_never(e)
 
-    def is_left_and(self, function: Callable[[TypeLeft], bool]) -> bool:
-        """
-        Check if the monad is Left and satisfies a predicate.
+    def is_left_and(self, function: Callable[[L], bool]) -> bool:
+        """Returns True if the Either Monad is Left and the predicate returns True for the value.
 
         Parameters
         ----------
-        function: Callable[[TypeLeft], bool]
+        function: Callable[[L], bool]
             Predicate function applied to the Left value.
 
         Returns
         -------
-        bool
-            The result of the predicate.
+        result: bool
+            Returns the predicate result if Left, otherwise False.
 
         Examples
-        -------
-        Check if the Left instance satisfies the provided predicate.
-        >>> val = Left("Error")
+        --------
+        >>> val: Either[str, int] = Right(10)
         >>> val.is_left_and(lambda x: x == "Error")
-        True
+        False
         """
-        return function(self._left_value)
+        match e := self._as_either():
+            case Left(value):
+                return function(value)
+            case Right():
+                return False
+            case _:
+                assert_never(e)
 
-    def map_or(
-        self, default_value: TypeResult, function: Callable[[Any], TypeResult]
-    ) -> TypeResult:
-        """
-        Apply a function to the Right value, or return a default if Left.
-
-        Since this is Left, the default value is returned.
+    def map_or(self, default_value: U, function: Callable[[R], U]) -> U:
+        """Applies the function to the Right value, or returns the default value if Left.
 
         Parameters
         ----------
-        default_value: TypeResult
-            Default value to be returned.
-        function: Callable[[Any], TypeResult]
+        default_value: U
+            Default value to be returned if the Either Monad is Left.
+        function: Callable[[R], U]
             Function applied to the Right value.
 
         Returns
         -------
-        TypeResult
-            The default value.
+        result: U
+            Returns the function result or the default value.
 
         Examples
-        -------
-        Return a default value because the Monad is in a Left state.
-        >>> val = Left("Error")
-        >>> val.map_or("Fallback", lambda x: x)
-        'Fallback'
+        --------
+        >>> val: Either[str, int] = Right(10)
+        >>> val.map_or(0, lambda x: x + 5)
+        15
         """
-        return default_value
+        match e := self._as_either():
+            case Left():
+                return default_value
+            case Right(value):
+                return function(value)
+            case _:
+                assert_never(e)
 
-    def and_(self, other: Either[TypeLeft, Any]) -> Either[TypeLeft, Any]:
-        """
-        Chain with another Either Monad.
-
-        Since this is Left, this returns the current Left instance.
+    def and_(self, other: Either[L, U]) -> Either[L, U]:
+        """Returns `other` if the Either Monad is Right, otherwise the Left.
 
         Parameters
         ----------
-        other: Either[TypeLeft, Any]
-            The other Either Monad.
+        other: Either[L, U]
+            Either Monad to be returned if this Either Monad is Right.
 
         Returns
         -------
-        Either[TypeLeft, Any]
-            The current Left instance.
+        either: Either[L, U]
+            Returns `other` or the Left.
 
         Examples
-        -------
-        Chaining two Left instances returns the first Left instance.
-        >>> val1 = Left("Error")
-        >>> val2 = Left("Other Error")
+        --------
+        >>> val1: Either[str, int] = Right(1)
+        >>> val2: Either[str, int] = Right(2)
         >>> val1.and_(val2)
-        Left(Error)
+        Right(2)
         """
-        return self
+        match e := self._as_either():
+            case Left(value):
+                return Left(value)
+            case Right():
+                return other
+            case _:
+                assert_never(e)
 
-    def or_(self, other: Either[Any, TypeRight]) -> Either[Any, TypeRight]:
-        """
-        Fallback to another Either Monad.
-
-        Since this is Left, the other Monad is returned.
+    def or_(self, other: Either[F, R]) -> Either[F, R]:
+        """Returns this Either Monad if it is Right, otherwise `other`.
 
         Parameters
         ----------
-        other: Either[Any, TypeRight]
-            The fallback Either Monad.
+        other: Either[F, R]
+            Either Monad to be returned if this Either Monad is Left.
 
         Returns
         -------
-        Either[Any, TypeRight]
-            The other Monad.
+        either: Either[F, R]
+            Returns the Right or `other`.
 
         Examples
-        -------
-        Provide a fallback value when the current Monad is Left.
-        >>> val1 = Left("Error")
-        >>> val2 = Right(10)
+        --------
+        >>> val1: Either[str, int] = Right(1)
+        >>> val2: Either[str, int] = Right(2)
         >>> val1.or_(val2)
+        Right(1)
+        """
+        match e := self._as_either():
+            case Left():
+                return other
+            case Right(value):
+                return Right(value)
+            case _:
+                assert_never(e)
+
+    def zip(self, other: Either[L, U]) -> Either[L, tuple[R, U]]:
+        """Combines this Either Monad with another into an Either Monad of a tuple, or the first
+        Left.
+
+        Parameters
+        ----------
+        other: Either[L, U]
+            Either Monad to be zipped with this Either Monad.
+
+        Returns
+        -------
+        either: Either[L, tuple[R, U]]
+            Returns Right of a tuple of both values, or Left.
+
+        Examples
+        --------
+        >>> val1: Either[str, int] = Right(1)
+        >>> val2: Either[str, int] = Right(2)
+        >>> val1.zip(val2)
+        Right((1, 2))
+        """
+        return self.bind(
+            lambda value: other.map(lambda other_value: (value, other_value))
+        )
+
+    @overload
+    def flatten(self: _EitherImpl[L, Right[U, F]]) -> Either[L | F, U]: ...
+
+    @overload
+    def flatten(self: _EitherImpl[L, Left[F, U]]) -> Either[L | F, U]: ...
+
+    @overload
+    def flatten(self: _EitherImpl[L, Either[F, U]]) -> Either[L | F, U]: ...
+
+    @overload
+    def flatten(self: Left[L, Any]) -> Either[L, Never]: ...
+
+    def flatten(self: _EitherImpl[Any, Any]) -> Either[Any, Any]:
+        """Flattens a nested Either Monad by one level.
+
+        Returns
+        -------
+        either: Either[L, U]
+            Returns the nested Either Monad if Right, otherwise the Left.
+
+        Examples
+        --------
+        >>> Right(Right(10)).flatten()
         Right(10)
         """
-        return other
+        match e := self._as_either():
+            case Left(value):
+                return Left(value)
+            case Right(value):
+                return cast("Either[Any, Any]", value)
+            case _:
+                assert_never(e)
 
-    def zip(self, other: Either[Any, Any]) -> Either[TypeLeft, Any]:
-        """
-        Combine this Left with another Either Monad.
-
-        Since this is Left, the current Left instance is returned.
-
-        Parameters
-        ----------
-        other: Either[Any, Any]
-            The other Either Monad to zip with.
+    def right(self) -> Maybe[R]:
+        """Converts the Either Monad into a Maybe Monad, discarding any Left value.
 
         Returns
         -------
-        Either[TypeLeft, Any]
-            The current Left instance.
+        maybe: Maybe[R]
+            Returns Just with the Right value, or Nothing if Left.
 
         Examples
-        -------
-        Zipping a Left instance with another monad returns the Left instance.
-        >>> val1 = Left("Error")
-        >>> val2 = Right(10)
-        >>> val1.zip(val2)
-        Left(Error)
-        """
-        return self
-
-    def flatten(self) -> Either[TypeLeft, Any]:
-        """
-        Flatten a nested Either Monad.
-
-        Since this is Left, the Left instance is returned unchanged - flatten only ever unwraps
-        a nested Either carried on the Right side.
-
-        Returns
-        -------
-        Either[TypeLeft, Any]
-            The current Left instance.
-
-        Examples
-        -------
-        Flattening a Left instance leaves it unchanged, whatever it wraps.
-        >>> val = Left("Error")
-        >>> val.flatten()
-        Left(Error)
-        """
-        return self
-
-    def right(self) -> Maybe[Any]:
-        """
-        Convert the Right value to a Maybe Monad.
-
-        Since this is Left, it returns Nothing.
-
-        Returns
-        -------
-        Maybe[Any]
-            Nothing.
-
-        Examples
-        -------
-        Convert a Left value to a Maybe type, resulting in Nothing.
-        >>> val = Left("Error")
+        --------
+        >>> val: Either[str, int] = Right(10)
         >>> val.right()
+        Just(10)
+        """
+        from pymoliath.maybe import Just, Nothing
+
+        match e := self._as_either():
+            case Left():
+                return Nothing()
+            case Right(value):
+                return Just(value)
+            case _:
+                assert_never(e)
+
+    def left(self) -> Maybe[L]:
+        """Converts the Either Monad into a Maybe Monad of the Left value, discarding any Right
+        value.
+
+        Returns
+        -------
+        maybe: Maybe[L]
+            Returns Just with the Left value, or Nothing if Right.
+
+        Examples
+        --------
+        >>> val: Either[str, int] = Right(10)
+        >>> val.left()
         Nothing()
         """
-        from pymoliath.maybe import Nothing
+        from pymoliath.maybe import Just, Nothing
 
-        return Nothing()
+        match e := self._as_either():
+            case Left(value):
+                return Just(value)
+            case Right():
+                return Nothing()
+            case _:
+                assert_never(e)
 
-    def left(self) -> Maybe[TypeLeft]:
-        """
-        Convert the Left value to a Maybe Monad.
+    def unwrap(self) -> R:
+        """Returns the Right value, or otherwise raises an Exception with the Left value.
 
         Returns
         -------
-        Maybe[TypeLeft]
-            A Just containing the Left value.
-
-        Examples
-        -------
-        Convert a Left value to a Maybe type, resulting in a Just value.
-        >>> val = Left("Error")
-        >>> val.left()
-        Just(Error)
-        """
-        from pymoliath.maybe import Just
-
-        return Just(self._left_value)
-
-    def unwrap(self) -> Any:
-        """
-        Extract the value from the Left Monad.
+        result: R
+            Returns the Right value.
 
         Raises
-        -------
+        ------
         Exception
-            An Exception containing the Left value.
+            If the Either Monad is Left.
 
         Examples
-        -------
-        Extract the value from a Left instance, which raises an Exception.
-        >>> val = Left("Error")
+        --------
+        >>> val: Either[str, int] = Right(10)
         >>> val.unwrap()
-        Traceback (most recent call last):
-            ...
-        Exception: Error
-        """
-        raise Exception(self._left_value)
-
-    def unwrap_or(self, default_value: TypeRight) -> TypeRight:
-        """
-        Extract the value or return a default if Left.
-
-        Since this is Left, the default value is returned.
-
-        Parameters
-        ----------
-        default_value: TypeRight
-            Default value of type TypeRight.
-
-        Returns
-        -------
-        TypeRight
-            The default value.
-
-        Examples
-        -------
-        Extract the default value because the Monad is in a Left state.
-        >>> val = Left("Error")
-        >>> val.unwrap_or(10)
         10
         """
-        return default_value
+        match e := self._as_either():
+            case Left(value):
+                raise Exception(value)
+            case Right(value):
+                return value
+            case _:
+                assert_never(e)
 
-    def unwrap_or_else(
-        self, left_function: Callable[[TypeLeft], TypeResult]
-    ) -> TypeResult:
-        """
-        Extract the value or apply a function if Left.
-
-        Since this is Left, the left_function is called with the Left value.
-
-        Parameters
-        ----------
-        left_function: Callable[[TypeLeft], TypeResult]
-            Function called with the Left value.
-
-        Returns
-        -------
-        TypeResult
-            The result of the function call.
-
-        Examples
-        -------
-        Execute a fallback function because the Monad is in a Left state.
-        >>> val = Left("Error")
-        >>> val.unwrap_or_else(lambda x: "Handled Error")
-        'Handled Error'
-        """
-        return left_function(self._left_value)
-
-    def unwrap_left_or(self, default_value: TypeLeft) -> TypeLeft:
-        """
-        Extract the Left value or return a default.
-
-        Since this is Left, the internal Left value is returned.
+    def unwrap_or(self, default_value: R) -> R:
+        """Returns the Right value, or otherwise a provided default value of the same type.
 
         Parameters
         ----------
-        default_value: TypeLeft
-            Default value of type TypeLeft.
+        default_value: R
+            Default value of R
 
         Returns
         -------
-        TypeLeft
-            The internal Left value.
+        result: R
+            Returns the Right value or the default value.
 
         Examples
+        --------
+        >>> val: Either[str, int] = Right(10)
+        >>> val.unwrap_or(5)
+        10
+        """
+        match e := self._as_either():
+            case Left():
+                return default_value
+            case Right(value):
+                return value
+            case _:
+                assert_never(e)
+
+    def unwrap_or_else(self, left_function: Callable[[L], R]) -> R:
+        """Returns the Right value, or otherwise calls the left_function with the Left value.
+
+        Parameters
+        ----------
+        left_function: Callable[[L], R]
+            Function which will be called if the Either Monad is Left.
+
+        Returns
         -------
-        Extract the internal value of the Left instance.
-        >>> val = Left("Error")
+        result: R
+            Returns the Right value or the left_function result.
+
+        Examples
+        --------
+        >>> val: Either[str, int] = Right(10)
+        >>> val.unwrap_or_else(lambda _: 0)
+        10
+        """
+        match e := self._as_either():
+            case Left(value):
+                return left_function(value)
+            case Right(value):
+                return value
+            case _:
+                assert_never(e)
+
+    def unwrap_left_or(self, default_value: L) -> L:
+        """Returns the Left value, or otherwise a provided default value of L.
+
+        Parameters
+        ----------
+        default_value: L
+            Default value of L
+
+        Returns
+        -------
+        result: L
+            Returns the Left value or the default value.
+
+        Examples
+        --------
+        >>> val: Either[str, int] = Right(10)
         >>> val.unwrap_left_or("Default")
-        'Error'
+        'Default'
         """
-        return self._left_value
+        match e := self._as_either():
+            case Left(value):
+                return value
+            case Right():
+                return default_value
+            case _:
+                assert_never(e)
 
-    def inspect(self, function: Callable[[Any], None]) -> Either[TypeLeft, Any]:
-        """
-        Perform a side-effecting action on the Right value.
-
-        Since this is Left, the function is ignored.
+    def inspect(self, function: Callable[[R], None]) -> Either[L, R]:
+        """Calls function with the Right value (if any) and returns the Either Monad unchanged.
 
         Parameters
         ----------
-        function: Callable[[Any], None]
-            Inspection function for the Right value.
+        function: Callable[[R], None]
+            Inspection function which takes the Right value of the Either Monad
 
         Returns
         -------
-        Either[TypeLeft, Any]
-            The current Left instance.
+        either: Either[L, R]
 
         Examples
-        -------
-        Performing an inspection on a Left instance returns the Left instance unchanged.
-        >>> val = Left("Error")
-        >>> val.inspect(lambda x: print(f"Right value: {x}"))
-        Left(Error)
+        --------
+        >>> val: Either[str, int] = Right(10)
+        >>> val.inspect(lambda x: print(f"Value: {x}"))
+        Value: 10
+        Right(10)
         """
-        return self
+        match e := self._as_either():
+            case Left():
+                pass
+            case Right(value):
+                function(value)
+            case _:
+                assert_never(e)
+        return e
 
-    def inspect_left(
-        self, function: Callable[[TypeLeft], None]
-    ) -> Either[TypeLeft, Any]:
-        """
-        Perform a side-effecting action on the Left value.
+    def inspect_left(self, function: Callable[[L], None]) -> Either[L, R]:
+        """Calls function with the Left value (if any) and returns the Either Monad unchanged.
 
         Parameters
         ----------
-        function: Callable[[TypeLeft], None]
-            Inspection function for the Left value.
+        function: Callable[[L], None]
+            Inspection function which takes the Left value of the Either Monad
 
         Returns
         -------
-        Either[TypeLeft, Any]
-            The current Left instance after running the inspection.
+        either: Either[L, R]
 
         Examples
-        -------
-        Perform a side-effecting action on the Left value.
-        >>> val = Left("Error")
-        >>> val.inspect_left(lambda x: print(f"Left value: {x}"))
-        Left value: Error
-        Left(Error)
+        --------
+        >>> val: Either[str, int] = Left("boom")
+        >>> val.inspect_left(lambda x: print(f"Left: {x}"))
+        Left: boom
+        Left(boom)
         """
-        function(self._left_value)
-        return self
+        match e := self._as_either():
+            case Left(value):
+                function(value)
+            case Right():
+                pass
+            case _:
+                assert_never(e)
+        return e
 
     def match(
-        self,
-        left_function: Callable[[TypeLeft], TypeResult],
-        right_function: Callable[[Any], TypeResult],
-    ) -> TypeResult:
-        """
-        Handle the value using Railroad Oriented Programming for the Left case.
+        self, left_function: Callable[[L], U], right_function: Callable[[R], U]
+    ) -> U:
+        """Matches the Either Monad to either a Left function or a Right function with the same
+        return type.
 
         Parameters
         ----------
-        left_function: Callable[[TypeLeft], TypeResult]
-            Callback for the Left case.
-        right_function: Callable[[Any], TypeResult]
-            Callback for the Right case.
-
-        Returns
-        -------
-        TypeResult
-            The result of the left_function.
+        left_function: Callable[[L], U]
+            Callback function for Either monads of type Left
+        right_function: Callable[[R], U]
+            Callback function for Either monads of type Right
 
         Examples
-        -------
-        Execute the left-specific handler when the Monad is Left.
-        >>> val = Left("Error")
-        >>> val.match(lambda x: f"Error: {x}", lambda x: "Success")
-        'Error: Error'
+        --------
+        >>> val: Either[str, int] = Right(10)
+        >>> val.match(lambda x: "Error", lambda x: f"Success: {x}")
+        'Success: 10'
         """
-        return left_function(self._left_value)
+        match e := self._as_either():
+            case Left(value):
+                return left_function(value)
+            case Right(value):
+                return right_function(value)
+            case _:
+                assert_never(e)
 
     def is_left(self) -> bool:
-        """
-        Check if the monad is a Left type.
-
-        Returns
-        -------
-        bool
-            True.
+        """Returns True if the Either Monad is Left, otherwise False.
 
         Examples
-        -------
-        Verify that the Monad is a Left instance.
-        >>> val = Left("Error")
+        --------
+        >>> val: Either[str, int] = Right(10)
         >>> val.is_left()
-        True
-        """
-        return True
-
-    def is_right(self) -> bool:
-        """
-        Check if the monad is a Right type.
-
-        Returns
-        -------
-        bool
-            False.
-
-        Examples
-        -------
-        Verify that the Monad is not a Right instance.
-        >>> val = Left("Error")
-        >>> val.is_right()
         False
         """
-        return False
+        return isinstance(self, Left)
 
-    def __str__(self) -> str:
-        """
-        Returns the string representation of the Left Monad.
-        """
-        return f"Left({self._left_value})"
-
-    def __eq__(self, __o: object) -> bool:
-        """
-        Compare this Left Monad with another object.
-
-        Returns
-        -------
-        bool
-            True if the other object is a Left Monad and has the same string representation.
+    def is_right(self) -> bool:
+        """Returns True if the Either Monad is Right, otherwise False.
 
         Examples
-        -------
-        Compare two Left instances for equality.
-        >>> val1 = Left("Error")
-        >>> val2 = Left("Error")
-        >>> val1 == val2
+        --------
+        >>> val: Either[str, int] = Right(10)
+        >>> val.is_right()
         True
         """
-        return isinstance(__o, Left) and str(self) == str(__o)
+        return isinstance(self, Right)
+
+    def _payload(self) -> object:
+        match e := self._as_either():
+            case Left(value):
+                return value
+            case Right(value):
+                return value
+            case _:
+                assert_never(e)
+
+    def __str__(self) -> str:
+        """Returns the string representation of the Either Monad.
+
+        Examples
+        --------
+        >>> str(Right(10))
+        'Right(10)'
+        >>> str(Left("Error"))
+        'Left(Error)'
+        """
+        return f"{type(self).__name__}({self._payload()})"
 
     def __repr__(self) -> str:
-        """
-        Returns the official string representation of the Left Monad.
-        """
+        """Returns the string representation of the Either Monad (same as __str__)."""
         return str(self)
 
+    def __eq__(self, other: object) -> bool:
+        """Returns True if `other` is the same variant wrapping a value of the same type and string.
 
-Either: TypeAlias = Left[TypeLeft] | Right[TypeRight]
+        Examples
+        --------
+        >>> Right(10) == Right(10)
+        True
+        >>> Right(10) == Left(10)
+        False
+        """
+        if type(self) is not type(other):
+            return False
+        value, other_value = (
+            self._payload(),
+            cast("_EitherImpl[Any, Any]", other)._payload(),
+        )
+        return type(value) is type(other_value) and str(value) == str(other_value)
+
+    __hash__ = None  # type: ignore[assignment]
 
 
-def either_safe(function: Callable[[], TypeResult]) -> Either[Exception, TypeResult]:
+@final
+@dataclass(frozen=True, slots=True, repr=False, eq=False)
+class Left(_EitherImpl[L, R]):
+    """The Left variant of the Either Monad, typically wrapping an error value.
+
+    Examples
+    --------
+    >>> Left("Error Message")
+    Left(Error Message)
     """
-    Execute an unsafe function and wrap the result in an Either Monad.
 
-    Captures any Exception raised by the function and returns it as a Left value,
-    otherwise returns the result as a Right value.
+    value: L
+
+
+@final
+@dataclass(frozen=True, slots=True, repr=False, eq=False)
+class Right(
+    _EitherImpl[L_Never, R], Generic[R, L_Never]
+):  # R first: no default after a default
+    """The Right variant of the Either Monad, wrapping the successful value.
+
+    Examples
+    --------
+    >>> Right(10)
+    Right(10)
+    """
+
+    value: R
+
+
+# Left's Right type has deliberately no default: if it defaulted to Never, pyright would pin a
+# lambda's Right type to Never as soon as one branch returns a Left
+# (`lambda x: Right(x) if x else Left("zero")`).
+type Either[LeftT, RightT] = Left[LeftT, RightT] | Right[RightT, LeftT]
+
+
+def either_safe(function: Callable[[], R]) -> Either[Exception, R]:
+    """Calls function and wraps its return value in Right, or a raised Exception in Left.
 
     Parameters
     ----------
-    function: Callable[[], TypeResult]
-        A callable function that may raise an exception.
+    function: Callable[[], R]
+        Zero-argument function which may raise an Exception.
 
     Returns
     -------
-    Either[Exception, TypeResult]
-        An Either Monad containing the result or the caught Exception.
+    either: Either[Exception, R]
+
+    Examples
+    --------
+    >>> either_safe(lambda: 1)
+    Right(1)
+    >>> either_safe(lambda: 1 / 0)
+    Left(division by zero)
     """
     try:
         return Right(function())

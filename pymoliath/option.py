@@ -11,11 +11,25 @@ chaining operations without constant explicit null checks.
 This implementation is heavily inspired by the Rust `Option` type and the Haskell `Maybe` monad -
 see `pymoliath.maybe` for the sibling implementation using `Just`/`Nothing` naming.
 
-The `Option` type is a sum type that can be either `Some` or `Nil`.
-In this implementation, it is represented as a Union type in Python.
+The `Option` type is a sealed sum type that can be either `Some` or `Nil`. Like in Rust, both
+variants carry the type parameter:
 
 ```python
-Option = Some[TypeSource] | Nil[TypeSource]
+type Option[T] = Some[T] | Nil[T]
+```
+
+## Typing like in Rust
+
+Because both variants know the full `Option[T]`, lambdas passed to `map`/`bind`/... are inferred
+cleanly and a `match` over `Some`/`Nil` is exhaustive. A bare `Nil()` leaves its type open
+(`Nil[Unknown]`) so it can be solved from context, e.g. in
+`lambda x: Some(x) if x > 0 else Nil()`. Like in Rust, annotate an empty value that has no context:
+
+```python
+empty: Option[int] = Nil()
+
+def find(value: int) -> Option[int]:
+    return Some(value) if value > 0 else Nil()
 ```
 
 ## Practical Examples and Benefits:
@@ -43,12 +57,14 @@ if user:
 
 # With Option (Functional)
 (get_user(user_id)
-    .map(get_profile)
-    .map(get_permission)
+    .bind(get_profile)
+    .bind(get_permission)
     .unwrap_or("Default Permission"))
 ```
 
-Structural pattern matching provides a clean, declarative way to handle the contents of an `Option` monad. Because the `Some` and `Nil` classes are designed to be compatible with Python's `match` statement, you can easily branch your logic based on whether a value exists without manually checking for `None` or using complex `if-is_some()` logic.
+Structural pattern matching provides a clean, declarative way to handle the contents of an
+`Option` monad. `Some` and `Nil` are the only variants (the Option is sealed), so a `match` over
+both is exhaustive and type checkers narrow the value in each branch.
 
 ```python
 match option_value:
@@ -63,75 +79,61 @@ match option_value:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     ClassVar,
     Generic,
-    Tuple,
-    TypeAlias,
-    TypeVar,
+    Never,
+    assert_never,
     cast,
+    final,
     overload,
 )
+
+from typing_extensions import TypeVar
 
 from pymoliath.util import curry
 
 if TYPE_CHECKING:
     from pymoliath.result import Result
 
-TypeSource = TypeVar("TypeSource")
-TypeResult = TypeVar("TypeResult")
-TypePure = TypeVar("TypePure")
-TypeErr = TypeVar("TypeErr")
+# Old-style TypeVars are invariant by default, which is what Option needs anyway
+# (T also appears in parameter positions, e.g. unwrap_or and or_).
+T = TypeVar("T")
+U = TypeVar("U")
+E = TypeVar("E")
 
 
-class Some(Generic[TypeSource]):
-    """The Some variant of the Option Monad.
+class _OptionImpl(Generic[T]):
+    """Shared implementation of the Option Monad - `Some` and `Nil` are its only subclasses."""
 
-    Represents a computation that successfully yielded a value. It wraps a value of type
-    `TypeSource` and provides a functional interface for chaining operations.
+    __slots__ = ()
 
-    Parameters
-    ----------
-    value: TypeSource
-        Value to be stored in the Some Option Monad.
-    """
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        # Runtime "sealed": only Some and Nil (defined in this module) may subclass.
+        super().__init_subclass__(**kwargs)
+        if cls.__module__ != __name__:
+            raise TypeError("Option cannot be subclassed; use Some or Nil")
 
-    __slots__ = ("_value",)
-    __match_args__ = ("_value",)
+    def _as_option(self) -> Option[T]:
+        # Safe: Some and Nil are the only subclasses (see __init_subclass__).
+        return cast("Option[T]", self)
 
-    def __init__(self, value: TypeSource):
-        """Some Monad constructor which takes a value of type TypeSource.
-
-        Parameters
-        ----------
-        value: TypeSource
-            Value to be stored in the Some Monad.
-
-        Examples
-        --------
-        >>> some = Some(42)
-        >>> print(some._value)
-        42
-        """
-        self._value = value
-
-    def map(self, function: Callable[[TypeSource], TypeResult]) -> Option[TypeResult]:
-        """Option monad functor interface (>=, map).
-
-        Definition: M(a) >= f: a -> b => M(b)
+    def map(self, function: Callable[[T], U]) -> Option[U]:
+        """Calls function on a wrapped Some value, otherwise returns Nil.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], TypeResult]
-            Function which takes a value of TypeSource and returns a value of type TypeResult
+        function: Callable[[T], U]
+            Function which takes a value of T and returns a value of type U.
 
         Returns
         -------
-        option: Option[TypeResult]
-            Returns a Option Monad with the function result if Monad is a Some or otherwise a Nothing.
+        option: Option[U]
+            Returns a Some with the function result or otherwise Nil.
 
         Examples
         --------
@@ -141,55 +143,55 @@ class Some(Generic[TypeSource]):
         >>> empty: Option[int] = Nil()
         >>> empty.map(lambda x: x + 1)
         Nil()
-        >>> names: Option[str] = Some("alice")
-        >>> names.map(str.upper)
-        Some(ALICE)
         """
-        return Some(function(self._value))
+        match o := self._as_option():
+            case Some(value):
+                return Some(function(value))
+            case Nil():
+                return Nil()
+            case _:
+                assert_never(o)
 
-    def bind(
-        self, function: Callable[[TypeSource], Option[TypeResult]]
-    ) -> Option[TypeResult]:
-        """Option Monad bind interface (>>=, bind, flatMap).
+    def bind(self, function: Callable[[T], Option[U]]) -> Option[U]:
+        """Calls function if the Option Monad is Some, otherwise returns Nil (Rust: `and_then`).
 
         Parameters
         ----------
-        function: Callable[[TypeSource], Option[TypeResult]]
-            Function which takes a value of type TypeSource and returns a option monad of type TypeResult.
+        function: Callable[[T], Option[U]]
+            Function which takes a value of T and returns a new Option Monad.
 
         Returns
         -------
-        option: Option[TypeResult]
-            Returns a Option Monad with the function result if the Monad is a Some or otherwise a Nothing
+        option: Option[U]
+            Returns the function result if Some, otherwise Nil.
 
         Examples
         --------
         >>> val: Option[int] = Some(5)
-        >>> def get_next(x: int) -> Option[int]:
-        ...     return Some(x + 1) if x < 10 else Nil()
-        >>> val.bind(get_next)
-        Some(6)
-        >>> val_large: Option[int] = Some(10)
-        >>> val_large.bind(get_next)
-        Nil()
+        >>> val.bind(lambda x: Some(x * 2) if x > 0 else Nil())
+        Some(10)
         """
-        return function(self._value)
+        match o := self._as_option():
+            case Some(value):
+                return function(value)
+            case Nil():
+                return Nil()
+            case _:
+                assert_never(o)
 
-    def apply(
-        self, applicative: Option[Callable[..., TypeResult]]
-    ) -> Option[TypeResult]:
-        """Option Monad applicative interface for Option Monads containing a value (<*>).
+    def apply(self, applicative: Option[Callable[..., U]]) -> Option[U]:
+        """Applies the passed applicative wrapping a function if the Option Monad is Some, otherwise
+        returns Nil. Functions of several arguments are curried.
 
         Parameters
         ----------
-        applicative: Option[TypeApplicative] (TypeApplicative: any callable type)
-            Applicative option monad which contains a function and will be applied to the option monad containing
-            a value.
+        applicative: Option[Callable[[T], U]]
+            Applicative Option Monad which contains a function.
 
         Returns
         -------
-        option: Option[TypeResult]
-            Applies a option monad containing a value of type TypeSource to a option monad containing a function.
+        option: Option[U]
+            Returns an Option Monad from the applied function if both are Some, otherwise Nil.
 
         Examples
         --------
@@ -197,363 +199,388 @@ class Some(Generic[TypeSource]):
         >>> func: Option[Callable[[int], int]] = Some(lambda x: x * 2)
         >>> val.apply(func)
         Some(20)
-        >>> empty: Option[int] = Nil()
-        >>> val.apply(empty)
-        Nil()
         """
-
-        def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> Option[TypeResult]:
-            """Maps the applicative's function, curried, over this Some value."""
-            return self.map(curry(applicative_function))
-
-        return applicative.bind(binder)
+        return applicative.bind(lambda function: self.map(curry(function)))
 
     def apply2(
-        self: Some[Callable[..., TypeResult]],
-        applicative_value: Option[Any],
-    ) -> Option[TypeResult]:
-        """Option Monad applicative interface for Option Monads containing a function (<*>).
+        self: _OptionImpl[Callable[..., U]], applicative_value: Option[Any]
+    ) -> Option[U]:
+        """Applies the function wrapped in this Option Monad to the passed Option Monad wrapping a
+        value if both are Some, otherwise returns Nil. Functions of several arguments are curried.
 
         Parameters
         ----------
-        applicative_value: Option[TypePure]
-            Option monad value which will be applied to the option monad containing a function
+        applicative_value: Option[Any]
+            Option monad which contains a value.
 
         Returns
         -------
-        option: Option[TypeResult]
-            Applies a option monad containing a function to a option monad of type TypeSource (value or function).
+        option: Option[U]
+            Returns an Option Monad from the applied function if both are Some, otherwise Nil.
 
         Examples
         --------
-        >>> func_monad: Option[Callable[[int], int]] = Some(lambda y: 10 + y)
-        >>> val_monad: Option[int] = Some(5)
-        >>> func_monad.apply2(val_monad)
+        >>> func: Option[Callable[[int], int]] = Some(lambda y: 10 + y)
+        >>> val: Option[int] = Some(5)
+        >>> func.apply2(val)
         Some(15)
-        >>> empty_val: Option[int] = Nil()
-        >>> func_monad.apply2(empty_val)
+        >>> empty: Option[int] = Nil()
+        >>> func.apply2(empty)
         Nil()
         """
+        return self.bind(lambda function: applicative_value.map(curry(function)))
 
-        def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> Option[TypeResult]:
-            """Maps the curried applicative function, held by this Some, over `applicative_value`."""
-            return applicative_value.map(curry(applicative_function))
-
-        return self.bind(binder)
-
-    def filter(
-        self, filter_function: Callable[[TypeSource], bool]
-    ) -> Option[TypeSource]:
-        """Returns a Some if filter function is True and Option Monad is of type Some, otherwise Nothing.
+    def filter(self, filter_function: Callable[[T], bool]) -> Option[T]:
+        """Returns the Option Monad if it is Some and the predicate returns True, otherwise Nil.
 
         Parameters
         ----------
-        filter_function: Callable[[TypeSource], bool]
-            Filter function which will be applied to Some if not Nothing.
+        filter_function: Callable[[T], bool]
+            Predicate function applied to the Some value.
 
         Returns
         -------
-        result: Option[TypeSource]
-            Returns Some if the Option Monad is of type Some and filter function returns True otherwise Nothing.
+        option: Option[T]
+            Returns the Some if the predicate holds, otherwise Nil.
 
         Examples
         --------
         >>> val: Option[int] = Some(10)
         >>> val.filter(lambda x: x > 5)
         Some(10)
-        >>> val.filter(lambda x: x < 5)
-        Nil()
-        >>> empty: Option[int] = Nil()
-        >>> empty.filter(lambda x: x > 5)
+        >>> val.filter(lambda x: x > 10)
         Nil()
         """
-        if filter_function(self._value):
-            return self
-        return Nil()
+        match o := self._as_option():
+            case Some(value) if filter_function(value):
+                return o
+            case Some() | Nil():
+                return Nil()
+            case _:
+                assert_never(o)
 
-    def is_some_and(self, function: Callable[[TypeSource], bool]) -> bool:
-        """Returns True if the Option Monad is a Some and the predicate returns True for the contained value.
+    def is_some_and(self, function: Callable[[T], bool]) -> bool:
+        """Returns True if the Option Monad is Some and the predicate returns True for the value.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], bool]
+        function: Callable[[T], bool]
             Predicate function applied to the Some value.
 
         Returns
         -------
         result: bool
-            Returns the predicate result.
+            Returns the predicate result if Some, otherwise False.
 
         Examples
         --------
         >>> val: Option[int] = Some(10)
         >>> val.is_some_and(lambda x: x > 5)
         True
-        >>> val.is_some_and(lambda x: x < 5)
-        False
         """
-        return function(self._value)
+        match o := self._as_option():
+            case Some(value):
+                return function(value)
+            case Nil():
+                return False
+            case _:
+                assert_never(o)
 
-    def map_or(
-        self, default_value: TypeResult, function: Callable[[TypeSource], TypeResult]
-    ) -> TypeResult:
+    def map_or(self, default_value: U, function: Callable[[T], U]) -> U:
         """Applies the function to the Some value, or returns the default value if Nil.
 
         Parameters
         ----------
-        default_value: TypeResult
+        default_value: U
             Default value to be returned if the Option Monad is Nil.
-        function: Callable[[TypeSource], TypeResult]
+        function: Callable[[T], U]
             Function applied to the Some value.
 
         Returns
         -------
-        result: TypeResult
-            Returns the function result.
+        result: U
+            Returns the function result or the default value.
 
         Examples
         --------
         >>> val: Option[int] = Some(10)
         >>> val.map_or(0, lambda x: x * 2)
         20
-        >>> empty: Option[int] = Nil()
-        >>> empty.map_or(0, lambda x: x * 2)
-        0
         """
-        return function(self._value)
+        match o := self._as_option():
+            case Some(value):
+                return function(value)
+            case Nil():
+                return default_value
+            case _:
+                assert_never(o)
 
-    def and_(self, other: Option[TypeResult]) -> Option[TypeResult]:
-        """Returns `other` if the Option Monad is a Some, otherwise Nil.
+    def and_(self, other: Option[U]) -> Option[U]:
+        """Returns `other` if the Option Monad is Some, otherwise Nil.
 
         Parameters
         ----------
-        other: Option[TypeResult]
-            Option Monad to be returned if this Option Monad is a Some.
+        other: Option[U]
+            Option Monad to be returned if this Option Monad is Some.
 
         Returns
         -------
-        result: Option[TypeResult]
-            Returns `other`.
+        option: Option[U]
+            Returns `other` or Nil.
 
         Examples
         --------
-        >>> val: Option[int] = Some(1)
-        >>> other: Option[int] = Some(2)
-        >>> val.and_(other)
+        >>> val1: Option[int] = Some(1)
+        >>> val2: Option[int] = Some(2)
+        >>> val1.and_(val2)
         Some(2)
-        >>> empty: Option[int] = Nil()
-        >>> empty.and_(other)
-        Nil()
         """
-        return other
+        match o := self._as_option():
+            case Some():
+                return other
+            case Nil():
+                return Nil()
+            case _:
+                assert_never(o)
 
-    def or_(self, other: Option[TypeSource]) -> Option[TypeSource]:
-        """Returns this Option Monad if it is a Some, otherwise `other`.
+    def or_(self, other: Option[T]) -> Option[T]:
+        """Returns this Option Monad if it is Some, otherwise `other`.
 
         Parameters
         ----------
-        other: Option[TypeSource]
-            Option Monad to be returned if this Option Monad is a Nil.
+        other: Option[T]
+            Option Monad to be returned if this Option Monad is Nil.
 
         Returns
         -------
-        result: Option[TypeSource]
-            Returns this Some.
+        option: Option[T]
+            Returns the Some or `other`.
 
         Examples
         --------
-        >>> val: Option[int] = Some(1)
-        >>> other: Option[int] = Some(2)
-        >>> val.or_(other)
-        Some(1)
-        >>> empty: Option[int] = Nil()
-        >>> empty.or_(other)
+        >>> val1: Option[int] = Nil()
+        >>> val2: Option[int] = Some(2)
+        >>> val1.or_(val2)
         Some(2)
         """
-        return self
+        match o := self._as_option():
+            case Some():
+                return o
+            case Nil():
+                return other
+            case _:
+                assert_never(o)
 
-    def zip(self, other: Option[TypePure]) -> Option[Tuple[TypeSource, TypePure]]:
-        """Combines this Option Monad with another into an Option Monad of a tuple, or Nil if either is Nil.
+    def zip(self, other: Option[U]) -> Option[tuple[T, U]]:
+        """Combines this Option Monad with another into an Option Monad of a tuple, or Nil if
+        either is Nil.
 
         Parameters
         ----------
-        other: Option[TypePure]
+        other: Option[U]
             Option Monad to be zipped with this Option Monad.
 
         Returns
         -------
-        result: Option[Tuple[TypeSource, TypePure]]
+        option: Option[tuple[T, U]]
             Returns Some of a tuple of both values, or Nil.
 
         Examples
         --------
-        >>> val: Option[int] = Some(1)
-        >>> other: Option[int] = Some(2)
-        >>> val.zip(other)
-        Some((1, 2))
-        >>> empty: Option[int] = Nil()
-        >>> val.zip(empty)
-        Nil()
+        >>> val1: Option[int] = Some(1)
+        >>> val2: Option[str] = Some("a")
+        >>> val1.zip(val2)
+        Some((1, 'a'))
         """
-        return other.map(lambda o: (self._value, o))
+        return self.bind(
+            lambda value: other.map(lambda other_value: (value, other_value))
+        )
 
     @overload
-    def flatten(self: Some[Some[TypeResult]]) -> Option[TypeResult]: ...
+    def flatten(self: _OptionImpl[Some[U]]) -> Option[U]: ...
 
     @overload
-    def flatten(self: Some[Nil[TypeResult]]) -> Option[TypeResult]: ...
+    def flatten(self: _OptionImpl[Nil[U]]) -> Option[U]: ...
 
-    def flatten(self) -> Option[Any]:
+    @overload
+    def flatten(self: _OptionImpl[Option[U]]) -> Option[U]: ...
+
+    @overload
+    def flatten(self: Nil[Any]) -> Option[Never]: ...
+
+    def flatten(self: _OptionImpl[Any]) -> Option[Any]:
         """Flattens a nested Option Monad by one level.
 
         Returns
         -------
-        result: Option[TypeResult]
-            Returns the nested Option Monad.
+        option: Option[U]
+            Returns the nested Option Monad if Some, otherwise Nil.
 
         Examples
         --------
-        >>> val: Option[Option[int]] = Some(Some(1))
-        >>> val.flatten()
+        >>> Some(Some(1)).flatten()
         Some(1)
-        >>> empty_inner: Option[Option[int]] = Some(Nil())
-        >>> empty_inner.flatten()
-        Nil()
         """
-        return cast(Option[Any], self._value)
+        match o := self._as_option():
+            case Some(value):
+                return cast("Option[Any]", value)
+            case Nil():
+                return Nil()
+            case _:
+                assert_never(o)
 
-    def ok_or(self, err_value: TypeErr) -> Result[TypeSource, TypeErr]:
-        """Converts the Option Monad into a Result Monad, using `err_value` as the Err value if Nil.
+    def ok_or(self, err_value: E) -> Result[T, E]:
+        """Converts the Option Monad into a Result Monad, mapping Some(v) to Ok(v) and Nil to
+        Err(err_value).
 
         Parameters
         ----------
-        err_value: TypeErr
-            Error value to be used if the Option Monad is Nil.
+        err_value: E
+            Error value used if the Option Monad is Nil.
 
         Returns
         -------
-        result: Result[TypeSource, TypeErr]
-            Returns Ok with the Some value.
+        result: Result[T, E]
+            Returns Ok with the Some value, or Err with err_value.
 
         Examples
         --------
         >>> val: Option[int] = Some(1)
-        >>> val.ok_or("Error")
+        >>> val.ok_or("missing")
         Ok(1)
         """
-        from pymoliath.result import Ok
+        from pymoliath.result import Err, Ok
 
-        return Ok(self._value)
+        match o := self._as_option():
+            case Some(value):
+                return Ok(value)
+            case Nil():
+                return Err(err_value)
+            case _:
+                assert_never(o)
 
-    def ok_or_else(
-        self, err_function: Callable[[], TypeErr]
-    ) -> Result[TypeSource, TypeErr]:
-        """Converts the Option Monad into a Result Monad, calling `err_function` for the Err value if Nil.
+    def ok_or_else(self, err_function: Callable[[], E]) -> Result[T, E]:
+        """Converts the Option Monad into a Result Monad, mapping Some(v) to Ok(v) and Nil to
+        Err(err_function()).
 
         Parameters
         ----------
-        err_function: Callable[[], TypeErr]
-            Function called to produce the error value if the Option Monad is Nil.
+        err_function: Callable[[], E]
+            Function computing the error value if the Option Monad is Nil.
 
         Returns
         -------
-        result: Result[TypeSource, TypeErr]
-            Returns Ok with the Some value.
+        result: Result[T, E]
+            Returns Ok with the Some value, or Err with the err_function result.
 
         Examples
         --------
-        >>> val: Option[int] = Some(1)
-        >>> val.ok_or_else(lambda: "Error")
-        Ok(1)
+        >>> val: Option[int] = Nil()
+        >>> val.ok_or_else(lambda: "missing")
+        Err(missing)
         """
-        from pymoliath.result import Ok
+        from pymoliath.result import Err, Ok
 
-        return Ok(self._value)
+        match o := self._as_option():
+            case Some(value):
+                return Ok(value)
+            case Nil():
+                return Err(err_function())
+            case _:
+                assert_never(o)
 
-    def unwrap(self) -> TypeSource:
-        """Returns the internal value of the Some or raises an exception if Nothing.
+    def unwrap(self) -> T:
+        """Returns the Some value, or otherwise raises an Exception.
 
         Returns
         -------
-        value: TypeSource
-            Returns the Option value or a default value.
+        result: T
+            Returns the Some value.
+
+        Raises
+        ------
+        Exception
+            If the Option Monad is Nil.
 
         Examples
         --------
         >>> val: Option[int] = Some(1)
         >>> val.unwrap()
         1
-        >>> empty: Option[int] = Nil()
-        >>> empty.unwrap()
-        Traceback (most recent call last):
-            ...
-        Exception: Unwrap error on Option monad
         """
-        return self._value
+        match o := self._as_option():
+            case Some(value):
+                return value
+            case Nil():
+                raise Exception("Unwrap error on Option monad")
+            case _:
+                assert_never(o)
 
-    def unwrap_or(self, default_value: TypeSource) -> TypeSource:
-        """Returns the internal value of the Some or default value if the Monad is a Nothing.
+    def unwrap_or(self, default_value: T) -> T:
+        """Returns the Some value, or otherwise a provided default value of the same type.
 
         Parameters
         ----------
-        default_value: TypeSource
-            Default value to be returned if the Monad is a Nothing
+        default_value: T
+            Default value of T
 
         Returns
         -------
-        value: TypeSource
-            Returns the Option value or a default value.
+        result: T
+            Returns the Some value or the default value.
 
         Examples
         --------
-        >>> val: Option[int] = Some(1)
+        >>> val: Option[int] = Nil()
         >>> val.unwrap_or(0)
-        1
-        >>> empty: Option[int] = Nil()
-        >>> empty.unwrap_or(0)
         0
         """
-        return self._value
+        match o := self._as_option():
+            case Some(value):
+                return value
+            case Nil():
+                return default_value
+            case _:
+                assert_never(o)
 
-    def unwrap_or_else(self, nothing_function: Callable[[], TypeSource]) -> TypeSource:
-        """Returns the internal value of the Some or default value if the Monad is a Nothing.
+    def unwrap_or_else(self, nothing_function: Callable[[], T]) -> T:
+        """Returns the Some value, or otherwise calls the nothing_function.
 
         Parameters
         ----------
-        nothing_function: Callable[[], TypeSource]
-            Function to be called when the Option value is of type Nothing
+        nothing_function: Callable[[], T]
+            Function which will be called if the Option Monad is Nil.
 
         Returns
         -------
-        value: TypeSource
-            Returns the Option value or calls the nothing function.
+        result: T
+            Returns the Some value or the nothing_function result.
 
         Examples
         --------
-        >>> val: Option[int] = Some(1)
+        >>> val: Option[int] = Nil()
         >>> val.unwrap_or_else(lambda: 0)
-        1
-        >>> empty: Option[int] = Nil()
-        >>> empty.unwrap_or_else(lambda: 0)
         0
         """
-        return self._value
+        match o := self._as_option():
+            case Some(value):
+                return value
+            case Nil():
+                return nothing_function()
+            case _:
+                assert_never(o)
 
-    def inspect(self, function: Callable[[TypeSource], None]) -> Option[TypeSource]:
-        """Inspect the Option monad value of TypeSource
+    def inspect(self, function: Callable[[T], None]) -> Option[T]:
+        """Calls function with the Some value (if any) and returns the Option Monad unchanged.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], None]
-            Inspection function which takes the option value if not nothing
+        function: Callable[[T], None]
+            Inspection function which takes the Some value of the Option monad
 
         Returns
         -------
-        option: Option[TypeSource]
+        option: Option[T]
 
         Examples
         --------
@@ -561,66 +588,56 @@ class Some(Generic[TypeSource]):
         >>> val.inspect(lambda x: print(f"Value is: {x}"))
         Value is: 42
         Some(42)
-        >>> empty: Option[int] = Nil()
-        >>> empty.inspect(lambda x: print(f"Value is: {x}"))
-        Nil()
         """
-        function(self._value)
-        return self
+        match o := self._as_option():
+            case Some(value):
+                function(value)
+            case Nil():
+                pass
+            case _:
+                assert_never(o)
+        return o
 
     def match(
-        self,
-        some_function: Callable[[TypeSource], TypeResult],
-        nothing_function: Callable[[], TypeResult],
-    ) -> TypeResult:
-        """The option function takes a function and a default value. If the Option value is Nothing, the function returns
-        the default value. Otherwise, it applies the function to the value inside a Some monad and returns the result.
+        self, some_function: Callable[[T], U], nothing_function: Callable[[], U]
+    ) -> U:
+        """Matches the Option Monad to either a Some function or a Nil function with the same
+        return type.
 
-        Parameter
-        ---------
-        callback: Callable[[TypeSource], TypeSource]
-          Callback function if the Option Monad is a Some
-        default: TypeResult
-          Default value to be returned if the Option Monad is Nothing
-
-        Returns
-        -------
-        result: TypeSource
+        Parameters
+        ----------
+        some_function: Callable[[T], U]
+            Callback function for Option monads of type Some
+        nothing_function: Callable[[], U]
+            Callback function for Option monads of type Nil
 
         Examples
         --------
         >>> val: Option[int] = Some(10)
-        >>> val.match(lambda x: x * 2, lambda: 0)
-        20
-        >>> empty: Option[int] = Nil()
-        >>> empty.match(lambda x: x * 2, lambda: 0)
-        0
+        >>> val.match(lambda x: f"Some: {x}", lambda: "Nil")
+        'Some: 10'
         """
-        return some_function(self._value)
+        match o := self._as_option():
+            case Some(value):
+                return some_function(value)
+            case Nil():
+                return nothing_function()
+            case _:
+                assert_never(o)
 
     def is_nothing(self) -> bool:
-        """Returns False, since this Option Monad is a Some.
-
-        Returns
-        -------
-        result: bool
-            Returns False.
+        """Returns True if the Option Monad is Nil, otherwise False.
 
         Examples
         --------
-        >>> val: Option[int] = Some(5)
+        >>> val: Option[int] = Nil()
         >>> val.is_nothing()
-        False
+        True
         """
-        return False
+        return isinstance(self, Nil)
 
     def is_some(self) -> bool:
-        """Returns True, since this Option Monad is a Some.
-
-        Returns
-        -------
-        result: bool
-            Returns True.
+        """Returns True if the Option Monad is Some, otherwise False.
 
         Examples
         --------
@@ -628,676 +645,165 @@ class Some(Generic[TypeSource]):
         >>> val.is_some()
         True
         """
-        return True
+        return isinstance(self, Some)
 
-    def to_optional(self) -> TypeSource | None:
-        """Converts the Option Monad into a standard Python optional value.
-
-        Returns
-        -------
-        value: TypeSource | None
-            Returns the Some value.
+    def to_optional(self) -> T | None:
+        """Converts the Option Monad into an optional value: the Some value or None.
 
         Examples
         --------
-        >>> val: Option[int] = Some(10)
+        >>> val: Option[int] = Some(5)
         >>> val.to_optional()
-        10
-        >>> empty: Option[int] = Nil()
-        >>> print(empty.to_optional())
-        None
+        5
         """
-        return self._value
+        match o := self._as_option():
+            case Some(value):
+                return value
+            case Nil():
+                return None
+            case _:
+                assert_never(o)
 
     @staticmethod
-    def from_optional(value: TypeSource | None) -> Option[TypeSource]:
-        """Converts a standard Python optional value into an Option Monad.
-
-        Parameters
-        ----------
-        value: TypeSource | None
-            Optional value to be converted into an Option Monad.
-
-        Returns
-        -------
-        option: Option[TypeSource]
-            Returns Some if `value` is not None, otherwise Nil.
+    def from_optional(value: U | None) -> Option[U]:
+        """Creates an Option Monad from an optional value: Nil for None, otherwise Some.
 
         Examples
         --------
-        >>> Some(5) == Some.from_optional(5)
-        True
-        >>> Nil() == Some.from_optional(None)
-        True
+        >>> Some.from_optional(None)
+        Nil()
         """
         return from_optional(value)
 
     def __str__(self) -> str:
-        """Returns the string representation of the Some Monad.
+        """Returns the string representation of the Option Monad.
 
         Examples
         --------
         >>> str(Some(42))
         'Some(42)'
+        >>> str(Nil())
+        'Nil()'
         """
-        return f"Some({self._value})"
+        match o := self._as_option():
+            case Some(value):
+                return f"Some({value})"
+            case Nil():
+                return "Nil()"
+            case _:
+                assert_never(o)
 
-    def __eq__(self, __o: object) -> bool:
-        """Returns True if `other` is also a Some Monad with an equal string representation.
+    def __repr__(self) -> str:
+        """Returns the string representation of the Option Monad (same as __str__)."""
+        return str(self)
+
+    def __eq__(self, other: object) -> bool:
+        """Returns True if `other` is the same variant wrapping a value of the same type and string.
 
         Examples
         --------
         >>> Some(1) == Some(1)
         True
-        >>> Some(1) == Some(2)
+        >>> Some(1) == Nil()
         False
         """
-        return isinstance(__o, Some) and str(self) == str(__o)
-
-    def __repr__(self) -> str:
-        """Returns the string representation of the Some Monad (same as __str__).
-
-        Examples
-        --------
-        >>> repr(Some(10))
-        'Some(10)'
-        """
-        return str(self)
-
-
-class Nil(Generic[TypeSource]):
-    """The Nil variant of the Option Monad.
-
-    Nil holds no data and is generic over `TypeSource` even though it does not store any internal
-    value: a phantom type parameter (like Rust's `Option<T>::None`) that lets `map`/`bind`/`apply`/
-    `filter`/`inspect` propagate real types instead of collapsing to `Any`.
-
-    Examples
-    -------
-    >>> empty = Nil()
-    >>> print(type(empty))
-    <class 'pymoliath.option.Nil'>
-    """
-
-    __slots__ = ()
-
-    _instance: ClassVar[Nil[Any] | None] = None
-
-    def __new__(cls) -> Nil[TypeSource]:
-        """
-        Returns the single shared Nil instance, creating it on first call.
-
-        Since `Nil` holds no data and is conceptually equivalent to any other `Nil` of the same
-        type, this implementation uses a singleton pattern to optimize memory and performance by
-        sharing a single instance.
-
-        Returns
-        -------
-        Nil[TypeSource]
-            The singleton instance of the Nil monad.
-
-        Examples
-        -------
-        >>> n1 = Nil()
-        >>> n2 = Nil()
-        >>> n1 is n2
-        True
-        """
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cast(Nil[TypeSource], cls._instance)
-
-    def map(self, function: Callable[[Any], TypeResult]) -> Option[TypeResult]:
-        """Option monad functor interface (>=, map).
-
-        Parameters
-        ----------
-        function: Callable[[Any], TypeResult]
-            Function which would be applied to the value if this Option Monad were a Some.
-
-        Returns
-        -------
-        option: Option[TypeResult]
-            Returns Nil, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.map(lambda x: x + 1)
-        Nil()
-        >>> empty.map(str.upper)
-        Nil()
-        """
-        return Nil()
-
-    def bind(self, function: Callable[[Any], Option[TypeResult]]) -> Option[TypeResult]:
-        """Option Monad bind interface (>>=, bind, flatMap).
-
-        Parameters
-        ----------
-        function: Callable[[Any], Option[TypeResult]]
-            Function which would be applied to the value if this Option Monad were a Some.
-
-        Returns
-        -------
-        option: Option[TypeResult]
-            Returns Nil, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> def get_next(x: int) -> Option[int]:
-        ...     return Some(x + 1) if x < 10 else Nil()
-        >>> empty.bind(get_next)
-        Nil()
-        """
-        return Nil()
-
-    def apply(
-        self, applicative: Option[Callable[..., TypeResult]]
-    ) -> Option[TypeResult]:
-        """Option Monad applicative interface for Option Monads containing a value (<*>).
-
-        Parameters
-        ----------
-        applicative: Option[TypeApplicative] (TypeApplicative: any callable type)
-            Applicative option monad which would be applied to the option monad containing a value.
-
-        Returns
-        -------
-        option: Option[TypeResult]
-            Returns Nil, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> func: Option[Callable[[int], int]] = Some(lambda x: x * 2)
-        >>> empty.apply(func)
-        Nil()
-        """
-        return Nil()
-
-    def apply2(self, applicative_value: Option[Any]) -> Option[Any]:
-        """Option Monad applicative interface for Option Monads containing a function (<*>).
-
-        Parameters
-        ----------
-        applicative_value: Option[TypePure]
-            Option monad value which would be applied to the option monad containing a function.
-
-        Returns
-        -------
-        option: Option[Any]
-            Returns this Nil, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> val: Option[int] = Some(5)
-        >>> empty.apply2(val)
-        Nil()
-        """
-        return self
-
-    def filter(self, filter_function: Callable[[Any], bool]) -> Option[TypeSource]:
-        """Returns a Some if filter function is True and Option Monad is of type Some, otherwise Nothing.
-
-        Parameters
-        ----------
-        filter_function: Callable[[Any], bool]
-            Filter function which would be applied to the value if this Option Monad were a Some.
-
-        Returns
-        -------
-        result: Option[TypeSource]
-            Returns this Nil, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.filter(lambda x: x > 5)
-        Nil()
-        """
-        return self
-
-    def is_some_and(self, function: Callable[[Any], bool]) -> bool:
-        """Returns True if the Option Monad is a Some and the predicate returns True for the contained value.
-
-        Parameters
-        ----------
-        function: Callable[[Any], bool]
-            Predicate function which would be applied to the value if this Option Monad were a Some.
-
-        Returns
-        -------
-        result: bool
-            Returns False, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.is_some_and(lambda x: x > 5)
-        False
-        """
-        return False
-
-    def map_or(
-        self, default_value: TypeResult, function: Callable[[Any], TypeResult]
-    ) -> TypeResult:
-        """Applies the function to the Some value, or returns the default value if Nil.
-
-        Parameters
-        ----------
-        default_value: TypeResult
-            Default value to be returned if the Option Monad is Nil.
-        function: Callable[[Any], TypeResult]
-            Function which would be applied to the value if this Option Monad were a Some.
-
-        Returns
-        -------
-        result: TypeResult
-            Returns `default_value`, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.map_or(0, lambda x: x * 2)
-        0
-        """
-        return default_value
-
-    def and_(self, other: Option[Any]) -> Option[TypeSource]:
-        """Returns `other` if the Option Monad is a Some, otherwise Nil.
-
-        Parameters
-        ----------
-        other: Option[Any]
-            Option Monad which would be returned if this Option Monad were a Some.
-
-        Returns
-        -------
-        result: Option[TypeSource]
-            Returns this Nil, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> other: Option[int] = Some(2)
-        >>> empty.and_(other)
-        Nil()
-        """
-        return self
-
-    def or_(self, other: Option[TypeSource]) -> Option[TypeSource]:
-        """Returns this Option Monad if it is a Some, otherwise `other`.
-
-        Parameters
-        ----------
-        other: Option[TypeSource]
-            Option Monad to be returned since this Option Monad is a Nil.
-
-        Returns
-        -------
-        result: Option[TypeSource]
-            Returns `other`.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> other: Option[int] = Some(2)
-        >>> empty.or_(other)
-        Some(2)
-        """
-        return other
-
-    def zip(self, other: Option[Any]) -> Option[Any]:
-        """Combines this Option Monad with another into an Option Monad of a tuple, or Nil if either is Nil.
-
-        Parameters
-        ----------
-        other: Option[Any]
-            Option Monad which would be zipped with this Option Monad if this Option Monad were a Some.
-
-        Returns
-        -------
-        result: Option[Any]
-            Returns this Nil, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> other: Option[int] = Some(2)
-        >>> empty.zip(other)
-        Nil()
-        """
-        return self
-
-    def flatten(self) -> Option[TypeSource]:
-        """Flattens a nested Option Monad by one level.
-
-        Returns
-        -------
-        result: Option[TypeSource]
-            Returns this Nil, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[Option[int]] = Nil()
-        >>> empty.flatten()
-        Nil()
-        """
-        return self
-
-    def ok_or(self, err_value: TypeErr) -> Result[Any, TypeErr]:
-        """Converts the Option Monad into a Result Monad, using `err_value` as the Err value if Nil.
-
-        Parameters
-        ----------
-        err_value: TypeErr
-            Error value to be used if the Option Monad is Nil.
-
-        Returns
-        -------
-        result: Result[TypeSource, TypeErr]
-            Returns Err with `err_value`, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.ok_or("Error")
-        Err(Error)
-        """
-        from pymoliath.result import Err
-
-        return Err(err_value)
-
-    def ok_or_else(self, err_function: Callable[[], TypeErr]) -> Result[Any, TypeErr]:
-        """Converts the Option Monad into a Result Monad, calling `err_function` for the Err value if Nil.
-
-        Parameters
-        ----------
-        err_function: Callable[[], TypeErr]
-            Function called to produce the error value if the Option Monad is Nil.
-
-        Returns
-        -------
-        result: Result[TypeSource, TypeErr]
-            Returns Err with the result of `err_function`, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.ok_or_else(lambda: "Error")
-        Err(Error)
-        """
-        from pymoliath.result import Err
-
-        return Err(err_function())
-
-    def unwrap(self) -> TypeSource:
-        """Raises an exception, since a Nil Monad has no internal value to unwrap.
-
-        Returns
-        -------
-        value: TypeSource
-            Never returns; always raises an Exception.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.unwrap()
-        Traceback (most recent call last):
-            ...
-        Exception: Unwrap error on Option monad
-        """
-        raise Exception("Unwrap error on Option monad")
-
-    def unwrap_or(self, default_value: TypeSource) -> TypeSource:
-        """Returns the internal value of the Some or default value if the Monad is a Nothing.
-
-        Parameters
-        ----------
-        default_value: TypeSource
-            Default value to be returned if the Monad is a Nothing
-
-        Returns
-        -------
-        value: TypeSource
-            Returns `default_value`, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.unwrap_or(0)
-        0
-        """
-        return default_value
-
-    def unwrap_or_else(self, nothing_function: Callable[[], TypeSource]) -> TypeSource:
-        """Returns the internal value of the Some or default value if the Monad is a Nothing.
-
-        Parameters
-        ----------
-        nothing_function: Callable[[], TypeSource]
-            Function to be called when the Option value is of type Nothing
-
-        Returns
-        -------
-        value: TypeSource
-            Returns the result of calling `nothing_function`, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.unwrap_or_else(lambda: 0)
-        0
-        """
-        return nothing_function()
-
-    def inspect(self, function: Callable[[Any], None]) -> Option[TypeSource]:
-        """Inspect the Option monad value of TypeSource
-
-        Parameters
-        ----------
-        function: Callable[[Any], None]
-            Inspection function which would be called with the value if this Option Monad were a Some.
-
-        Returns
-        -------
-        option: Option[TypeSource]
-            Returns this Nil, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.inspect(lambda x: print(f"Value is: {x}"))
-        Nil()
-        """
-        return self
-
-    def match(
-        self,
-        some_function: Callable[[Any], TypeResult],
-        nothing_function: Callable[[], TypeResult],
-    ) -> TypeResult:
-        """The option function takes a function and a default value. If the Option value is Nothing, the function returns
-        the default value. Otherwise, it applies the function to the value inside a Some monad and returns the result.
-
-        Parameter
-        ---------
-        callback: Callable[[TypeSource], TypeSource]
-          Callback function if the Option Monad is a Some
-        default: TypeResult
-          Default value to be returned if the Option Monad is Nothing
-
-        Returns
-        -------
-        result: TypeSource
-            Returns the result of calling `nothing_function`, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.match(lambda x: x * 2, lambda: 0)
-        0
-        """
-        return nothing_function()
-
-    def is_nothing(self) -> bool:
-        """Returns True, since this Option Monad is a Nil.
-
-        Returns
-        -------
-        result: bool
-            Returns True.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.is_nothing()
-        True
-        """
-        return True
-
-    def is_some(self) -> bool:
-        """Returns False, since this Option Monad is a Nil.
-
-        Returns
-        -------
-        result: bool
-            Returns False.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> empty.is_some()
-        False
-        """
-        return False
-
-    def to_optional(self) -> TypeSource | None:
-        """Converts the Option Monad into a standard Python optional value.
-
-        Returns
-        -------
-        value: TypeSource | None
-            Returns None, since this Option Monad is Nil.
-
-        Examples
-        --------
-        >>> empty: Option[int] = Nil()
-        >>> print(empty.to_optional())
-        None
-        """
-        return None
-
-    @staticmethod
-    def from_optional(value: TypeSource | None) -> Option[TypeSource]:
-        """Converts a standard Python optional value into an Option Monad.
-
-        Parameters
-        ----------
-        value: TypeSource | None
-            Optional value to be converted into an Option Monad.
-
-        Returns
-        -------
-        option: Option[TypeSource]
-            Returns Some if `value` is not None, otherwise Nil.
-
-        Examples
-        --------
-        >>> Some(5) == Nil.from_optional(5)
-        True
-        >>> Nil() == Nil.from_optional(None)
-        True
-        """
-        return from_optional(value)
-
-    def __str__(self) -> str:
-        """Returns the string representation of the Nil Monad.
-
-        Examples
-        --------
-        >>> str(Nil())
-        'Nil()'
-        """
-        return "Nil()"
-
-    def __eq__(self, __o: object) -> bool:
-        """Returns True if `other` is also a Nil Monad.
-
-        Examples
-        --------
-        >>> Nil() == Nil()
-        True
-        >>> Nil() == Some(1)
-        False
-        """
-        return isinstance(__o, Nil)
-
-    def __repr__(self) -> str:
-        """Returns the string representation of the Nil Monad (same as __str__).
-
-        Examples
-        --------
-        >>> repr(Nil())
-        'Nil()'
-        """
-        return str(self)
-
-
-Option: TypeAlias = Some[TypeSource] | Nil[TypeSource]
-
-
-def from_optional(value: TypeSource | None) -> Option[TypeSource]:
-    """Converts a standard Python optional value into an Option Monad.
-
-    Parameters
-    ----------
-    value: TypeSource | None
-        Optional value to be converted into an Option Monad.
-
-    Returns
-    -------
-    option: Option[TypeSource]
-        Returns Some containing `value`, or Nil if `value` is None.
+        if type(self) is not type(other):
+            return False
+        match o := self._as_option():
+            case Some(value):
+                other_value = cast("Some[Any]", other).value
+                return type(value) is type(other_value) and str(value) == str(
+                    other_value
+                )
+            case Nil():
+                return True
+            case _:
+                assert_never(o)
+
+    __hash__ = None  # type: ignore[assignment]
+
+
+@final
+@dataclass(frozen=True, slots=True, repr=False, eq=False)
+class Some(_OptionImpl[T]):
+    """The Some variant of the Option Monad, wrapping a value.
 
     Examples
     --------
-    >>> from_optional("hello")
-    Some(hello)
+    >>> Some(42)
+    Some(42)
+    """
+
+    value: T
+
+
+@final
+@dataclass(frozen=True, slots=True, repr=False, eq=False)
+class Nil(_OptionImpl[T]):
+    """The Nil variant of the Option Monad, representing the absence of a value (a singleton).
+
+    Examples
+    --------
+    >>> Nil()
+    Nil()
+    """
+
+    _instance: ClassVar[Nil[Any] | None] = None
+
+    def __new__(cls) -> Nil[T]:
+        # Nil carries no data, so all instances (of any T) are the same object.
+        if cls._instance is None:
+            cls._instance = object.__new__(cls)
+        return cast("Nil[T]", cls._instance)
+
+
+# Nil's type parameter has deliberately no default: if it defaulted to Never, pyright would pin a
+# lambda's type to Never as soon as one branch returns Nil (`lambda x: Some(x) if x else Nil()`).
+type Option[T] = Some[T] | Nil[T]
+
+
+def from_optional(value: T | None) -> Option[T]:
+    """Creates an Option Monad from an optional value: Nil for None, otherwise Some.
+
+    Parameters
+    ----------
+    value: T | None
+        Optional value.
+
+    Returns
+    -------
+    option: Option[T]
+
+    Examples
+    --------
     >>> from_optional(None)
     Nil()
+    >>> from_optional(1)
+    Some(1)
     """
     if value is None:
         return Nil()
     return Some(value)
 
 
-def safe(function: Callable[[], TypeResult]) -> Option[TypeResult]:
-    """Calls a function which might raise an Exception and returns Some with the result, otherwise Nil.
+def safe(function: Callable[[], T]) -> Option[T]:
+    """Calls function and wraps its return value in Some, or returns Nil if it raises an Exception.
 
     Parameters
     ----------
-    function: Callable[[], TypeResult]
-        Callable function which may raise an exception.
+    function: Callable[[], T]
+        Zero-argument function which may raise an Exception.
 
     Returns
     -------
-    option: Option[TypeResult]
-        Returns Some containing the function result, or Nil if an exception was raised.
+    option: Option[T]
 
     Examples
     --------
-    >>> def risky_call():
-    ...     raise ValueError("Boom")
-    >>> safe(risky_call)
+    >>> safe(lambda: 1)
+    Some(1)
+    >>> safe(lambda: 1 / 0)
     Nil()
-    >>> def safe_call():
-    ...     return 42
-    >>> safe(safe_call)
-    Some(42)
     """
     try:
         return Some(function())

@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from pymoliath.aio import AsyncResult
-from pymoliath.result import Err, Ok
+from pymoliath.result import Err, Ok, Result
 
 
 class TestAsyncResult(unittest.IsolatedAsyncioTestCase):
@@ -110,14 +110,16 @@ class TestAsyncResult(unittest.IsolatedAsyncioTestCase):
         result = await AsyncResult.from_ok(10).bind(lambda x: Ok(x + 1))
         self.assertEqual(Ok(11), result)
 
-        result_err = await AsyncResult.from_ok(10).bind(lambda _: Err("boom"))
+        ten: AsyncResult[int, str] = AsyncResult.from_ok(10)
+        result_err = await ten.bind(lambda _: Err("boom"))
         self.assertEqual(Err("boom"), result_err)
 
     async def test_bind_returning_awaitable_result(self):
-        async def to_result(x: int) -> Ok[int]:
+        async def to_result(x: int) -> Result[int, str]:
             return Ok(x + 1)
 
-        result = await AsyncResult.from_ok(10).bind(to_result)
+        ten: AsyncResult[int, str] = AsyncResult.from_ok(10)
+        result = await ten.bind(to_result)
         self.assertEqual(Ok(11), result)
 
     async def test_bind_on_err(self):
@@ -140,10 +142,11 @@ class TestAsyncResult(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Ok(1), result_ok)
 
     async def test_bind_err_returning_awaitable_result(self):
-        async def to_result(e: str) -> Err[str]:
+        async def to_result(e: str) -> Result[int, str]:
             return Err(e.upper())
 
-        result = await AsyncResult.from_err("boom").bind_err(to_result)
+        boom: AsyncResult[int, str] = AsyncResult.from_err("boom")
+        result = await boom.bind_err(to_result)
         self.assertEqual(Err("BOOM"), result)
 
     async def test_bind_err_on_ok(self):
@@ -216,7 +219,8 @@ class TestAsyncResult(unittest.IsolatedAsyncioTestCase):
         result = await AsyncResult.from_ok(10).zip(AsyncResult.from_ok("a"))
         self.assertEqual(Ok((10, "a")), result)
 
-        result_err = await AsyncResult.from_ok(10).zip(AsyncResult.from_err("boom"))
+        ten: AsyncResult[int, str] = AsyncResult.from_ok(10)
+        result_err = await ten.zip(AsyncResult.from_err("boom"))
         self.assertEqual(Err("boom"), result_err)
 
     async def test_flatten(self):

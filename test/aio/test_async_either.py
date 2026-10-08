@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from pymoliath.aio import AsyncEither
-from pymoliath.either import Left, Right
+from pymoliath.either import Either, Left, Right
 
 
 class TestAsyncEither(unittest.IsolatedAsyncioTestCase):
@@ -110,14 +110,16 @@ class TestAsyncEither(unittest.IsolatedAsyncioTestCase):
         result = await AsyncEither.from_right(10).bind(lambda x: Right(x + 1))
         self.assertEqual(Right(11), result)
 
-        result_left = await AsyncEither.from_right(10).bind(lambda _: Left("bad"))
+        ten: AsyncEither[str, int] = AsyncEither.from_right(10)
+        result_left = await ten.bind(lambda _: Left("bad"))
         self.assertEqual(Left("bad"), result_left)
 
     async def test_bind_returning_awaitable_either(self):
-        async def to_either(x: int) -> Right[int]:
+        async def to_either(x: int) -> Either[str, int]:
             return Right(x + 1)
 
-        result = await AsyncEither.from_right(10).bind(to_either)
+        ten: AsyncEither[str, int] = AsyncEither.from_right(10)
+        result = await ten.bind(to_either)
         self.assertEqual(Right(11), result)
 
     async def test_bind_on_left(self):
@@ -144,10 +146,11 @@ class TestAsyncEither(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Right(0), result_right)
 
     async def test_bind_left_returning_awaitable_either(self):
-        async def to_either(x: str) -> Left[str]:
+        async def to_either(x: str) -> Either[str, int]:
             return Left(x.upper())
 
-        result = await AsyncEither.from_left("error").bind_left(to_either)
+        error: AsyncEither[str, int] = AsyncEither.from_left("error")
+        result = await error.bind_left(to_either)
         self.assertEqual(Left("ERROR"), result)
 
     async def test_bind_left_on_right(self):
@@ -222,9 +225,8 @@ class TestAsyncEither(unittest.IsolatedAsyncioTestCase):
         result = await AsyncEither.from_right(10).zip(AsyncEither.from_right("a"))
         self.assertEqual(Right((10, "a")), result)
 
-        result_left = await AsyncEither.from_right(10).zip(
-            AsyncEither.from_left("error")
-        )
+        ten: AsyncEither[str, int] = AsyncEither.from_right(10)
+        result_left = await ten.zip(AsyncEither.from_left("error"))
         self.assertEqual(Left("error"), result_left)
 
         result_left_self = await AsyncEither.from_left("error").zip(

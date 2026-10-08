@@ -12,12 +12,16 @@ are given and turn it into a `Failure`.
 
 This implementation is heavily inspired by Scala's `Try` type.
 
-The `Try` type is a sum type that can be either `Success` or `Failure`.
-In this implementation, it is represented as a Union type in Python.
+The `Try` type is a sealed sum type that can be either `Success` or `Failure`. Like Rust's
+`Result`, both variants carry the type parameter:
 
 ```python
-Try = Success[TypeSource] | Failure
+type Try[T] = Success[T] | Failure[T]
 ```
+
+A bare `Success(10)` is a `Success[int]`. A bare `Failure(e)` leaves its success type open
+(`Failure[Unknown]`) so it can be solved from context, e.g. in
+`lambda x: Success(x) if x > 0 else Failure(ValueError("negative"))`.
 
 ## Practical Examples and Benefits:
 
@@ -53,9 +57,9 @@ except ValueError as e:
 ```
 
 Structural pattern matching provides a clean, declarative way to handle the contents of a `Try`
-monad. Because the `Success` and `Failure` classes are designed to be compatible with Python's
-`match` statement, you can easily branch your logic based on whether the computation succeeded or
-raised, without manually checking `is_success()`/`is_failure()`.
+monad. `Success` and `Failure` are the only variants (the Try is sealed), so a `match` over both is
+exhaustive and type checkers narrow the value in each branch, without manually checking
+`is_success()`/`is_failure()`.
 
 ```python
 match try_value:
@@ -70,57 +74,50 @@ match try_value:
 
 from __future__ import annotations
 
-from typing import Any, Callable, Generic, Tuple, TypeAlias, TypeVar, cast, overload
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, Generic, Never, assert_never, cast, final, overload
+
+from typing_extensions import TypeVar
 
 from pymoliath.either import Either, Left, Right
 from pymoliath.result import Err, Ok, Result
 from pymoliath.util import curry
 
-TypeSource = TypeVar("TypeSource")
-TypeResult = TypeVar("TypeResult")
-TypePure = TypeVar("TypePure")
+# Old-style TypeVars are invariant by default, which is what Try needs anyway
+# (T also appears in parameter positions, e.g. unwrap_or and or_).
+T = TypeVar("T")
+U = TypeVar("U")
 
 
-class Success(Generic[TypeSource]):
-    """The Success variant of the Try Monad.
+class _TryImpl(Generic[T]):
+    """Shared implementation of the Try Monad - `Success` and `Failure` are its only subclasses."""
 
-    Represents a computation that completed without raising. It wraps a value of type
-    `TypeSource` and provides a functional interface for chaining operations, catching any
-    exception the chained function raises and turning it into a `Failure`.
-    """
+    __slots__ = ()
 
-    __slots__ = ("_success_value",)
-    __match_args__ = ("_success_value",)
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        # Runtime "sealed": only Success and Failure (defined in this module) may subclass.
+        super().__init_subclass__(**kwargs)
+        if cls.__module__ != __name__:
+            raise TypeError("Try cannot be subclassed; use Success or Failure")
 
-    def __init__(self, value: TypeSource):
-        """Success Monad constructor which takes a value of type TypeSource.
+    def _as_try(self) -> Try[T]:
+        # Safe: Success and Failure are the only subclasses (see __init_subclass__).
+        return cast("Try[T]", self)
 
-        Parameters
-        ----------
-        value: TypeSource
-            Value to be stored in the Success Monad.
-
-        Examples
-        --------
-        >>> success = Success(42)
-        >>> print(success)
-        Success(42)
-        """
-        self._success_value = value
-
-    def map(self, function: Callable[[TypeSource], TypeResult]) -> Try[TypeResult]:
-        """Calls function to the a wrapped Success value if not an Failure, otherwise leaving the Failure value untouched.
-        The map function will execute the function by checking for any exception.
+    def map(self, function: Callable[[T], U]) -> Try[U]:
+        """Calls function on a wrapped Success value, otherwise leaving the Failure untouched.
+        Any exception raised by the function is caught and turned into a Failure.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], TypeResult]
-            Function which takes a value of TypeSource and returns a value of type TypeResult.
+        function: Callable[[T], U]
+            Function which takes a value of T and returns a value of type U.
 
         Returns
         -------
-        try: Try[TypeResult]
-            Returns an Success with the function result or otherwise Failure.
+        try: Try[U]
+            Returns a Success with the function result or otherwise a Failure.
 
         Examples
         --------
@@ -132,16 +129,20 @@ class Success(Generic[TypeSource]):
         >>> val.map(risky)
         Failure(boom)
         """
-        try:
-            return Success(function(self._success_value))
-        except Exception as e:
-            return Failure(e)
+        match t := self._as_try():
+            case Success(value):
+                try:
+                    return Success(function(value))
+                except Exception as e:
+                    return Failure(e)
+            case Failure(exception):
+                return Failure(exception)
+            case _:
+                assert_never(t)
 
-    def map_failure(
-        self, function: Callable[[Exception], Exception]
-    ) -> Try[TypeSource]:
-        """Calls function to the Failure value if not Success, otherwise leaving the Success value untouched.
-        The map function will execute the function by checking for any exception.
+    def map_failure(self, function: Callable[[Exception], Exception]) -> Try[T]:
+        """Calls function on a wrapped Failure exception, otherwise leaving the Success untouched.
+        Any exception raised by the function is caught and turned into a Failure.
 
         Parameters
         ----------
@@ -150,117 +151,131 @@ class Success(Generic[TypeSource]):
 
         Returns
         -------
-        result: Try[TypeSource]
-            Returns an Failure with the function result or otherwise Success.
+        try: Try[T]
+            Returns a Failure with the function result or otherwise the Success.
 
         Examples
         --------
         >>> val: Try[int] = Success(5)
         >>> val.map_failure(lambda e: ValueError("wrapped"))
         Success(5)
+        >>> failed: Try[int] = Failure(ValueError("boom"))
+        >>> failed.map_failure(lambda e: ValueError(f"wrapped {e}"))
+        Failure(wrapped boom)
         """
-        return self
+        match t := self._as_try():
+            case Success(value):
+                return Success(value)
+            case Failure(exception):
+                try:
+                    return Failure(function(exception))
+                except Exception as e:
+                    return Failure(e)
+            case _:
+                assert_never(t)
 
-    def bind(
-        self, function: Callable[[TypeSource], Try[TypeResult]]
-    ) -> Try[TypeResult]:
-        """Calls function if Try Monad is Success, otherwise returns Failure.
-        The bind function will execute the passed function and is also checking for any exception.
+    def bind(self, function: Callable[[T], Try[U]]) -> Try[U]:
+        """Calls function if the Try Monad is Success, otherwise returns the Failure.
+        Any exception raised by the function is caught and turned into a Failure.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], Try[TypeResult]]
-            Function which takes a value of TypeSource and returns a Try Monad of TypeResult.
+        function: Callable[[T], Try[U]]
+            Function which takes a value of T and returns a new Try Monad.
 
         Returns
         -------
-        result: Try[TypeResult]
-            Returns a Try Monad from the function result if Success, otherwise an Failure.
+        try: Try[U]
+            Returns the function result if Success, otherwise a Failure.
 
         Examples
         --------
-        >>> val: Try[int] = Success(5)
         >>> def get_next(x: int) -> Try[int]:
         ...     return Success(x + 1) if x < 10 else Failure(ValueError("too big"))
-        >>> val.bind(get_next)
+        >>> Success(5).bind(get_next)
         Success(6)
         >>> Success(10).bind(get_next)
         Failure(too big)
         """
-        try:
-            return function(self._success_value)
-        except Exception as e:
-            return Failure(e)
+        match t := self._as_try():
+            case Success(value):
+                try:
+                    return function(value)
+                except Exception as e:
+                    return Failure(e)
+            case Failure(exception):
+                return Failure(exception)
+            case _:
+                assert_never(t)
 
-    def bind_failure(
-        self, function: Callable[[Exception], Try[TypeSource]]
-    ) -> Try[TypeSource]:
-        """Calls function if Try Monad is an Failure, otherwise returns Success.
-        The bind function will execute the passed function and is also checking for any exception.
+    def bind_failure(self, function: Callable[[Exception], Try[T]]) -> Try[T]:
+        """Calls function if the Try Monad is Failure, otherwise returns the Success.
+        Any exception raised by the function is caught and turned into a Failure.
 
         Parameters
         ----------
-        function: Callable[[Exception], Try[TypeResult]]
-            Function which takes an Exception and returns a Try Monad of TypeResult.
+        function: Callable[[Exception], Try[T]]
+            Function which takes the Exception and returns a new Try Monad.
 
         Returns
         -------
-        result: Try[TypeResult]
-            Returns a Try Monad from the function result if Failure, otherwise an Success.
+        try: Try[T]
+            Returns the function result if Failure, otherwise the Success.
 
         Examples
         --------
-        >>> val: Try[int] = Success(5)
-        >>> val.bind_failure(lambda e: Success(0))
-        Success(5)
+        >>> failed: Try[int] = Failure(ValueError("boom"))
+        >>> failed.bind_failure(lambda e: Success(0))
+        Success(0)
         """
-        return self
+        match t := self._as_try():
+            case Success(value):
+                return Success(value)
+            case Failure(exception):
+                try:
+                    return function(exception)
+                except Exception as e:
+                    return Failure(e)
+            case _:
+                assert_never(t)
 
-    def apply(self, applicative: Try[Callable[..., TypeResult]]) -> Try[TypeResult]:
-        """Applies the passed applicative wrapping a function if Try Monad is Success, otherwise returns Failure.
+    def apply(self, applicative: Try[Callable[..., U]]) -> Try[U]:
+        """Applies the passed applicative wrapping a function if the Try Monad is Success,
+        otherwise returns the (first) Failure. Functions of several arguments are curried.
 
         Parameters
         ----------
-        applicative: Try[Callable[Callable[[TypeSource], TypeResult]]
+        applicative: Try[Callable[[T], U]]
             Applicative Try Monad which contains a function.
 
         Returns
         -------
-        result: Try[TypeResult]
-            Returns a Try Monad from the applied function if Success, otherwise an Failure.
+        try: Try[U]
+            Returns a Try Monad from the applied function if Success, otherwise a Failure.
 
         Examples
         --------
-        >>> val: Try[int] = Success(10)
         >>> func: Try[Callable[[int], int]] = Success(lambda x: x * 2)
+        >>> val: Try[int] = Success(10)
         >>> val.apply(func)
         Success(20)
         """
+        return applicative.bind(lambda function: self.map(curry(function)))
 
-        def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> Try[TypeResult]:
-            """Maps the applicative's function, curried, over this Success value."""
-            return self.map(curry(applicative_function))
-
-        return applicative.bind(binder)
-
-    def apply2(
-        self: Success[Callable[..., TypeResult]],
-        applicative_value: Try[Any],
-    ) -> Try[TypeResult]:
-        """Applies the passed Try Monad wrapping a value to the Try Monad containing a function if Success,
-        otherwise returns Failure.
+    def apply2(self: _TryImpl[Callable[..., U]], applicative_value: Try[Any]) -> Try[U]:
+        """Applies the function wrapped in this Try Monad to the passed Try Monad wrapping a value
+        if both are Success, otherwise returns the (first) Failure. Functions of several arguments
+        are curried.
 
         Parameters
         ----------
-        applicative_value: Try[TypePure]
-            Try monad containing a value which will be applied to the Try Monad containing a function.
+        applicative_value: Try[Any]
+            Try Monad which contains a value.
 
         Returns
         -------
-        try: Try[TypeResult]:
-            Returns a Try Monad from the applied function if Success, otherwise an Failure.
+        try: Try[U]
+            Returns a Try Monad from the applied function if Success, otherwise a Failure.
 
         Examples
         --------
@@ -269,27 +284,20 @@ class Success(Generic[TypeSource]):
         >>> func.apply2(val)
         Success(20)
         """
+        return self.bind(lambda function: applicative_value.map(curry(function)))
 
-        def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> Try[TypeResult]:
-            """Maps the curried applicative function over the applicative's value."""
-            return applicative_value.map(curry(applicative_function))
-
-        return self.bind(binder)
-
-    def is_success_and(self, function: Callable[[TypeSource], bool]) -> bool:
-        """Returns True if the Try Monad is Success and the predicate returns True for the contained value.
+    def is_success_and(self, function: Callable[[T], bool]) -> bool:
+        """Returns True if the Try Monad is Success and the predicate returns True for the value.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], bool]
+        function: Callable[[T], bool]
             Predicate function applied to the Success value.
 
         Returns
         -------
         result: bool
-            Returns the predicate result.
+            Returns the predicate result if Success, otherwise False.
 
         Examples
         --------
@@ -297,45 +305,56 @@ class Success(Generic[TypeSource]):
         >>> val.is_success_and(lambda x: x > 5)
         True
         """
-        return function(self._success_value)
+        match t := self._as_try():
+            case Success(value):
+                return function(value)
+            case Failure():
+                return False
+            case _:
+                assert_never(t)
 
-    def is_failure_and(self, function: Callable[[Any], bool]) -> bool:
-        """Returns False, since this Try Monad is Success.
+    def is_failure_and(self, function: Callable[[Exception], bool]) -> bool:
+        """Returns True if the Try Monad is Failure and the predicate returns True for the
+        exception.
 
         Parameters
         ----------
         function: Callable[[Exception], bool]
-            Predicate function which would be applied to the Failure value.
+            Predicate function applied to the Failure exception.
 
         Returns
         -------
         result: bool
-            Returns False.
+            Returns the predicate result if Failure, otherwise False.
 
         Examples
         --------
-        >>> val: Try[int] = Success(10)
-        >>> val.is_failure_and(lambda e: True)
-        False
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.is_failure_and(lambda e: isinstance(e, ValueError))
+        True
         """
-        return False
+        match t := self._as_try():
+            case Success():
+                return False
+            case Failure(exception):
+                return function(exception)
+            case _:
+                assert_never(t)
 
-    def map_or(
-        self, default_value: TypeResult, function: Callable[[TypeSource], TypeResult]
-    ) -> TypeResult:
+    def map_or(self, default_value: U, function: Callable[[T], U]) -> U:
         """Applies the function to the Success value, or returns the default value if Failure.
 
         Parameters
         ----------
-        default_value: TypeResult
+        default_value: U
             Default value to be returned if the Try Monad is Failure.
-        function: Callable[[TypeSource], TypeResult]
+        function: Callable[[T], U]
             Function applied to the Success value.
 
         Returns
         -------
-        result: TypeResult
-            Returns the function result.
+        result: U
+            Returns the function result or the default value.
 
         Examples
         --------
@@ -343,20 +362,26 @@ class Success(Generic[TypeSource]):
         >>> val.map_or(0, lambda x: x * 2)
         20
         """
-        return function(self._success_value)
+        match t := self._as_try():
+            case Success(value):
+                return function(value)
+            case Failure():
+                return default_value
+            case _:
+                assert_never(t)
 
-    def and_(self, other: Try[TypeResult]) -> Try[TypeResult]:
-        """Returns `other` if the Try Monad is Success, otherwise Failure.
+    def and_(self, other: Try[U]) -> Try[U]:
+        """Returns `other` if the Try Monad is Success, otherwise the Failure.
 
         Parameters
         ----------
-        other: Try[TypeResult]
+        other: Try[U]
             Try Monad to be returned if this Try Monad is Success.
 
         Returns
         -------
-        result: Try[TypeResult]
-            Returns `other`.
+        try: Try[U]
+            Returns `other` or the Failure.
 
         Examples
         --------
@@ -365,41 +390,53 @@ class Success(Generic[TypeSource]):
         >>> val1.and_(val2)
         Success(2)
         """
-        return other
+        match t := self._as_try():
+            case Success():
+                return other
+            case Failure(exception):
+                return Failure(exception)
+            case _:
+                assert_never(t)
 
-    def or_(self, other: Try[TypeSource]) -> Try[TypeSource]:
+    def or_(self, other: Try[T]) -> Try[T]:
         """Returns this Try Monad if it is Success, otherwise `other`.
 
         Parameters
         ----------
-        other: Try[TypeSource]
+        other: Try[T]
             Try Monad to be returned if this Try Monad is Failure.
 
         Returns
         -------
-        result: Try[TypeSource]
-            Returns this Success.
+        try: Try[T]
+            Returns the Success or `other`.
 
         Examples
         --------
-        >>> val1: Try[int] = Success(1)
+        >>> val1: Try[int] = Failure(ValueError("boom"))
         >>> val2: Try[int] = Success(2)
         >>> val1.or_(val2)
-        Success(1)
+        Success(2)
         """
-        return self
+        match t := self._as_try():
+            case Success(value):
+                return Success(value)
+            case Failure():
+                return other
+            case _:
+                assert_never(t)
 
-    def zip(self, other: Try[TypePure]) -> Try[Tuple[TypeSource, TypePure]]:
-        """Combines this Try Monad with another into a Try Monad of a tuple, or Failure if either is Failure.
+    def zip(self, other: Try[U]) -> Try[tuple[T, U]]:
+        """Combines this Try Monad with another into a Try Monad of a tuple, or the first Failure.
 
         Parameters
         ----------
-        other: Try[TypePure]
+        other: Try[U]
             Try Monad to be zipped with this Try Monad.
 
         Returns
         -------
-        result: Try[Tuple[TypeSource, TypePure]]
+        try: Try[tuple[T, U]]
             Returns Success of a tuple of both values, or Failure.
 
         Examples
@@ -409,37 +446,55 @@ class Success(Generic[TypeSource]):
         >>> val1.zip(val2)
         Success((1, 2))
         """
-        return other.map(lambda o: (self._success_value, o))
+        return self.bind(
+            lambda value: other.map(lambda other_value: (value, other_value))
+        )
 
     @overload
-    def flatten(self: Success[Success[TypeResult]]) -> Try[TypeResult]: ...
+    def flatten(self: _TryImpl[Success[U]]) -> Try[U]: ...
 
     @overload
-    def flatten(self: Success[Failure]) -> Try[Any]: ...
+    def flatten(self: _TryImpl[Failure[U]]) -> Try[U]: ...
 
-    def flatten(self) -> Try[Any]:
+    @overload
+    def flatten(self: _TryImpl[Try[U]]) -> Try[U]: ...
+
+    @overload
+    def flatten(self: Failure[Any]) -> Try[Never]: ...
+
+    def flatten(self: _TryImpl[Any]) -> Try[Any]:
         """Flattens a nested Try Monad by one level.
 
         Returns
         -------
-        result: Try[TypeResult]
-            Returns the nested Try Monad.
+        try: Try[U]
+            Returns the nested Try Monad if Success, otherwise the Failure.
 
         Examples
         --------
-        >>> val: Try[Try[int]] = Success(Success(1))
-        >>> val.flatten()
+        >>> Success(Success(1)).flatten()
         Success(1)
         """
-        return cast(Try[Any], self._success_value)
+        match t := self._as_try():
+            case Success(value):
+                return cast("Try[Any]", value)
+            case Failure(exception):
+                return Failure(exception)
+            case _:
+                assert_never(t)
 
-    def unwrap(self) -> TypeSource:
-        """Returns the Success value if not Failure, or otherwise raises the Failure Exception.
+    def unwrap(self) -> T:
+        """Returns the Success value, or otherwise raises the wrapped exception.
 
         Returns
         -------
-        result: TypeRight
-            Returns the Success value or raises the Failure Exception.
+        result: T
+            Returns the Success value.
+
+        Raises
+        ------
+        Exception
+            The wrapped exception if the Try Monad is Failure.
 
         Examples
         --------
@@ -447,64 +502,80 @@ class Success(Generic[TypeSource]):
         >>> val.unwrap()
         1
         """
-        return self._success_value
+        match t := self._as_try():
+            case Success(value):
+                return value
+            case Failure(exception):
+                raise exception
+            case _:
+                assert_never(t)
 
-    def unwrap_or(self, default_value: TypeSource) -> TypeSource:
-        """Returns the Ok value if not Err, or otherwise a provided default value of the same type.
+    def unwrap_or(self, default_value: T) -> T:
+        """Returns the Success value, or otherwise a provided default value of the same type.
 
         Parameters
         ----------
-        default_value: TypeOk
-            Default value of TypeOk
+        default_value: T
+            Default value of T
 
         Returns
         -------
-        result: TypeOk
-            Returns the Ok value or a default value.
+        result: T
+            Returns the Success value or the default value.
 
         Examples
         --------
-        >>> val: Try[int] = Success(1)
+        >>> val: Try[int] = Failure(ValueError("boom"))
         >>> val.unwrap_or(0)
-        1
+        0
         """
-        return self._success_value
+        match t := self._as_try():
+            case Success(value):
+                return value
+            case Failure():
+                return default_value
+            case _:
+                assert_never(t)
 
-    def unwrap_or_else(
-        self, failure_function: Callable[[Exception], TypeSource]
-    ) -> TypeSource:
-        """Returns the Success value if not Failure, or otherwise calls the provided function with the failure value.
+    def unwrap_or_else(self, failure_function: Callable[[Exception], T]) -> T:
+        """Returns the Success value, or otherwise calls the failure_function with the exception.
 
         Parameters
         ----------
-        failure_function: Callable[[Exception], TypeRight]
-            Called with the failure value and must return a value of type TypeSource
+        failure_function: Callable[[Exception], T]
+            Function which will be called if the Try Monad is Failure.
 
         Returns
         -------
-        result: TypeRight
-            Returns the Success value or value from the function call.
+        result: T
+            Returns the Success value or the failure_function result.
 
         Examples
         --------
-        >>> val: Try[int] = Success(1)
-        >>> val.unwrap_or_else(lambda e: 0)
-        1
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.unwrap_or_else(lambda e: len(str(e)))
+        4
         """
-        return self._success_value
+        match t := self._as_try():
+            case Success(value):
+                return value
+            case Failure(exception):
+                return failure_function(exception)
+            case _:
+                assert_never(t)
 
     def unwrap_failure_or(self, default_value: Exception) -> Exception:
-        """Returns the Err value if not Ok, or otherwise a provided default Exception.
+        """Returns the Failure exception, or otherwise a provided default exception.
 
         Parameters
         ----------
         default_value: Exception
-            Default value of type Exception
+            Default exception
 
         Returns
         -------
         result: Exception
-            Returns the Err value or a default value.
+            Returns the Failure exception or the default value.
 
         Examples
         --------
@@ -512,19 +583,25 @@ class Success(Generic[TypeSource]):
         >>> val.unwrap_failure_or(ValueError("default"))
         ValueError('default')
         """
-        return default_value
+        match t := self._as_try():
+            case Success():
+                return default_value
+            case Failure(exception):
+                return exception
+            case _:
+                assert_never(t)
 
-    def inspect(self, function: Callable[[TypeSource], None]) -> Try[TypeSource]:
-        """Inspect the Try monad value of TypeSource
+    def inspect(self, function: Callable[[T], None]) -> Try[T]:
+        """Calls function with the Success value (if any) and returns the Try Monad unchanged.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], None]
-            Inspection function which takes the success value of the Try monad
+        function: Callable[[T], None]
+            Inspection function which takes the Success value of the Try Monad
 
         Returns
         -------
-        try: Try[TypeSource]
+        try: Try[T]
 
         Examples
         --------
@@ -533,42 +610,57 @@ class Success(Generic[TypeSource]):
         Value is: 42
         Success(42)
         """
-        function(self._success_value)
-        return self
+        match t := self._as_try():
+            case Success(value):
+                function(value)
+            case Failure():
+                pass
+            case _:
+                assert_never(t)
+        return t
 
-    def inspect_failure(self, function: Callable[[Exception], None]) -> Try[TypeSource]:
-        """Inspect the Try monad Exception value
+    def inspect_failure(self, function: Callable[[Exception], None]) -> Try[T]:
+        """Calls function with the Failure exception (if any) and returns the Try Monad unchanged.
 
         Parameters
         ----------
         function: Callable[[Exception], None]
-            Inspection function which takes the exception value of the Try monad
+            Inspection function which takes the exception of the Try Monad
 
         Returns
         -------
-        try: Try[TypeSource]
+        try: Try[T]
 
         Examples
         --------
-        >>> val: Try[int] = Success(42)
-        >>> val.inspect_failure(lambda e: print(f"Exception: {e}"))
-        Success(42)
+        >>> val: Try[int] = Failure(ValueError("boom"))
+        >>> val.inspect_failure(lambda e: print(f"Error: {e}"))
+        Error: boom
+        Failure(boom)
         """
-        return self
+        match t := self._as_try():
+            case Success():
+                pass
+            case Failure(exception):
+                function(exception)
+            case _:
+                assert_never(t)
+        return t
 
     def match(
         self,
-        failure_function: Callable[[Exception], TypeResult],
-        success_function: Callable[[TypeSource], TypeResult],
-    ) -> TypeResult:
-        """Try Monad specific function to handle railroad orientated types.
+        failure_function: Callable[[Exception], U],
+        success_function: Callable[[T], U],
+    ) -> U:
+        """Matches the Try Monad to either a Failure function or a Success function with the same
+        return type.
 
         Parameters
         ----------
-        failure_function: Callable[[TypeErr], TypeResult]
-            Callback function for either monads of type Failure
-        success_function: Callable[[TypeSource], TypeResult]
-            Callback function for either monads of type Success
+        failure_function: Callable[[Exception], U]
+            Callback function for Try monads of type Failure
+        success_function: Callable[[T], U]
+            Callback function for Try monads of type Success
 
         Examples
         --------
@@ -576,15 +668,16 @@ class Success(Generic[TypeSource]):
         >>> val.match(lambda e: "Error", lambda x: f"Success: {x}")
         'Success: 10'
         """
-        return success_function(self._success_value)
+        match t := self._as_try():
+            case Success(value):
+                return success_function(value)
+            case Failure(exception):
+                return failure_function(exception)
+            case _:
+                assert_never(t)
 
-    def to_either(self) -> Either[Exception, TypeSource]:
-        """Try Monad specific function to return an Either Monad.
-
-        Returns
-        -------
-        either: Either[Exception, TypeSource]
-            Returns the Try Monad as Either Monad
+    def to_either(self) -> Either[Exception, T]:
+        """Converts the Try Monad into an Either Monad (Success -> Right, Failure -> Left).
 
         Examples
         --------
@@ -592,15 +685,16 @@ class Success(Generic[TypeSource]):
         >>> val.to_either()
         Right(10)
         """
-        return Right(self._success_value)
+        match t := self._as_try():
+            case Success(value):
+                return Right(value)
+            case Failure(exception):
+                return Left(exception)
+            case _:
+                assert_never(t)
 
-    def to_result(self) -> Result[TypeSource, Exception]:
-        """Try Monad specific function to return an Result Monad.
-
-        Returns
-        -------
-        either: Either[Exception, TypeSource]
-            Returns the Try Monad as Either Monad
+    def to_result(self) -> Result[T, Exception]:
+        """Converts the Try Monad into a Result Monad (Success -> Ok, Failure -> Err).
 
         Examples
         --------
@@ -608,15 +702,16 @@ class Success(Generic[TypeSource]):
         >>> val.to_result()
         Ok(10)
         """
-        return Ok(self._success_value)
+        match t := self._as_try():
+            case Success(value):
+                return Ok(value)
+            case Failure(exception):
+                return Err(exception)
+            case _:
+                assert_never(t)
 
     def is_success(self) -> bool:
-        """Try monad is success function
-
-        Returns
-        -------
-        result: bool
-            True: if try monad is of type success, False: if try monad is of type failure
+        """Returns True if the Try Monad is Success, otherwise False.
 
         Examples
         --------
@@ -624,15 +719,10 @@ class Success(Generic[TypeSource]):
         >>> val.is_success()
         True
         """
-        return True
+        return isinstance(self, Success)
 
     def is_failure(self) -> bool:
-        """Try monad is failure function
-
-        Returns
-        -------
-        result: bool
-            True: if try monad is of type failure, False: if try monad is of type success
+        """Returns True if the Try Monad is Failure, otherwise False.
 
         Examples
         --------
@@ -640,629 +730,106 @@ class Success(Generic[TypeSource]):
         >>> val.is_failure()
         False
         """
-        return False
+        return isinstance(self, Failure)
+
+    def _payload(self) -> object:
+        match t := self._as_try():
+            case Success(value):
+                return value
+            case Failure(exception):
+                return exception
+            case _:
+                assert_never(t)
 
     def __str__(self) -> str:
-        """Returns the string representation of the Success Monad.
+        """Returns the string representation of the Try Monad.
 
         Examples
         --------
         >>> str(Success(42))
         'Success(42)'
+        >>> str(Failure(ValueError("boom")))
+        'Failure(boom)'
         """
-        return f"Success({self._success_value})"
+        return f"{type(self).__name__}({self._payload()})"
+
+    def __repr__(self) -> str:
+        """Returns the string representation of the Try Monad (same as __str__)."""
+        return str(self)
 
     def __eq__(self, other: object) -> bool:
-        """Returns True if `other` is a Success wrapping a value of the same type and string representation.
+        """Returns True if `other` is the same variant wrapping a value of the same type and string,
+        so wrapped exceptions compare by type and message.
 
         Examples
         --------
         >>> Success(1) == Success(1)
         True
-        >>> Success(1) == Success(2)
-        False
-        """
-        if isinstance(other, Success):
-            other_success = cast(Success[Any], other)
-            return str(self) == str(other_success) and type(
-                self._success_value
-            ) is type(other_success._success_value)
-        return False
-
-    def __repr__(self) -> str:
-        """Returns the string representation of the Success Monad (same as __str__).
-
-        Examples
-        --------
-        >>> repr(Success(10))
-        'Success(10)'
-        """
-        return str(self)
-
-
-class Failure:
-    """The Failure variant of the Try Monad.
-
-    Represents a computation that raised an exception. It wraps the raised `Exception` and, like
-    `Success`, provides a functional interface for chaining operations, though `map`/`bind` on a
-    `Failure` are no-ops since there is no success value to transform.
-    """
-
-    __slots__ = ("_failure_value",)
-    __match_args__ = ("_failure_value",)
-
-    def __init__(self, value: Exception):
-        """Failure Monad constructor which takes a value of type Exception.
-
-        Parameters
-        ----------
-        value: Exception
-            Exception to be stored in the Failure Monad. Must be an instance of Exception.
-
-        Examples
-        --------
-        >>> failure = Failure(ValueError("boom"))
-        >>> print(failure)
-        Failure(boom)
-        """
-        assert isinstance(value, Exception), "Failure value must be of type Exception"
-        self._failure_value = value
-
-    def map(self, function: Callable[[Any], TypeResult]) -> Try[TypeResult]:
-        """Leaves the Failure value untouched, since this Try Monad is already a Failure.
-
-        Parameters
-        ----------
-        function: Callable[[Any], TypeResult]
-            Function which would have been applied to the Success value.
-
-        Returns
-        -------
-        result: Try[TypeResult]
-            Returns this Failure unchanged.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.map(lambda x: x + 1)
-        Failure(boom)
-        """
-        return self
-
-    def map_failure(self, function: Callable[[Exception], Exception]) -> Try[Any]:
-        """Calls function with the Failure value. The function is executed while checking for any exception.
-
-        Parameters
-        ----------
-        function: Callable[[Exception], Exception]
-            Function which takes an Exception and returns an Exception.
-
-        Returns
-        -------
-        result: Try[Any]
-            Returns a Failure with the function result, or a Failure of the raised exception.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.map_failure(lambda e: TypeError(f"wrapped: {e}"))
-        Failure(wrapped: boom)
-        """
-        try:
-            return Failure(function(self._failure_value))
-        except Exception as e:
-            return Failure(e)
-
-    def bind(self, function: Callable[[Any], Try[TypeResult]]) -> Try[TypeResult]:
-        """Leaves this Failure untouched, since the bind function is only called for Success.
-
-        Parameters
-        ----------
-        function: Callable[[Any], Try[TypeResult]]
-            Function which would have been applied to the Success value.
-
-        Returns
-        -------
-        result: Try[TypeResult]
-            Returns this Failure unchanged.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.bind(lambda x: Success(x + 1))
-        Failure(boom)
-        """
-        return self
-
-    def bind_failure(
-        self, function: Callable[[Exception], Try[TypeSource]]
-    ) -> Try[TypeSource]:
-        """Calls function with the Failure value. The bind function is executed while checking for any exception.
-
-        Parameters
-        ----------
-        function: Callable[[Exception], Try[TypeSource]]
-            Function which takes an Exception and returns a Try Monad of TypeSource.
-
-        Returns
-        -------
-        result: Try[TypeSource]
-            Returns the Try Monad from the function result, or a Failure if it raised an exception.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.bind_failure(lambda e: Success(0))
-        Success(0)
-        """
-        try:
-            return function(self._failure_value)
-        except Exception as e:
-            return Failure(e)
-
-    def apply(self, applicative: Try[Callable[..., TypeResult]]) -> Try[TypeResult]:
-        """Leaves this Failure untouched, since applying a function only happens for Success.
-
-        Parameters
-        ----------
-        applicative: Try[Callable[..., TypeResult]]
-            Applicative Try Monad which contains a function.
-
-        Returns
-        -------
-        result: Try[TypeResult]
-            Returns this Failure unchanged.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> func: Try[Callable[[int], int]] = Success(lambda x: x * 2)
-        >>> val.apply(func)
-        Failure(boom)
-        """
-        return self
-
-    def apply2(self, applicative_value: Try[Any]) -> Try[Any]:
-        """Leaves this Failure untouched, since applying a value only happens for Success.
-
-        Parameters
-        ----------
-        applicative_value: Try[Any]
-            Try Monad containing a value which would have been applied to the function.
-
-        Returns
-        -------
-        result: Try[Any]
-            Returns this Failure unchanged.
-
-        Examples
-        --------
-        >>> val: Try[Callable[[int], int]] = Failure(ValueError("boom"))
-        >>> other: Try[int] = Success(5)
-        >>> val.apply2(other)
-        Failure(boom)
-        """
-        return self
-
-    def is_success_and(self, function: Callable[[Any], bool]) -> bool:
-        """Returns False, since this Try Monad is Failure.
-
-        Parameters
-        ----------
-        function: Callable[[Any], bool]
-            Predicate function which would be applied to the Success value.
-
-        Returns
-        -------
-        result: bool
-            Returns False.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.is_success_and(lambda x: x > 5)
-        False
-        """
-        return False
-
-    def is_failure_and(self, function: Callable[[Exception], bool]) -> bool:
-        """Returns True if the Try Monad is Failure and the predicate returns True for the contained exception.
-
-        Parameters
-        ----------
-        function: Callable[[Exception], bool]
-            Predicate function applied to the Failure value.
-
-        Returns
-        -------
-        result: bool
-            Returns the predicate result.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.is_failure_and(lambda e: isinstance(e, ValueError))
-        True
-        """
-        return function(self._failure_value)
-
-    def map_or(
-        self, default_value: TypeResult, function: Callable[[Any], TypeResult]
-    ) -> TypeResult:
-        """Returns the default value, since this Try Monad is Failure.
-
-        Parameters
-        ----------
-        default_value: TypeResult
-            Default value to be returned since the Try Monad is Failure.
-        function: Callable[[Any], TypeResult]
-            Function which would have been applied to the Success value.
-
-        Returns
-        -------
-        result: TypeResult
-            Returns the default value.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.map_or("Fallback", lambda x: x)
-        'Fallback'
-        """
-        return default_value
-
-    def and_(self, other: Try[Any]) -> Try[Any]:
-        """Returns this Failure, since the Try Monad is not Success.
-
-        Parameters
-        ----------
-        other: Try[Any]
-            Try Monad which would have been returned if this Try Monad was Success.
-
-        Returns
-        -------
-        result: Try[Any]
-            Returns this Failure.
-
-        Examples
-        --------
-        >>> val1: Try[int] = Failure(ValueError("boom"))
-        >>> val2: Try[int] = Success(2)
-        >>> val1.and_(val2)
-        Failure(boom)
-        """
-        return self
-
-    def or_(self, other: Try[TypeSource]) -> Try[TypeSource]:
-        """Returns `other`, since this Try Monad is Failure.
-
-        Parameters
-        ----------
-        other: Try[TypeSource]
-            Try Monad to be returned since this Try Monad is Failure.
-
-        Returns
-        -------
-        result: Try[TypeSource]
-            Returns `other`.
-
-        Examples
-        --------
-        >>> val1: Try[int] = Failure(ValueError("boom"))
-        >>> val2: Try[int] = Success(2)
-        >>> val1.or_(val2)
-        Success(2)
-        """
-        return other
-
-    def zip(self, other: Try[Any]) -> Try[Any]:
-        """Returns this Failure, since combining values only happens for Success.
-
-        Parameters
-        ----------
-        other: Try[Any]
-            Try Monad which would have been zipped with this Try Monad.
-
-        Returns
-        -------
-        result: Try[Any]
-            Returns this Failure.
-
-        Examples
-        --------
-        >>> val1: Try[int] = Failure(ValueError("boom"))
-        >>> val2: Try[int] = Success(2)
-        >>> val1.zip(val2)
-        Failure(boom)
-        """
-        return self
-
-    def flatten(self) -> Try[Any]:
-        """Returns this Failure unchanged, since there is no nested Success value to flatten.
-
-        Returns
-        -------
-        result: Try[Any]
-            Returns this Failure.
-
-        Examples
-        --------
-        >>> val: Try[Try[int]] = Failure(ValueError("boom"))
-        >>> val.flatten()
-        Failure(boom)
-        """
-        return self
-
-    def unwrap(self) -> Any:
-        """Raises the Failure Exception, since this Try Monad is not Success.
-
-        Returns
-        -------
-        result: Any
-            Never returns, always raises the stored Exception.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.unwrap()
-        Traceback (most recent call last):
-            ...
-        ValueError: boom
-        """
-        raise self._failure_value
-
-    def unwrap_or(self, default_value: TypeSource) -> TypeSource:
-        """Returns the provided default value, since this Try Monad is Failure.
-
-        Parameters
-        ----------
-        default_value: TypeSource
-            Default value of TypeSource.
-
-        Returns
-        -------
-        result: TypeSource
-            Returns the default value.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.unwrap_or(0)
-        0
-        """
-        return default_value
-
-    def unwrap_or_else(
-        self, failure_function: Callable[[Exception], TypeSource]
-    ) -> TypeSource:
-        """Calls the provided function with the Failure value and returns its result.
-
-        Parameters
-        ----------
-        failure_function: Callable[[Exception], TypeSource]
-            Called with the Failure value and must return a value of type TypeSource.
-
-        Returns
-        -------
-        result: TypeSource
-            Returns the result of the function call.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.unwrap_or_else(lambda e: 0)
-        0
-        """
-        return failure_function(self._failure_value)
-
-    def unwrap_failure_or(self, default_value: Exception) -> Exception:
-        """Returns the Failure Exception, since this Try Monad is Failure.
-
-        Parameters
-        ----------
-        default_value: Exception
-            Default value of type Exception, ignored since this Try Monad is Failure.
-
-        Returns
-        -------
-        result: Exception
-            Returns the Failure value.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.unwrap_failure_or(TypeError("default"))
-        ValueError('boom')
-        """
-        return self._failure_value
-
-    def inspect(self, function: Callable[[Any], None]) -> Try[Any]:
-        """Leaves this Failure untouched, since inspecting the Success value only happens for Success.
-
-        Parameters
-        ----------
-        function: Callable[[Any], None]
-            Inspection function which would have taken the Success value.
-
-        Returns
-        -------
-        result: Try[Any]
-            Returns this Failure unchanged.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.inspect(lambda x: print(f"Value: {x}"))
-        Failure(boom)
-        """
-        return self
-
-    def inspect_failure(self, function: Callable[[Exception], None]) -> Try[Any]:
-        """Inspect the Try monad Exception value.
-
-        Parameters
-        ----------
-        function: Callable[[Exception], None]
-            Inspection function which takes the exception value of the Try monad.
-
-        Returns
-        -------
-        result: Try[Any]
-            Returns this Failure unchanged.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.inspect_failure(lambda e: print(f"Exception: {e}"))
-        Exception: boom
-        Failure(boom)
-        """
-        function(self._failure_value)
-        return self
-
-    def match(
-        self,
-        failure_function: Callable[[Exception], TypeResult],
-        success_function: Callable[[Any], TypeResult],
-    ) -> TypeResult:
-        """Try Monad specific function to handle railroad orientated types.
-
-        Parameters
-        ----------
-        failure_function: Callable[[Exception], TypeResult]
-            Callback function for Try monads of type Failure.
-        success_function: Callable[[Any], TypeResult]
-            Callback function for Try monads of type Success.
-
-        Returns
-        -------
-        result: TypeResult
-            Returns the result of calling failure_function with the Failure value.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.match(lambda e: f"Error: {e}", lambda x: "Success")
-        'Error: boom'
-        """
-        return failure_function(self._failure_value)
-
-    def to_either(self) -> Either[Exception, Any]:
-        """Try Monad specific function to return an Either Monad.
-
-        Returns
-        -------
-        either: Either[Exception, Any]
-            Returns the Try Monad as a Left Either Monad.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.to_either()
-        Left(boom)
-        """
-        return Left(self._failure_value)
-
-    def to_result(self) -> Result[Any, Exception]:
-        """Try Monad specific function to return a Result Monad.
-
-        Returns
-        -------
-        result: Result[Any, Exception]
-            Returns the Try Monad as an Err Result Monad.
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.to_result()
-        Err(boom)
-        """
-        return Err(self._failure_value)
-
-    def is_success(self) -> bool:
-        """Try monad is success function.
-
-        Returns
-        -------
-        result: bool
-            True: if try monad is of type success, False: if try monad is of type failure
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.is_success()
-        False
-        """
-        return False
-
-    def is_failure(self) -> bool:
-        """Try monad is failure function.
-
-        Returns
-        -------
-        result: bool
-            True: if try monad is of type failure, False: if try monad is of type success
-
-        Examples
-        --------
-        >>> val: Try[int] = Failure(ValueError("boom"))
-        >>> val.is_failure()
-        True
-        """
-        return True
-
-    def __str__(self) -> str:
-        """Returns the string representation of the Failure Monad.
-
-        Examples
-        --------
-        >>> str(Failure(ValueError("boom")))
-        'Failure(boom)'
-        """
-        return f"Failure({self._failure_value})"
-
-    def __eq__(self, other: object) -> bool:
-        """Returns True if `other` is a Failure wrapping an exception of the same type and string representation.
-
-        Examples
-        --------
         >>> Failure(ValueError("boom")) == Failure(ValueError("boom"))
         True
         >>> Failure(ValueError("boom")) == Failure(TypeError("boom"))
         False
         """
-        if isinstance(other, Failure):
-            return str(self) == str(other) and type(self._failure_value) is type(
-                other._failure_value
-            )
-        return False
+        if type(self) is not type(other):
+            return False
+        value, other_value = self._payload(), cast("_TryImpl[Any]", other)._payload()
+        return type(value) is type(other_value) and str(value) == str(other_value)
 
-    def __repr__(self) -> str:
-        """Returns the string representation of the Failure Monad (same as __str__).
-
-        Examples
-        --------
-        >>> repr(Failure(ValueError("boom")))
-        'Failure(boom)'
-        """
-        return str(self)
+    __hash__ = None  # type: ignore[assignment]
 
 
-Try: TypeAlias = Success[TypeSource] | Failure
+@final
+@dataclass(frozen=True, slots=True, repr=False, eq=False)
+class Success(_TryImpl[T]):
+    """The Success variant of the Try Monad, wrapping the value of a computation that completed
+    without raising.
+
+    Examples
+    --------
+    >>> Success(42)
+    Success(42)
+    """
+
+    value: T
 
 
-def safe(function: Callable[[], TypeResult]) -> Try[TypeResult]:
-    """Either Monad method (try_except) which wraps a function that may raise an exception.
+@final
+@dataclass(frozen=True, slots=True, repr=False, eq=False)
+class Failure(_TryImpl[T]):
+    """The Failure variant of the Try Monad, wrapping the exception a computation raised.
+
+    Examples
+    --------
+    >>> Failure(ValueError("boom"))
+    Failure(boom)
+    """
+
+    exception: Exception
+
+    def __post_init__(self) -> None:
+        assert isinstance(self.exception, Exception), (
+            "Failure value must be of type Exception"
+        )
+
+
+# Failure's success type has deliberately no default: if it defaulted to Never, pyright would pin a
+# lambda's success type to Never as soon as one branch returns a Failure
+# (`lambda x: Success(x) if x else Failure(ValueError("zero"))`).
+type Try[SuccessT] = Success[SuccessT] | Failure[SuccessT]
+
+
+def safe(function: Callable[[], T]) -> Try[T]:
+    """Calls function and wraps its return value in Success, or a raised Exception in Failure.
 
     Parameters
     ----------
-    function: Callable[[], TypeResult]
+    function: Callable[[], T]
         Callable function which may raise an exception
 
     Returns
     -------
-    either: Either[Exception, TypeResult]
-        Returns an Either Monad which contains either the function result or an Exception with a message added.
+    try: Try[T]
+        Returns a Try Monad which contains either the function result or the raised Exception.
 
     Examples
     --------

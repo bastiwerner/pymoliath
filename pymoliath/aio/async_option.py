@@ -29,28 +29,23 @@ asyncio.run(AsyncOption.from_coroutine(fetch_ten))  # Some(10)
 
 from __future__ import annotations
 
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Generator,
-    Generic,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from collections.abc import Awaitable, Callable, Generator
+from typing import Any, Generic, TypeVar, assert_never
 
 from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.option import Nil, Option, Some
 from pymoliath.util import curry
 
-TypeSource = TypeVar("TypeSource")
-TypeResult = TypeVar("TypeResult")
-TypePure = TypeVar("TypePure")
+T = TypeVar("T")
+U = TypeVar("U")
+
+# Function-scoped TypeVar for the static constructors: the class-scoped T would be Unknown when
+# called on the unspecialized class (`AsyncOption.from_value(1)`).
+V = TypeVar("V")
 
 
-class AsyncOption(Generic[TypeSource]):
-    """Async Option Monad: a deferred computation which resolves to an Option[TypeSource] once awaited.
+class AsyncOption(Generic[T]):
+    """Async Option Monad: a deferred computation which resolves to an Option[T] once awaited.
 
     Directly awaitable - nothing in a chain of map/bind/filter/... runs until the AsyncOption itself
     is awaited (`await an_async_option`), mirroring how Sequence (pymoliath/lazy.py) stays lazy until
@@ -63,12 +58,12 @@ class AsyncOption(Generic[TypeSource]):
 
     __slots__ = ("_run",)
 
-    def __init__(self, run: Callable[[], Awaitable[Option[TypeSource]]]) -> None:
+    def __init__(self, run: Callable[[], Awaitable[Option[T]]]) -> None:
         """AsyncOption constructor which takes a zero-argument async callable resolving to an Option.
 
         Parameters
         ----------
-        run: Callable[[], Awaitable[Option[TypeSource]]]
+        run: Callable[[], Awaitable[Option[T]]]
             Zero-argument callable returning a fresh awaitable each call, resolving to an Option.
             To stay re-awaitable, `run` must produce a *new* awaitable every call rather than
             handing back an already-created (and possibly already-consumed) coroutine object -
@@ -83,8 +78,8 @@ class AsyncOption(Generic[TypeSource]):
         """
         self._run = run
 
-    def __await__(self) -> Generator[Any, None, Option[TypeSource]]:
-        """Runs the pipeline and resolves to the final Option[TypeSource].
+    def __await__(self) -> Generator[Any, None, Option[T]]:
+        """Runs the pipeline and resolves to the final Option[T].
 
         Examples
         --------
@@ -95,17 +90,17 @@ class AsyncOption(Generic[TypeSource]):
         return self._run().__await__()
 
     @staticmethod
-    def from_value(value: TypeSource) -> AsyncOption[TypeSource]:
+    def from_value(value: V) -> AsyncOption[V]:
         """Lifts a plain value into an already-Some AsyncOption.
 
         Parameters
         ----------
-        value: TypeSource
+        value: V
             Value to be wrapped as Some once awaited.
 
         Returns
         -------
-        async_option: AsyncOption[TypeSource]
+        async_option: AsyncOption[V]
 
         Examples
         --------
@@ -114,24 +109,24 @@ class AsyncOption(Generic[TypeSource]):
         Some(10)
         """
 
-        async def run() -> Option[TypeSource]:
+        async def run() -> Option[V]:
             """Resolves immediately to Some(value)."""
             return Some(value)
 
         return AsyncOption(run)
 
     @staticmethod
-    def from_option(option: Option[TypeSource]) -> AsyncOption[TypeSource]:
+    def from_option(option: Option[V]) -> AsyncOption[V]:
         """Lifts an existing sync Option (Some or Nil) into an AsyncOption.
 
         Parameters
         ----------
-        option: Option[TypeSource]
+        option: Option[V]
             Option to be wrapped, resolved unchanged once awaited.
 
         Returns
         -------
-        async_option: AsyncOption[TypeSource]
+        async_option: AsyncOption[V]
 
         Examples
         --------
@@ -142,7 +137,7 @@ class AsyncOption(Generic[TypeSource]):
         Nil()
         """
 
-        async def run() -> Option[TypeSource]:
+        async def run() -> Option[V]:
             """Resolves immediately to `option`."""
             return option
 
@@ -150,20 +145,20 @@ class AsyncOption(Generic[TypeSource]):
 
     @staticmethod
     def from_coroutine(
-        coroutine_function: Callable[[], Awaitable[TypeSource]],
-    ) -> AsyncOption[TypeSource]:
+        coroutine_function: Callable[[], Awaitable[V]],
+    ) -> AsyncOption[V]:
         """Wraps a zero-argument async callable producing a raw value as a Some once awaited.
 
         Parameters
         ----------
-        coroutine_function: Callable[[], Awaitable[TypeSource]]
+        coroutine_function: Callable[[], Awaitable[V]]
             Zero-argument callable returning a fresh awaitable each call (e.g. an `async def`
             function, not an already-created coroutine object, so the AsyncOption stays
             re-awaitable).
 
         Returns
         -------
-        async_option: AsyncOption[TypeSource]
+        async_option: AsyncOption[V]
 
         Examples
         --------
@@ -173,25 +168,23 @@ class AsyncOption(Generic[TypeSource]):
         Some(10)
         """
 
-        async def run() -> Option[TypeSource]:
+        async def run() -> Option[V]:
             """Awaits `coroutine_function` and wraps its result as Some."""
             return Some(await coroutine_function())
 
         return AsyncOption(run)
 
-    def map(
-        self, function: Callable[[TypeSource], Union[TypeResult, Awaitable[TypeResult]]]
-    ) -> AsyncOption[TypeResult]:
+    def map(self, function: Callable[[T], U | Awaitable[U]]) -> AsyncOption[U]:
         """AsyncOption functor interface (>=, map).
 
         Parameters
         ----------
-        function: Callable[[TypeSource], Union[TypeResult, Awaitable[TypeResult]]]
+        function: Callable[[T], U | Awaitable[U]]
             Sync or async function applied to the resolved value if Some.
 
         Returns
         -------
-        async_option: AsyncOption[TypeResult]
+        async_option: AsyncOption[U]
             Returns a new AsyncOption which resolves to Some with the function result, or Nil
             without calling `function`, if this AsyncOption resolves to Nil.
 
@@ -204,38 +197,37 @@ class AsyncOption(Generic[TypeSource]):
         Nil()
         """
 
-        async def run() -> Option[TypeResult]:
+        async def run() -> Option[U]:
             """Awaits self, then applies `function`, short-circuiting on Nil."""
-            option = await self
-            if option.is_nothing():
-                return Nil()
-            return Some(await _resolve(function(option.unwrap())))
+            match option := await self:
+                case Some(value):
+                    return Some(await _resolve(function(value)))
+                case Nil():
+                    return Nil()
+                case _:
+                    assert_never(option)
 
         return AsyncOption(run)
 
     def bind(
         self,
         function: Callable[
-            [TypeSource],
-            Union[
-                AsyncOption[TypeResult],
-                Option[TypeResult],
-                Awaitable[Option[TypeResult]],
-            ],
+            [T],
+            AsyncOption[U] | Option[U] | Awaitable[Option[U]],
         ],
-    ) -> AsyncOption[TypeResult]:
+    ) -> AsyncOption[U]:
         """AsyncOption bind interface (>>=, bind, flatMap).
 
         Parameters
         ----------
-        function: Callable[[TypeSource], AsyncOption[TypeResult] | Option[TypeResult] | Awaitable[Option[TypeResult]]]
+        function: Callable[[T], AsyncOption[U] | Option[U] | Awaitable[Option[U]]]
             Function applied to the resolved value if Some, returning another AsyncOption, a plain
             Option, or an awaitable resolving to an Option - whichever shape is returned is
             auto-detected.
 
         Returns
         -------
-        async_option: AsyncOption[TypeResult]
+        async_option: AsyncOption[U]
             Returns a new AsyncOption with the function result if Some, otherwise Nil without
             calling `function`.
 
@@ -248,33 +240,34 @@ class AsyncOption(Generic[TypeSource]):
         Nil()
         """
 
-        async def run() -> Option[TypeResult]:
+        async def run() -> Option[U]:
             """Awaits self, then chains into `function`'s result, short-circuiting on Nil."""
-            option = await self
-            if option.is_nothing():
-                return Nil()
-            result = function(option.unwrap())
-            if isinstance(result, AsyncOption):
-                return await result
-            return await _resolve(result)
+            match option := await self:
+                case Some(value):
+                    result = function(value)
+                    if isinstance(result, AsyncOption):
+                        return await result
+                    return await _resolve(result)
+                case Nil():
+                    return Nil()
+                case _:
+                    assert_never(option)
 
         return AsyncOption(run)
 
-    def apply(
-        self, applicative: AsyncOption[Callable[..., TypeResult]]
-    ) -> AsyncOption[TypeResult]:
+    def apply(self, applicative: AsyncOption[Callable[..., U]]) -> AsyncOption[U]:
         """AsyncOption applicative interface for AsyncOptions containing a value (<*>).
 
         Parameters
         ----------
-        applicative: AsyncOption[TypeApplicative] (TypeApplicative: any callable type)
+        applicative: AsyncOption[Callable[..., U]]
             Applicative AsyncOption which contains a function and will be applied to the AsyncOption
             containing a value.
 
         Returns
         -------
-        async_option: AsyncOption[TypeResult]
-            Applies an AsyncOption containing a value of type TypeSource to an AsyncOption containing
+        async_option: AsyncOption[U]
+            Applies an AsyncOption containing a value of type T to an AsyncOption containing
             a function.
 
         Examples
@@ -287,28 +280,28 @@ class AsyncOption(Generic[TypeSource]):
         """
 
         def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> AsyncOption[TypeResult]:
+            applicative_function: Callable[..., U],
+        ) -> AsyncOption[U]:
             """Maps the applicative's function, curried, over this AsyncOption's value."""
             return self.map(curry(applicative_function))
 
         return applicative.bind(binder)
 
     def apply2(
-        self: AsyncOption[Callable[..., TypeResult]],
+        self: AsyncOption[Callable[..., U]],
         applicative_value: AsyncOption[Any],
-    ) -> AsyncOption[TypeResult]:
+    ) -> AsyncOption[U]:
         """AsyncOption applicative interface for AsyncOptions containing a function (<*>).
 
         Parameters
         ----------
-        applicative_value: AsyncOption[TypePure]
+        applicative_value: AsyncOption[Any]
             AsyncOption value which will be applied to the AsyncOption containing a function.
 
         Returns
         -------
-        async_option: AsyncOption[TypeResult]
-            Applies an AsyncOption containing a function to an AsyncOption of type TypePure (value or
+        async_option: AsyncOption[U]
+            Applies an AsyncOption containing a function to an AsyncOption of any type (value or
             function).
 
         Examples
@@ -321,26 +314,26 @@ class AsyncOption(Generic[TypeSource]):
         """
 
         def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> AsyncOption[TypeResult]:
+            applicative_function: Callable[..., U],
+        ) -> AsyncOption[U]:
             """Maps the curried applicative function, held by this AsyncOption, over `applicative_value`."""
             return applicative_value.map(curry(applicative_function))
 
         return self.bind(binder)
 
     def filter(
-        self, filter_function: Callable[[TypeSource], Union[bool, Awaitable[bool]]]
-    ) -> AsyncOption[TypeSource]:
+        self, filter_function: Callable[[T], bool | Awaitable[bool]]
+    ) -> AsyncOption[T]:
         """Returns a Some if filter function is True and this AsyncOption resolves to Some, otherwise Nil.
 
         Parameters
         ----------
-        filter_function: Callable[[TypeSource], Union[bool, Awaitable[bool]]]
+        filter_function: Callable[[T], bool | Awaitable[bool]]
             Sync or async predicate applied to the resolved value if Some.
 
         Returns
         -------
-        async_option: AsyncOption[TypeSource]
+        async_option: AsyncOption[T]
             Returns an AsyncOption resolving to Some if this AsyncOption resolves to Some and
             `filter_function` returns True, otherwise Nil.
 
@@ -353,28 +346,29 @@ class AsyncOption(Generic[TypeSource]):
         Nil()
         """
 
-        async def run() -> Option[TypeSource]:
+        async def run() -> Option[T]:
             """Awaits self, then keeps or discards the value based on `filter_function`."""
-            option = await self
-            if option.is_nothing():
-                return option
-            if await _resolve(filter_function(option.unwrap())):
-                return option
-            return Nil()
+            match option := await self:
+                case Some(value):
+                    return option if await _resolve(filter_function(value)) else Nil()
+                case Nil():
+                    return option
+                case _:
+                    assert_never(option)
 
         return AsyncOption(run)
 
-    def and_(self, other: AsyncOption[TypeResult]) -> AsyncOption[TypeResult]:
+    def and_(self, other: AsyncOption[U]) -> AsyncOption[U]:
         """Returns `other` if this AsyncOption resolves to Some, otherwise Nil.
 
         Parameters
         ----------
-        other: AsyncOption[TypeResult]
+        other: AsyncOption[U]
             AsyncOption to be returned if this AsyncOption resolves to Some.
 
         Returns
         -------
-        async_option: AsyncOption[TypeResult]
+        async_option: AsyncOption[U]
 
         Examples
         --------
@@ -386,17 +380,17 @@ class AsyncOption(Generic[TypeSource]):
         """
         return self.bind(lambda _: other)
 
-    def or_(self, other: AsyncOption[TypeSource]) -> AsyncOption[TypeSource]:
+    def or_(self, other: AsyncOption[T]) -> AsyncOption[T]:
         """Returns this AsyncOption if it resolves to Some, otherwise `other`.
 
         Parameters
         ----------
-        other: AsyncOption[TypeSource]
+        other: AsyncOption[T]
             AsyncOption to be returned if this AsyncOption resolves to Nil.
 
         Returns
         -------
-        async_option: AsyncOption[TypeSource]
+        async_option: AsyncOption[T]
 
         Examples
         --------
@@ -407,28 +401,29 @@ class AsyncOption(Generic[TypeSource]):
         Some(2)
         """
 
-        async def run() -> Option[TypeSource]:
+        async def run() -> Option[T]:
             """Awaits self, falling back to `other` if this AsyncOption resolves to Nil."""
-            option = await self
-            if option.is_some():
-                return option
-            return await other
+            match option := await self:
+                case Some():
+                    return option
+                case Nil():
+                    return await other
+                case _:
+                    assert_never(option)
 
         return AsyncOption(run)
 
-    def zip(
-        self, other: AsyncOption[TypePure]
-    ) -> AsyncOption[Tuple[TypeSource, TypePure]]:
+    def zip(self, other: AsyncOption[U]) -> AsyncOption[tuple[T, U]]:
         """Combines this AsyncOption with another into an AsyncOption of a tuple, or Nil if either is Nil.
 
         Parameters
         ----------
-        other: AsyncOption[TypePure]
+        other: AsyncOption[U]
             AsyncOption to be zipped with this AsyncOption.
 
         Returns
         -------
-        async_option: AsyncOption[Tuple[TypeSource, TypePure]]
+        async_option: AsyncOption[tuple[T, U]]
 
         Examples
         --------
@@ -439,22 +434,24 @@ class AsyncOption(Generic[TypeSource]):
         Nil()
         """
 
-        async def run() -> Option[Tuple[TypeSource, TypePure]]:
+        async def run() -> Option[tuple[T, U]]:
             """Awaits both self and `other`, combining their values if both are Some."""
-            option = await self
-            if option.is_nothing():
-                return Nil()
-            other_option = await other
-            return other_option.map(lambda o: (option.unwrap(), o))
+            match option := await self:
+                case Some(value):
+                    return (await other).map(lambda other_value: (value, other_value))
+                case Nil():
+                    return Nil()
+                case _:
+                    assert_never(option)
 
         return AsyncOption(run)
 
-    def flatten(self: AsyncOption[AsyncOption[TypeResult]]) -> AsyncOption[TypeResult]:
+    def flatten(self: AsyncOption[AsyncOption[U]]) -> AsyncOption[U]:
         """Flattens a nested AsyncOption by one level.
 
         Returns
         -------
-        async_option: AsyncOption[TypeResult]
+        async_option: AsyncOption[U]
             Returns the nested AsyncOption's eventual result, or Nil without awaiting it if this
             AsyncOption resolves to Nil.
 
@@ -466,28 +463,31 @@ class AsyncOption(Generic[TypeSource]):
         Some(1)
         """
 
-        async def run() -> Option[TypeResult]:
+        async def run() -> Option[U]:
             """Awaits self, then awaits the nested AsyncOption if Some."""
-            option = await self
-            if option.is_nothing():
-                return Nil()
-            return await option.unwrap()
+            match option := await self:
+                case Some(nested):
+                    return await nested
+                case Nil():
+                    return Nil()
+                case _:
+                    assert_never(option)
 
         return AsyncOption(run)
 
     def inspect(
-        self, function: Callable[[TypeSource], Union[None, Awaitable[None]]]
-    ) -> AsyncOption[TypeSource]:
-        """Inspect the AsyncOption's resolved value of TypeSource.
+        self, function: Callable[[T], None | Awaitable[None]]
+    ) -> AsyncOption[T]:
+        """Inspect the AsyncOption's resolved value of T.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], Union[None, Awaitable[None]]]
+        function: Callable[[T], None | Awaitable[None]]
             Sync or async inspection function called with the resolved value if Some.
 
         Returns
         -------
-        async_option: AsyncOption[TypeSource]
+        async_option: AsyncOption[T]
 
         Examples
         --------
@@ -497,11 +497,11 @@ class AsyncOption(Generic[TypeSource]):
         Some(42)
         """
 
-        async def run() -> Option[TypeSource]:
+        async def run() -> Option[T]:
             """Awaits self, calling `function` for its side effect only if Some."""
             option = await self
-            if option.is_some():
-                await _resolve(function(option.unwrap()))
+            if isinstance(option, Some):
+                await _resolve(function(option.value))
             return option
 
         return AsyncOption(run)

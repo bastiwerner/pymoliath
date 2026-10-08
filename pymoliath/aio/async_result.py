@@ -28,29 +28,30 @@ asyncio.run(AsyncResult.from_coroutine(fetch_ten))  # Ok(10)
 
 from __future__ import annotations
 
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Generator,
-    Generic,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from collections.abc import Awaitable, Callable, Generator
+from typing import Any, Generic, Never, assert_never, cast
+
+from typing_extensions import TypeVar
 
 from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.result import Err, Ok, Result
 from pymoliath.util import curry
 
-TypeOk = TypeVar("TypeOk")
-TypeErr = TypeVar("TypeErr")
-TypeReturn = TypeVar("TypeReturn")
-TypePure = TypeVar("TypePure")
+T = TypeVar("T")
+E = TypeVar("E")
+U = TypeVar("U")
+F = TypeVar("F")
+
+# Function-scoped TypeVars for the static constructors: the class-scoped T/E would be Unknown when
+# called on the unspecialized class (`AsyncResult.from_ok(1)`).
+V = TypeVar("V")
+X = TypeVar("X")
+# Like Ok's error type: `Never` unless the context (e.g. an annotation) asks for another one.
+X_Never = TypeVar("X_Never", default=Never)
 
 
-class AsyncResult(Generic[TypeOk, TypeErr]):
-    """Async Result Monad: a deferred computation which resolves to a Result[TypeOk, TypeErr] once awaited.
+class AsyncResult(Generic[T, E]):
+    """Async Result Monad: a deferred computation which resolves to a Result[T, E] once awaited.
 
     Directly awaitable - nothing in a chain of map/map_err/bind/bind_err/... runs until the
     AsyncResult itself is awaited (`await an_async_result`), mirroring how Sequence
@@ -65,12 +66,12 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
 
     __slots__ = ("_run",)
 
-    def __init__(self, run: Callable[[], Awaitable[Result[TypeOk, TypeErr]]]) -> None:
+    def __init__(self, run: Callable[[], Awaitable[Result[T, E]]]) -> None:
         """AsyncResult constructor which takes a zero-argument async callable resolving to a Result.
 
         Parameters
         ----------
-        run: Callable[[], Awaitable[Result[TypeOk, TypeErr]]]
+        run: Callable[[], Awaitable[Result[T, E]]]
             Zero-argument callable returning a fresh awaitable each call, resolving to a Result.
             To stay re-awaitable, `run` must produce a *new* awaitable every call rather than
             handing back an already-created (and possibly already-consumed) coroutine object -
@@ -85,8 +86,8 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         """
         self._run = run
 
-    def __await__(self) -> Generator[Any, None, Result[TypeOk, TypeErr]]:
-        """Runs the pipeline and resolves to the final Result[TypeOk, TypeErr].
+    def __await__(self) -> Generator[Any, None, Result[T, E]]:
+        """Runs the pipeline and resolves to the final Result[T, E].
 
         Examples
         --------
@@ -97,17 +98,18 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         return self._run().__await__()
 
     @staticmethod
-    def from_ok(value: TypeOk) -> AsyncResult[TypeOk, Any]:
+    def from_ok(value: V) -> AsyncResult[V, X_Never]:
         """Lifts a plain value into an already-Ok AsyncResult.
 
         Parameters
         ----------
-        value: TypeOk
+        value: V
             Value to be wrapped as Ok once awaited.
 
         Returns
         -------
-        async_result: AsyncResult[TypeOk, TypeErr]
+        async_result: AsyncResult[V, Never]
+            Like a bare `Ok`, the error type is `Never` until the AsyncResult is annotated.
 
         Examples
         --------
@@ -116,24 +118,27 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Ok(10)
         """
 
-        async def run() -> Result[TypeOk, Any]:
+        async def run() -> Result[V, X_Never]:
             """Resolves immediately to Ok(value)."""
             return Ok(value)
 
         return AsyncResult(run)
 
     @staticmethod
-    def from_err(value: TypeErr) -> AsyncResult[Any, TypeErr]:
+    # V is deliberately only in the return type: like a bare Err, the Ok type is left open to be
+    # solved from context.
+    def from_err(value: X) -> AsyncResult[V, X]:  # pyright: ignore[reportInvalidTypeVarUse]
         """Lifts a plain value into an already-Err AsyncResult.
 
         Parameters
         ----------
-        value: TypeErr
+        value: X
             Value to be wrapped as Err once awaited.
 
         Returns
         -------
-        async_result: AsyncResult[TypeOk, TypeErr]
+        async_result: AsyncResult[V, X]
+            Like a bare `Err`, the Ok type is left open to be solved from context.
 
         Examples
         --------
@@ -142,24 +147,24 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Err(error)
         """
 
-        async def run() -> Result[Any, TypeErr]:
+        async def run() -> Result[V, X]:
             """Resolves immediately to Err(value)."""
             return Err(value)
 
         return AsyncResult(run)
 
     @staticmethod
-    def from_result(result: Result[TypeOk, TypeErr]) -> AsyncResult[TypeOk, TypeErr]:
+    def from_result(result: Result[V, X]) -> AsyncResult[V, X]:
         """Lifts an existing sync Result (Ok or Err) into an AsyncResult.
 
         Parameters
         ----------
-        result: Result[TypeOk, TypeErr]
+        result: Result[V, X]
             Result to be wrapped, resolved unchanged once awaited.
 
         Returns
         -------
-        async_result: AsyncResult[TypeOk, TypeErr]
+        async_result: AsyncResult[V, X]
 
         Examples
         --------
@@ -170,7 +175,7 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Err(error)
         """
 
-        async def run() -> Result[TypeOk, TypeErr]:
+        async def run() -> Result[V, X]:
             """Resolves immediately to `result`."""
             return result
 
@@ -178,20 +183,20 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
 
     @staticmethod
     def from_coroutine(
-        coroutine_function: Callable[[], Awaitable[TypeOk]],
-    ) -> AsyncResult[TypeOk, Any]:
+        coroutine_function: Callable[[], Awaitable[V]],
+    ) -> AsyncResult[V, X_Never]:
         """Wraps a zero-argument async callable producing a raw value as an Ok once awaited.
 
         Parameters
         ----------
-        coroutine_function: Callable[[], Awaitable[TypeOk]]
+        coroutine_function: Callable[[], Awaitable[V]]
             Zero-argument callable returning a fresh awaitable each call (e.g. an `async def`
             function, not an already-created coroutine object, so the AsyncResult stays
             re-awaitable).
 
         Returns
         -------
-        async_result: AsyncResult[TypeOk, TypeErr]
+        async_result: AsyncResult[V, Never]
 
         Examples
         --------
@@ -201,25 +206,23 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Ok(10)
         """
 
-        async def run() -> Result[TypeOk, Any]:
+        async def run() -> Result[V, X_Never]:
             """Awaits `coroutine_function` and wraps its result as Ok."""
             return Ok(await coroutine_function())
 
         return AsyncResult(run)
 
-    def map(
-        self, function: Callable[[TypeOk], Union[TypeReturn, Awaitable[TypeReturn]]]
-    ) -> AsyncResult[TypeReturn, TypeErr]:
+    def map(self, function: Callable[[T], U | Awaitable[U]]) -> AsyncResult[U, E]:
         """AsyncResult functor interface (>=, map).
 
         Parameters
         ----------
-        function: Callable[[TypeOk], Union[TypeReturn, Awaitable[TypeReturn]]]
+        function: Callable[[T], U | Awaitable[U]]
             Sync or async function applied to the resolved value if Ok.
 
         Returns
         -------
-        async_result: AsyncResult[TypeReturn, TypeErr]
+        async_result: AsyncResult[U, E]
             Returns a new AsyncResult which resolves to Ok with the function result, or Err
             without calling `function`, if this AsyncResult resolves to Err.
 
@@ -232,28 +235,29 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Err(error)
         """
 
-        async def run() -> Result[TypeReturn, TypeErr]:
+        async def run() -> Result[U, E]:
             """Awaits self, then applies `function`, short-circuiting on Err."""
-            outcome = await self
-            if isinstance(outcome, Err):
-                return outcome
-            return Ok(await _resolve(function(outcome.unwrap())))
+            match outcome := await self:
+                case Ok(value):
+                    return Ok(await _resolve(function(value)))
+                case Err(error):
+                    return Err(error)
+                case _:
+                    assert_never(outcome)
 
         return AsyncResult(run)
 
-    def map_err(
-        self, function: Callable[[TypeErr], Union[TypeReturn, Awaitable[TypeReturn]]]
-    ) -> AsyncResult[TypeOk, TypeReturn]:
+    def map_err(self, function: Callable[[E], F | Awaitable[F]]) -> AsyncResult[T, F]:
         """AsyncResult functor interface for the Err channel.
 
         Parameters
         ----------
-        function: Callable[[TypeErr], Union[TypeReturn, Awaitable[TypeReturn]]]
+        function: Callable[[E], F | Awaitable[F]]
             Sync or async function applied to the resolved value if Err.
 
         Returns
         -------
-        async_result: AsyncResult[TypeOk, TypeReturn]
+        async_result: AsyncResult[T, F]
             Returns a new AsyncResult which resolves to Err with the function result, or Ok
             without calling `function`, if this AsyncResult resolves to Ok.
 
@@ -266,40 +270,37 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Ok(10)
         """
 
-        async def run() -> Result[TypeOk, TypeReturn]:
+        async def run() -> Result[T, F]:
             """Awaits self, then applies `function` to the Err value, short-circuiting on Ok."""
-            outcome = await self
-            match outcome:
-                case Ok():
-                    return outcome
-                case Err(err_value):
-                    return Err(await _resolve(function(err_value)))
+            match outcome := await self:
+                case Ok(value):
+                    return Ok(value)
+                case Err(error):
+                    return Err(await _resolve(function(error)))
+                case _:
+                    assert_never(outcome)
 
         return AsyncResult(run)
 
     def bind(
         self,
         function: Callable[
-            [TypeOk],
-            Union[
-                AsyncResult[TypeReturn, TypeErr],
-                Result[TypeReturn, TypeErr],
-                Awaitable[Result[TypeReturn, TypeErr]],
-            ],
+            [T],
+            AsyncResult[U, E] | Result[U, E] | Awaitable[Result[U, E]],
         ],
-    ) -> AsyncResult[TypeReturn, TypeErr]:
+    ) -> AsyncResult[U, E]:
         """AsyncResult bind interface (>>=, bind, flatMap).
 
         Parameters
         ----------
-        function: Callable[[TypeOk], AsyncResult[TypeReturn, TypeErr] | Result[TypeReturn, TypeErr] | Awaitable[Result[TypeReturn, TypeErr]]]
+        function: Callable[[T], AsyncResult[U, E] | Result[U, E] | Awaitable[Result[U, E]]]
             Function applied to the resolved value if Ok, returning another AsyncResult, a plain
             Result, or an awaitable resolving to a Result - whichever shape is returned is
             auto-detected.
 
         Returns
         -------
-        async_result: AsyncResult[TypeReturn, TypeErr]
+        async_result: AsyncResult[U, E]
             Returns a new AsyncResult with the function result if Ok, otherwise Err without
             calling `function`.
 
@@ -312,41 +313,40 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Err(error)
         """
 
-        async def run() -> Result[TypeReturn, TypeErr]:
+        async def run() -> Result[U, E]:
             """Awaits self, then chains into `function`'s result, short-circuiting on Err."""
-            outcome = await self
-            if isinstance(outcome, Err):
-                return outcome
-            next_result = function(outcome.unwrap())
-            if isinstance(next_result, AsyncResult):
-                return await next_result
-            return await _resolve(next_result)
+            match outcome := await self:
+                case Ok(value):
+                    next_result = function(value)
+                    if isinstance(next_result, AsyncResult):
+                        return await next_result
+                    return await _resolve(next_result)
+                case Err(error):
+                    return Err(error)
+                case _:
+                    assert_never(outcome)
 
         return AsyncResult(run)
 
     def bind_err(
         self,
         function: Callable[
-            [TypeErr],
-            Union[
-                AsyncResult[TypeOk, TypeReturn],
-                Result[TypeOk, TypeReturn],
-                Awaitable[Result[TypeOk, TypeReturn]],
-            ],
+            [E],
+            AsyncResult[T, F] | Result[T, F] | Awaitable[Result[T, F]],
         ],
-    ) -> AsyncResult[TypeOk, TypeReturn]:
+    ) -> AsyncResult[T, F]:
         """AsyncResult bind interface for the Err channel.
 
         Parameters
         ----------
-        function: Callable[[TypeErr], AsyncResult[TypeOk, TypeReturn] | Result[TypeOk, TypeReturn] | Awaitable[Result[TypeOk, TypeReturn]]]
+        function: Callable[[E], AsyncResult[T, F] | Result[T, F] | Awaitable[Result[T, F]]]
             Function applied to the resolved value if Err, returning another AsyncResult, a plain
             Result, or an awaitable resolving to a Result - whichever shape is returned is
             auto-detected.
 
         Returns
         -------
-        async_result: AsyncResult[TypeOk, TypeReturn]
+        async_result: AsyncResult[T, F]
             Returns a new AsyncResult with the function result if Err, otherwise Ok without
             calling `function`.
 
@@ -359,35 +359,36 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Ok(10)
         """
 
-        async def run() -> Result[TypeOk, TypeReturn]:
+        async def run() -> Result[T, F]:
             """Awaits self, then chains into `function`'s result, short-circuiting on Ok."""
-            outcome = await self
-            match outcome:
-                case Ok():
-                    return outcome
-                case Err(err_value):
-                    next_result = function(err_value)
+            match outcome := await self:
+                case Ok(value):
+                    return Ok(value)
+                case Err(error):
+                    next_result = function(error)
                     if isinstance(next_result, AsyncResult):
                         return await next_result
                     return await _resolve(next_result)
+                case _:
+                    assert_never(outcome)
 
         return AsyncResult(run)
 
     def apply(
-        self, applicative: AsyncResult[Callable[..., TypeReturn], TypeErr]
-    ) -> AsyncResult[TypeReturn, TypeErr]:
+        self, applicative: AsyncResult[Callable[..., U], F]
+    ) -> AsyncResult[U, E | F]:
         """AsyncResult applicative interface for AsyncResults containing a value (<*>).
 
         Parameters
         ----------
-        applicative: AsyncResult[TypeApplicative, TypeErr] (TypeApplicative: any callable type)
+        applicative: AsyncResult[Callable[..., U], F]
             Applicative AsyncResult which contains a function and will be applied to the
-            AsyncResult containing a value.
+            AsyncResult containing a value. As with `Result.apply`, the error types may differ.
 
         Returns
         -------
-        async_result: AsyncResult[TypeReturn, TypeErr]
-            Applies an AsyncResult containing a value of type TypeOk to an AsyncResult containing
+        async_result: AsyncResult[U, E | F]
+            Applies an AsyncResult containing a value of type T to an AsyncResult containing
             a function.
 
         Examples
@@ -399,29 +400,32 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Ok(20)
         """
 
-        def binder(
-            applicative_function: Callable[..., TypeReturn],
-        ) -> AsyncResult[TypeReturn, TypeErr]:
-            """Maps the applicative's function, curried, over this AsyncResult's value."""
-            return self.map(curry(applicative_function))
+        applicative_: AsyncResult[Callable[..., U], E | F] = cast(Any, applicative)
+        self_: AsyncResult[T, E | F] = cast(Any, self)
 
-        return applicative.bind(binder)
+        def binder(
+            applicative_function: Callable[..., U],
+        ) -> AsyncResult[U, E | F]:
+            """Maps the applicative's function, curried, over this AsyncResult's value."""
+            return self_.map(curry(applicative_function))
+
+        return applicative_.bind(binder)
 
     def apply2(
-        self: AsyncResult[Callable[..., TypeReturn], TypeErr],
-        applicative_value: AsyncResult[Any, TypeErr],
-    ) -> AsyncResult[TypeReturn, TypeErr]:
+        self: AsyncResult[Callable[..., U], E],
+        applicative_value: AsyncResult[Any, F],
+    ) -> AsyncResult[U, E | F]:
         """AsyncResult applicative interface for AsyncResults containing a function (<*>).
 
         Parameters
         ----------
-        applicative_value: AsyncResult[TypePure, TypeErr]
+        applicative_value: AsyncResult[Any, F]
             AsyncResult value which will be applied to the AsyncResult containing a function.
 
         Returns
         -------
-        async_result: AsyncResult[TypeReturn, TypeErr]
-            Applies an AsyncResult containing a function to an AsyncResult of type TypePure (value
+        async_result: AsyncResult[U, E | F]
+            Applies an AsyncResult containing a function to an AsyncResult of type U (value
             or function).
 
         Examples
@@ -433,27 +437,28 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Ok(20)
         """
 
+        self_: AsyncResult[Callable[..., U], E | F] = cast(Any, self)
+        value_: AsyncResult[Any, E | F] = cast(Any, applicative_value)
+
         def binder(
-            applicative_function: Callable[..., TypeReturn],
-        ) -> AsyncResult[TypeReturn, TypeErr]:
+            applicative_function: Callable[..., U],
+        ) -> AsyncResult[U, E | F]:
             """Maps the curried applicative function, held by this AsyncResult, over `applicative_value`."""
-            return applicative_value.map(curry(applicative_function))
+            return value_.map(curry(applicative_function))
 
-        return self.bind(binder)
+        return self_.bind(binder)
 
-    def and_(
-        self, other: AsyncResult[TypeReturn, TypeErr]
-    ) -> AsyncResult[TypeReturn, TypeErr]:
+    def and_(self, other: AsyncResult[U, E]) -> AsyncResult[U, E]:
         """Returns `other` if this AsyncResult resolves to Ok, otherwise Err.
 
         Parameters
         ----------
-        other: AsyncResult[TypeReturn, TypeErr]
+        other: AsyncResult[U, E]
             AsyncResult to be returned if this AsyncResult resolves to Ok.
 
         Returns
         -------
-        async_result: AsyncResult[TypeReturn, TypeErr]
+        async_result: AsyncResult[U, E]
 
         Examples
         --------
@@ -465,17 +470,17 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         """
         return self.bind(lambda _: other)
 
-    def or_(self, other: AsyncResult[TypeOk, TypeErr]) -> AsyncResult[TypeOk, TypeErr]:
+    def or_(self, other: AsyncResult[T, F]) -> AsyncResult[T, F]:
         """Returns this AsyncResult if it resolves to Ok, otherwise `other`.
 
         Parameters
         ----------
-        other: AsyncResult[TypeOk, TypeErr]
+        other: AsyncResult[T, F]
             AsyncResult to be returned if this AsyncResult resolves to Err.
 
         Returns
         -------
-        async_result: AsyncResult[TypeOk, TypeErr]
+        async_result: AsyncResult[T, F]
 
         Examples
         --------
@@ -486,28 +491,29 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Ok(2)
         """
 
-        async def run() -> Result[TypeOk, TypeErr]:
+        async def run() -> Result[T, F]:
             """Awaits self, falling back to `other` if this AsyncResult resolves to Err."""
-            outcome = await self
-            if isinstance(outcome, Ok):
-                return outcome
-            return await other
+            match outcome := await self:
+                case Ok(value):
+                    return Ok(value)
+                case Err():
+                    return await other
+                case _:
+                    assert_never(outcome)
 
         return AsyncResult(run)
 
-    def zip(
-        self, other: AsyncResult[TypePure, TypeErr]
-    ) -> AsyncResult[Tuple[TypeOk, TypePure], TypeErr]:
+    def zip(self, other: AsyncResult[U, E]) -> AsyncResult[tuple[T, U], E]:
         """Combines this AsyncResult with another into an AsyncResult of a tuple, or Err if either is Err.
 
         Parameters
         ----------
-        other: AsyncResult[TypePure, TypeErr]
+        other: AsyncResult[U, E]
             AsyncResult to be zipped with this AsyncResult.
 
         Returns
         -------
-        async_result: AsyncResult[Tuple[TypeOk, TypePure], TypeErr]
+        async_result: AsyncResult[tuple[T, U], E]
 
         Examples
         --------
@@ -518,24 +524,26 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Err(error)
         """
 
-        async def run() -> Result[Tuple[TypeOk, TypePure], TypeErr]:
+        async def run() -> Result[tuple[T, U], E]:
             """Awaits both self and `other`, combining their values if both are Ok."""
-            outcome = await self
-            if isinstance(outcome, Err):
-                return outcome
-            other_outcome = await other
-            return other_outcome.map(lambda o: (outcome.unwrap(), o))
+            match outcome := await self:
+                case Ok(value):
+                    return (await other).map(lambda other_value: (value, other_value))
+                case Err(error):
+                    return Err(error)
+                case _:
+                    assert_never(outcome)
 
         return AsyncResult(run)
 
     def flatten(
-        self: AsyncResult[AsyncResult[TypeReturn, TypeErr], TypeErr],
-    ) -> AsyncResult[TypeReturn, TypeErr]:
+        self: AsyncResult[AsyncResult[U, E], E],
+    ) -> AsyncResult[U, E]:
         """Flattens a nested AsyncResult by one level.
 
         Returns
         -------
-        async_result: AsyncResult[TypeReturn, TypeErr]
+        async_result: AsyncResult[U, E]
             Returns the nested AsyncResult's eventual result, or Err without awaiting it if this
             AsyncResult resolves to Err.
 
@@ -547,28 +555,31 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Ok(1)
         """
 
-        async def run() -> Result[TypeReturn, TypeErr]:
+        async def run() -> Result[U, E]:
             """Awaits self, then awaits the nested AsyncResult if Ok."""
-            outcome = await self
-            if isinstance(outcome, Err):
-                return outcome
-            return await outcome.unwrap()
+            match outcome := await self:
+                case Ok(nested):
+                    return await nested
+                case Err(error):
+                    return Err(error)
+                case _:
+                    assert_never(outcome)
 
         return AsyncResult(run)
 
     def inspect(
-        self, function: Callable[[TypeOk], Union[None, Awaitable[None]]]
-    ) -> AsyncResult[TypeOk, TypeErr]:
-        """Inspect the AsyncResult's resolved value of TypeOk.
+        self, function: Callable[[T], None | Awaitable[None]]
+    ) -> AsyncResult[T, E]:
+        """Inspect the AsyncResult's resolved value of T.
 
         Parameters
         ----------
-        function: Callable[[TypeOk], Union[None, Awaitable[None]]]
+        function: Callable[[T], None | Awaitable[None]]
             Sync or async inspection function called with the resolved value if Ok.
 
         Returns
         -------
-        async_result: AsyncResult[TypeOk, TypeErr]
+        async_result: AsyncResult[T, E]
 
         Examples
         --------
@@ -578,28 +589,28 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Ok(10)
         """
 
-        async def run() -> Result[TypeOk, TypeErr]:
+        async def run() -> Result[T, E]:
             """Awaits self, calling `function` for its side effect only if Ok."""
             outcome = await self
             if isinstance(outcome, Ok):
-                await _resolve(function(outcome.unwrap()))
+                await _resolve(function(outcome.value))
             return outcome
 
         return AsyncResult(run)
 
     def inspect_err(
-        self, function: Callable[[TypeErr], Union[None, Awaitable[None]]]
-    ) -> AsyncResult[TypeOk, TypeErr]:
-        """Inspect the AsyncResult's resolved value of TypeErr.
+        self, function: Callable[[E], None | Awaitable[None]]
+    ) -> AsyncResult[T, E]:
+        """Inspect the AsyncResult's resolved value of E.
 
         Parameters
         ----------
-        function: Callable[[TypeErr], Union[None, Awaitable[None]]]
+        function: Callable[[E], None | Awaitable[None]]
             Sync or async inspection function called with the resolved value if Err.
 
         Returns
         -------
-        async_result: AsyncResult[TypeOk, TypeErr]
+        async_result: AsyncResult[T, E]
 
         Examples
         --------
@@ -609,14 +620,11 @@ class AsyncResult(Generic[TypeOk, TypeErr]):
         Err(error)
         """
 
-        async def run() -> Result[TypeOk, TypeErr]:
+        async def run() -> Result[T, E]:
             """Awaits self, calling `function` for its side effect only if Err."""
             outcome = await self
-            match outcome:
-                case Err(err_value):
-                    await _resolve(function(err_value))
-                case Ok():
-                    pass
+            if isinstance(outcome, Err):
+                await _resolve(function(outcome.error))
             return outcome
 
         return AsyncResult(run)

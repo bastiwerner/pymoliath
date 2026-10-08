@@ -1,4 +1,5 @@
 import unittest
+from collections.abc import Callable
 from unittest.mock import Mock
 
 from pymoliath.option import Nil, Some
@@ -24,11 +25,17 @@ class TestResultMonad(unittest.TestCase):
         put it in a default context with return and then feed it to a function by using >>=,
         it’s the same as just taking the value and applying the function to it.
         """
-        ok_function = lambda x: Ok(x + 1)
-        err_function = lambda x: Err("error")
 
-        self.assertEqual(ok_function(10), Ok(10).bind(ok_function))
-        self.assertEqual(err_function(10), Err("error").bind(ok_function))
+        def ok_function(x: int) -> Result[int, str]:
+            return Ok(x + 1)
+
+        def err_function(x: int) -> Result[int, str]:
+            return Err("error")
+
+        ok_value: Result[int, str] = Ok(10)
+        self.assertEqual(ok_function(10), ok_value.bind(ok_function))
+        err_value: Result[int, str] = Err("error")
+        self.assertEqual(err_function(10), err_value.bind(ok_function))
 
     def test_monad_right_identity_law(self):
         """Right identity law: m >>= return ≡ m
@@ -50,20 +57,29 @@ class TestResultMonad(unittest.TestCase):
         The final monad law says that when we have a chain of monadic function applications with >>=,
         it shouldn’t matter how they’re nested.
         """
-        ok_value = Ok(42)
-        f = lambda x: Ok(x + 1000)
-        g = lambda y: Ok(y * 42)
+        ok_value: Result[int, str] = Ok(42)
+
+        def f(x: int) -> Result[int, str]:
+            return Ok(x + 1000)
+
+        def g(y: int) -> Result[int, str]:
+            return Ok(y * 42)
 
         self.assertEqual(
             ok_value.bind(f).bind(g), ok_value.bind(lambda x: f(x).bind(g))
         )
 
-        err_value = Err("error")
-        f = lambda x: Err(f"error {x}")
-        g = lambda y: Err(f"error {y}")
+        err_value: Result[int, str] = Err("error")
+
+        def f_err(x: int) -> Result[int, str]:
+            return Err(f"error {x}")
+
+        def g_err(y: int) -> Result[int, str]:
+            return Err(f"error {y}")
 
         self.assertEqual(
-            err_value.bind(f).bind(g), err_value.bind(lambda x: f(x).bind(g))
+            err_value.bind(f_err).bind(g_err),
+            err_value.bind(lambda x: f_err(x).bind(g_err)),
         )
 
     def test_monad_functor_identity_law(self):
@@ -97,8 +113,8 @@ class TestResultMonad(unittest.TestCase):
         Wrap the identity function with a monad container. Apply a monad container over the result.
         The applicative identity law states this should result in an identical object.
         """
-        ok_value = Ok(42)
-        err_value = Err("error")
+        ok_value: Result[int, str] = Ok(42)
+        err_value: Result[int, str] = Err("error")
 
         self.assertEqual(ok_value.apply(Ok(lambda x: x)), ok_value)
         self.assertEqual(err_value.apply(Ok(lambda x: x)), err_value)
@@ -113,13 +129,15 @@ class TestResultMonad(unittest.TestCase):
         We can then apply the wrapped function over the wrapped object.
         """
         x = 42
-        f = lambda x: x * 42
+        f: Callable[[int], int] = lambda x: x * 42
 
         self.assertEqual(Ok(x).apply(Ok(f)), Ok(f(x)))
-        self.assertEqual(Err(x).apply(Ok(f)), Err(x))
+        err_value: Result[int, int] = Err(x)
+        self.assertEqual(err_value.apply(Ok(f)), Err(x))
 
         self.assertEqual(Ok(f).apply2(Ok(x)), Ok(f(x)))
-        self.assertEqual(Ok(f).apply2(Err(x)), Err(x))
+        function: Result[Callable[[int], int], int] = Ok(f)
+        self.assertEqual(function.apply2(Err(x)), Err(x))
 
     def test_monad_applicative_composition_law(self):
         """Applicative composition law: pure (.) <*> u <*> v <*> w = u <*> (v <*> w)
@@ -141,7 +159,9 @@ class TestResultMonad(unittest.TestCase):
             u.apply2(v.apply2(w)),
         )
 
-        w = Err(42)
+        w: Result[int, int] = Err(42)
+        u: Result[Callable[[int], int], int] = Ok(lambda x: x + 42)
+        v: Result[Callable[[int], int], int] = Ok(lambda x: x * 42)
         self.assertEqual(w.apply(v.apply(u.apply(Err(42)))), w.apply(v).apply(u))
         self.assertEqual(
             Ok(lambda f, g: compose(f, g)).apply2(u).apply2(v).apply2(w),
@@ -163,8 +183,8 @@ class TestResultMonad(unittest.TestCase):
         self.assertTrue(err_value.is_err() and not err_value.is_ok())
 
     def test_either_monad_unwrap(self):
-        ok_value = Ok(10)
-        failure = Err("error")
+        ok_value: Result[int, str] = Ok(10)
+        failure: Result[int, str] = Err("error")
 
         with self.assertRaises(Exception):
             failure.unwrap()
@@ -175,7 +195,8 @@ class TestResultMonad(unittest.TestCase):
         self.assertEqual(10, failure.unwrap_or(10))
         self.assertEqual("other error", ok_value.unwrap_err_or("other error"))
         self.assertEqual(10, Ok(10).unwrap_or_else(lambda x: len(x)))
-        self.assertEqual(3, Err("foo").unwrap_or_else(lambda x: len(x)))
+        foo: Result[int, str] = Err("foo")
+        self.assertEqual(3, foo.unwrap_or_else(lambda x: len(x)))
 
     def test_result_inspect(self):
         ok_value = Ok(10)
@@ -203,7 +224,7 @@ class TestResultMonad(unittest.TestCase):
         self.assertEqual(Ok(10), safe_result)
 
     def test_result_monad_map_and_bind(self):
-        ok_value = Ok("hello")
+        ok_value: Result[str, str] = Ok("hello")
 
         self.assertEqual(
             Err("hello world sucks"),
@@ -232,8 +253,8 @@ class TestResultMonad(unittest.TestCase):
         self.assertEqual(0, err_value.map_or(0, lambda v: v + 1))
 
     def test_result_monad_and_or(self):
-        ok_value = Ok(10)
-        err_value = Err("error")
+        ok_value: Result[int, str] = Ok(10)
+        err_value: Result[int, str] = Err("error")
 
         self.assertEqual(Ok(20), ok_value.and_(Ok(20)))
         self.assertEqual(err_value, err_value.and_(Ok(20)))
@@ -241,8 +262,8 @@ class TestResultMonad(unittest.TestCase):
         self.assertEqual(Ok(20), err_value.or_(Ok(20)))
 
     def test_result_monad_zip(self):
-        ok_value = Ok(10)
-        err_value = Err("error")
+        ok_value: Result[int, str] = Ok(10)
+        err_value: Result[int, str] = Err("error")
 
         self.assertEqual(Ok((10, "a")), ok_value.zip(Ok("a")))
         self.assertEqual(Err("error"), ok_value.zip(Err("error")))

@@ -8,13 +8,29 @@ chaining operations without constant explicit null checks.
 * Haskell: [Data.Maybe](https://hackage.haskell.org/package/base-4.16.0.0/docs/Data.Maybe.html)
 * Rust: [Option](https://doc.rust-lang.org/std/option/)
 
-This implementation is heavily inspired by the Haskell `Maybe` monad and the Rust `Option` type.
+This implementation is heavily inspired by the Haskell `Maybe` monad and the Rust `Option` type -
+see `pymoliath.option` for the sibling implementation using `Some`/`Nil` naming.
 
-The `Maybe` type is a sum type that can be either `Just` or `Nothing`.
-In this implementation, it is represented as a Union type in Python.
+The `Maybe` type is a sealed sum type that can be either `Just` or `Nothing`. Like in Rust, both
+variants carry the type parameter:
 
 ```python
-Maybe = Just[TypeSource] | Nothing[TypeSource]
+type Maybe[T] = Just[T] | Nothing[T]
+```
+
+## Typing like in Rust
+
+Because both variants know the full `Maybe[T]`, lambdas passed to `map`/`bind`/... are inferred
+cleanly and a `match` over `Just`/`Nothing` is exhaustive. A bare `Nothing()` leaves its type open
+(`Nothing[Unknown]`) so it can be solved from context, e.g. in
+`lambda x: Just(x) if x > 0 else Nothing()`. Like in Rust, annotate an empty value that has no
+context:
+
+```python
+empty: Maybe[int] = Nothing()
+
+def lookup(value: int) -> Maybe[int]:
+    return Just(value) if value > 0 else Nothing()
 ```
 
 ## Practical Examples and Benefits:
@@ -42,12 +58,14 @@ if user:
 
 # With Maybe (Functional)
 (get_user(user_id)
-    .map(get_profile)
-    .map(get_permission)
+    .bind(get_profile)
+    .bind(get_permission)
     .unwrap_or("Default Permission"))
 ```
 
-Structural pattern matching provides a clean, declarative way to handle the contents of a `Maybe` monad. Because the `Just` and `Nothing` classes are designed to be compatible with Python's `match` statement, you can easily branch your logic based on whether a value exists without manually checking for `None` or using complex `if-is_just()` logic.
+Structural pattern matching provides a clean, declarative way to handle the contents of a `Maybe`
+monad. `Just` and `Nothing` are the only variants (the Maybe is sealed), so a `match` over both is
+exhaustive and type checkers narrow the value in each branch.
 
 ```python
 match maybe_value:
@@ -62,86 +80,61 @@ match maybe_value:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     ClassVar,
     Generic,
-    Tuple,
-    TypeAlias,
-    TypeVar,
+    Never,
+    assert_never,
     cast,
+    final,
     overload,
 )
 
-from pymoliath.either import Right
+from typing_extensions import TypeVar
+
 from pymoliath.util import curry
 
 if TYPE_CHECKING:
     from pymoliath.either import Either
 
-TypeSource = TypeVar("TypeSource")
-TypeResult = TypeVar("TypeResult")
-TypePure = TypeVar("TypePure")
-TypeLeft = TypeVar("TypeLeft")
+# Old-style TypeVars are invariant by default, which is what Maybe needs anyway
+# (T also appears in parameter positions, e.g. unwrap_or and or_).
+T = TypeVar("T")
+U = TypeVar("U")
+L = TypeVar("L")
 
 
-class Just(Generic[TypeSource]):
-    """
-    The Just variant of the Maybe Monad.
+class _MaybeImpl(Generic[T]):
+    """Shared implementation of the Maybe Monad - `Just` and `Nothing` are its only subclasses."""
 
-    Represents a computation that successfully yielded a value. It wraps a
-    value of type `TypeSource` and provides a functional interface for
-    chaining operations.
+    __slots__ = ()
 
-    Parameters
-    ----------
-    value: TypeSource
-        The value contained within the Just monad.
-    """
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        # Runtime "sealed": only Just and Nothing (defined in this module) may subclass.
+        super().__init_subclass__(**kwargs)
+        if cls.__module__ != __name__:
+            raise TypeError("Maybe cannot be subclassed; use Just or Nothing")
 
-    __slots__ = ("_value",)
-    __match_args__ = ("_value",)
+    def _as_maybe(self) -> Maybe[T]:
+        # Safe: Just and Nothing are the only subclasses (see __init_subclass__).
+        return cast("Maybe[T]", self)
 
-    def __init__(self, value: TypeSource):
-        """Just Monad constructor which takes a value of type TypeSource.
-
-        Parameters
-        ----------
-        value: TypeSource
-            Value to be stored in the Just Monad.
-
-        Examples
-        --------
-        >>> just = Just(42)
-        >>> print(just._value)
-        42
-        """
-        self._value = value
-
-    def map(self, function: Callable[[TypeSource], TypeResult]) -> Maybe[TypeResult]:
-        """Apply a function to the value inside the Just container.
-
-        The `map` method is the standard Functor interface for the Maybe monad.
-        It allows for transforming the internal value while preserving the
-        structure of the Monad. If the container is `Just`, the function
-        is applied to the value; if it is `Nothing`, the result is
-        automatically returned as `Nothing`.
-
-        Definition: M(a) >= f: a -> b => M(b)
+    def map(self, function: Callable[[T], U]) -> Maybe[U]:
+        """Calls function on a wrapped Just value, otherwise returns Nothing.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], TypeResult]
-            A function that accepts a value of type `TypeSource` and
-            returns a value of type `TypeResult`.
+        function: Callable[[T], U]
+            Function which takes a value of T and returns a value of type U.
 
         Returns
         -------
-        maybe: Maybe[TypeResult]
-            A new `Maybe` containing the result of the function application
-            if the current instance is `Just`, otherwise returns `Nothing`.
+        maybe: Maybe[U]
+            Returns a Just with the function result or otherwise Nothing.
 
         Examples
         --------
@@ -151,64 +144,55 @@ class Just(Generic[TypeSource]):
         >>> empty: Maybe[int] = Nothing()
         >>> empty.map(lambda x: x + 1)
         Nothing()
-        >>> names: Maybe[str] = Just("alice")
-        >>> names.map(str.upper)
-        Just(ALICE)
         """
-        return Just(function(self._value))
+        match m := self._as_maybe():
+            case Just(value):
+                return Just(function(value))
+            case Nothing():
+                return Nothing()
+            case _:
+                assert_never(m)
 
-    def bind(
-        self, function: Callable[[TypeSource], Maybe[TypeResult]]
-    ) -> Maybe[TypeResult]:
-        """Maybe Monad bind interface (>>=, bind, flatMap).
-
-        The bind method allows for chaining operations where the transformation
-        function itself returns a `Maybe` type. This prevents nested `Maybe`
-        types (e.g., `Just(Just(x))`) by extracting the inner value.
+    def bind(self, function: Callable[[T], Maybe[U]]) -> Maybe[U]:
+        """Calls function if the Maybe Monad is Just, otherwise returns Nothing (Rust: `and_then`).
 
         Parameters
         ----------
-        function: Callable[[TypeSource], Maybe[TypeResult]]
-            A function that accepts a value of type `TypeSource` and returns
-            a `Maybe` monad of type `TypeResult`.
+        function: Callable[[T], Maybe[U]]
+            Function which takes a value of T and returns a new Maybe Monad.
 
         Returns
         -------
-        maybe: Maybe[TypeResult]
-            Returns the result of applying the function to the internal value.
-            If the monad is `Just`, the function is executed; if `Nothing`,
-            the function is skipped and `Nothing` is returned.
+        maybe: Maybe[U]
+            Returns the function result if Just, otherwise Nothing.
 
         Examples
         --------
         >>> val: Maybe[int] = Just(5)
-        >>> def get_next_maybe(x: int) -> Maybe[int]:
-        ...     return Just(x + 1) if x < 10 else Nothing()
-        >>> val.bind(get_next_maybe)
-        Just(6)
-        >>> val_large: Maybe[int] = Just(10)
-        >>> val_large.bind(get_next_maybe)
-        Nothing()
+        >>> val.bind(lambda x: Just(x * 2) if x > 0 else Nothing())
+        Just(10)
         """
-        return function(self._value)
+        match m := self._as_maybe():
+            case Just(value):
+                return function(value)
+            case Nothing():
+                return Nothing()
+            case _:
+                assert_never(m)
 
-    def apply(self, applicative: Maybe[Callable[..., TypeResult]]) -> Maybe[TypeResult]:
-        """Maybe Monad applicative interface for Maybe Monads containing a value (<*>).
-
-        The apply method takes a `Maybe` containing a function and applies it
-        to the value contained within this `Just` monad.
+    def apply(self, applicative: Maybe[Callable[..., U]]) -> Maybe[U]:
+        """Applies the passed applicative wrapping a function if the Maybe Monad is Just, otherwise
+        returns Nothing. Functions of several arguments are curried.
 
         Parameters
         ----------
-        applicative: Maybe[Callable[..., TypeResult]]
-            An applicative maybe monad containing a callable function.
+        applicative: Maybe[Callable[[T], U]]
+            Applicative Maybe Monad which contains a function.
 
         Returns
         -------
-        maybe: Maybe[TypeResult]
-            Applies the function contained in the `applicative` monad to the
-            value contained in this monad. If either monad is `Nothing`,
-            the result is `Nothing`.
+        maybe: Maybe[U]
+            Returns a Maybe Monad from the applied function if both are Just, otherwise Nothing.
 
         Examples
         --------
@@ -216,478 +200,388 @@ class Just(Generic[TypeSource]):
         >>> func: Maybe[Callable[[int], int]] = Just(lambda x: x * 2)
         >>> val.apply(func)
         Just(20)
-        >>> empty: Maybe[int] = Nothing()
-        >>> val.apply(empty)
-        Nothing()
         """
-
-        def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> Maybe[TypeResult]:
-            """Maps the applicative's function, curried, over this Just value."""
-            return self.map(curry(applicative_function))
-
-        return applicative.bind(binder)
+        return applicative.bind(lambda function: self.map(curry(function)))
 
     def apply2(
-        self: Just[Callable[..., TypeResult]], applicative_value: Maybe[Any]
-    ) -> Maybe[TypeResult]:
-        """Maybe Monad applicative interface for Maybe Monads containing a function (<*>).
-
-        The `apply2` method allows for applying a function contained within a
-        `Just` monad to a value contained within another `Maybe` monad.
-        This is a key part of the Applicative Functor pattern, allowing for
-        independent computations to be combined.
+        self: _MaybeImpl[Callable[..., U]], applicative_value: Maybe[Any]
+    ) -> Maybe[U]:
+        """Applies the function wrapped in this Maybe Monad to the passed Maybe Monad wrapping a
+        value if both are Just, otherwise returns Nothing. Functions of several arguments are curried.
 
         Parameters
         ----------
         applicative_value: Maybe[Any]
-            The Maybe monad containing the value to which the function will be applied.
+            Maybe monad which contains a value.
 
         Returns
         -------
-        maybe: Maybe[TypeResult]
-            The result of applying the function contained in this monad to the
-            value contained in `applicative_value`. If either monad is `Nothing`,
-            the result is `Nothing`.
+        maybe: Maybe[U]
+            Returns a Maybe Monad from the applied function if both are Just, otherwise Nothing.
 
         Examples
         --------
-        >>> # A function that adds two numbers
-        >>> def add(x: int, y: int) -> int:
-        ...     return x + y
-        >>>
-        >>> # A Just monad containing the function (curried)
-        >>> func_monad: Maybe[Callable[[int], int]] = Just(lambda y: add(10, y))
-        >>>
-        >>> # A value monad
-        >>> val_monad: Maybe[int] = Just(5)
-        >>>
-        >>> # Apply the function to the value
-        >>> func_monad.apply2(val_monad)
+        >>> func: Maybe[Callable[[int], int]] = Just(lambda y: 10 + y)
+        >>> val: Maybe[int] = Just(5)
+        >>> func.apply2(val)
         Just(15)
-        >>>
-        >>> # If either is Nothing, the result is Nothing
-        >>> empty_val: Maybe[int] = Nothing()
-        >>> func_monad.apply2(empty_val)
+        >>> empty: Maybe[int] = Nothing()
+        >>> func.apply2(empty)
         Nothing()
         """
+        return self.bind(lambda function: applicative_value.map(curry(function)))
 
-        def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> Maybe[TypeResult]:
-            """Maps the curried applicative function, held by this Just, over `applicative_value`."""
-            return applicative_value.map(curry(applicative_function))
-
-        return self.bind(binder)
-
-    def filter(
-        self, filter_function: Callable[[TypeSource], bool]
-    ) -> Maybe[TypeSource]:
-        """Filters the contained value based on a predicate.
-
-        If the current Maybe instance is `Just` and the `filter_function`
-        returns `True` for the contained value, the original `Just` is
-        returned. Otherwise, it returns `Nothing`.
+    def filter(self, filter_function: Callable[[T], bool]) -> Maybe[T]:
+        """Returns the Maybe Monad if it is Just and the predicate returns True, otherwise Nothing.
 
         Parameters
         ----------
-        filter_function: Callable[[TypeSource], bool]
-            A predicate function that accepts the value inside the `Just`
-            monad and returns a boolean.
+        filter_function: Callable[[T], bool]
+            Predicate function applied to the Just value.
 
         Returns
         -------
-        result: Maybe[TypeSource]
-            The original `Just` instance if the predicate is met,
-            otherwise `Nothing`.
+        maybe: Maybe[T]
+            Returns the Just if the predicate holds, otherwise Nothing.
 
         Examples
         --------
         >>> val: Maybe[int] = Just(10)
         >>> val.filter(lambda x: x > 5)
         Just(10)
-        >>> val.filter(lambda x: x < 5)
-        Nothing()
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.filter(lambda x: x > 5)
+        >>> val.filter(lambda x: x > 10)
         Nothing()
         """
-        if filter_function(self._value):
-            return self
-        return Nothing()
+        match m := self._as_maybe():
+            case Just(value) if filter_function(value):
+                return m
+            case Just() | Nothing():
+                return Nothing()
+            case _:
+                assert_never(m)
 
-    def is_just_and(self, function: Callable[[TypeSource], bool]) -> bool:
-        """
-        Checks if the Maybe Monad is a Just and satisfies a given predicate.
-
-        This method evaluates a predicate function against the value contained
-        within the Just monad. If the monad is Just, it returns the boolean
-        result of the function. If the monad is Nothing, it returns False.
+    def is_just_and(self, function: Callable[[T], bool]) -> bool:
+        """Returns True if the Maybe Monad is Just and the predicate returns True for the value.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], bool]
-            A predicate function that accepts the value inside the Just
-            monad and returns a boolean result.
+        function: Callable[[T], bool]
+            Predicate function applied to the Just value.
 
         Returns
         -------
         result: bool
-            Returns True if the monad is Just and the predicate is satisfied,
-            otherwise returns False.
+            Returns the predicate result if Just, otherwise False.
 
         Examples
         --------
         >>> val: Maybe[int] = Just(10)
         >>> val.is_just_and(lambda x: x > 5)
         True
-        >>> val.is_just_and(lambda x: x < 5)
-        False
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.is_just_and(lambda x: x > 5)
-        False
         """
-        return function(self._value)
+        match m := self._as_maybe():
+            case Just(value):
+                return function(value)
+            case Nothing():
+                return False
+            case _:
+                assert_never(m)
 
-    def map_or(
-        self, default_value: TypeResult, function: Callable[[TypeSource], TypeResult]
-    ) -> TypeResult:
-        """Apply a transformation function to the Just value, providing a fallback value if Nothing.
-
-        This method is a convenience shorthand for chaining a `map` operation followed by
-        an `unwrap_or` call. It allows you to transform the internal value of a
-        Just monad and specify a default result for the case where the monad is Nothing
-        in a single, expressive operation.
+    def map_or(self, default_value: U, function: Callable[[T], U]) -> U:
+        """Applies the function to the Just value, or returns the default value if Nothing.
 
         Parameters
         ----------
-        default_value: TypeResult
-            The fallback value to be returned if the current Maybe instance is Nothing.
-        function: Callable[[TypeSource], TypeResult]
-            A transformation function that accepts the value inside the Just
-            monad and returns a value of type `TypeResult`.
+        default_value: U
+            Default value to be returned if the Maybe Monad is Nothing.
+        function: Callable[[T], U]
+            Function applied to the Just value.
 
         Returns
         -------
-        result: TypeResult
-            The result of applying `function` to the internal value if the
-            monad is Just; otherwise, the `default_value`.
+        result: U
+            Returns the function result or the default value.
 
         Examples
         --------
         >>> val: Maybe[int] = Just(10)
         >>> val.map_or(0, lambda x: x * 2)
         20
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.map_or(0, lambda x: x * 2)
-        0
-        >>> name: Maybe[str] = Just("alice")
-        >>> name.map_or("Guest", str.upper)
-        'ALICE'
-        >>> missing: Maybe[str] = Nothing()
-        >>> missing.map_or("Guest", str.upper)
-        'Guest'
         """
-        return function(self._value)
+        match m := self._as_maybe():
+            case Just(value):
+                return function(value)
+            case Nothing():
+                return default_value
+            case _:
+                assert_never(m)
 
-    def and_(self, other: Maybe[TypeResult]) -> Maybe[TypeResult]:
-        """
-        Returns `other` if the Maybe Monad is a Just, otherwise Nothing.
-
-        This operation allows for chaining computations where the continuation
-        depends on the success of the preceding operation. If the current
-        monad is `Nothing`, the operation short-circuits and returns `Nothing`.
+    def and_(self, other: Maybe[U]) -> Maybe[U]:
+        """Returns `other` if the Maybe Monad is Just, otherwise Nothing.
 
         Parameters
         ----------
-        other : Maybe[TypeResult]
-            The Maybe monad to be returned if the current instance is `Just`.
+        other: Maybe[U]
+            Maybe Monad to be returned if this Maybe Monad is Just.
 
         Returns
         -------
-        result : Maybe[TypeResult]
-            Returns the `other` Maybe monad if the current instance is `Just`,
-            otherwise returns `Nothing`.
+        maybe: Maybe[U]
+            Returns `other` or Nothing.
 
         Examples
         --------
-        >>> val: Maybe[int] = Just(1)
-        >>> other: Maybe[int] = Just(2)
-        >>> val.and_(other)
-        Just(2)
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.and_(other)
-        Nothing()
-        """
-        return other
-
-    def or_(self, other: Maybe[TypeSource]) -> Maybe[TypeSource]:
-        """Returns this Maybe Monad if it is a Just, otherwise returns `other`.
-
-        This operation provides a fallback mechanism for the Maybe Monad. If the
-        current instance contains a value (`Just`), the original value is preserved;
-        if the current instance is `Nothing`, the `other` Monad is returned.
-
-        Parameters
-        ----------
-        other : Maybe[TypeSource]
-            The Maybe Monad to be returned if the current instance is `Nothing`.
-
-        Returns
-        -------
-        result : Maybe[TypeSource]
-            Returns the current Just instance if it contains a value,
-            otherwise returns the `other` Maybe Monad.
-
-        Examples
-        --------
-        >>> val: Maybe[int] = Just(1)
-        >>> other: Maybe[int] = Just(2)
-        >>> val.or_(other)
-        Just(1)
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.or_(other)
+        >>> val1: Maybe[int] = Just(1)
+        >>> val2: Maybe[int] = Just(2)
+        >>> val1.and_(val2)
         Just(2)
         """
-        return self
+        match m := self._as_maybe():
+            case Just():
+                return other
+            case Nothing():
+                return Nothing()
+            case _:
+                assert_never(m)
 
-    def zip(self, other: Maybe[TypePure]) -> Maybe[Tuple[TypeSource, TypePure]]:
-        """Combines this Maybe Monad with another into a Maybe Monad of a tuple.
-
-        The `zip` method combines the values of two `Maybe` instances. It returns a `Just`
-        containing a tuple of both values only if both instances contain values. If either
-        instance is `Nothing`, the result is `Nothing`.
+    def or_(self, other: Maybe[T]) -> Maybe[T]:
+        """Returns this Maybe Monad if it is Just, otherwise `other`.
 
         Parameters
         ----------
-        other : Maybe[TypePure]
-            The Maybe monad to be zipped with the current instance.
+        other: Maybe[T]
+            Maybe Monad to be returned if this Maybe Monad is Nothing.
 
         Returns
         -------
-        result : Maybe[Tuple[TypeSource, TypePure]]
-            A Maybe monad containing a tuple of the two values if both are present,
-            otherwise returns `Nothing`.
+        maybe: Maybe[T]
+            Returns the Just or `other`.
 
         Examples
         --------
-        >>> val: Maybe[int] = Just(1)
-        >>> other: Maybe[int] = Just(2)
-        >>> val.zip(other)
-        Just((1, 2))
-        >>> empty: Maybe[int] = Nothing()
-        >>> val.zip(empty)
-        Nothing()
-        >>> empty_other: Maybe[int] = Nothing()
-        >>> empty.zip(empty_other)
-        Nothing()
+        >>> val1: Maybe[int] = Nothing()
+        >>> val2: Maybe[int] = Just(2)
+        >>> val1.or_(val2)
+        Just(2)
         """
-        return other.map(lambda o: (self._value, o))
+        match m := self._as_maybe():
+            case Just():
+                return m
+            case Nothing():
+                return other
+            case _:
+                assert_never(m)
+
+    def zip(self, other: Maybe[U]) -> Maybe[tuple[T, U]]:
+        """Combines this Maybe Monad with another into a Maybe Monad of a tuple, or Nothing if
+        either is Nothing.
+
+        Parameters
+        ----------
+        other: Maybe[U]
+            Maybe Monad to be zipped with this Maybe Monad.
+
+        Returns
+        -------
+        maybe: Maybe[tuple[T, U]]
+            Returns Just of a tuple of both values, or Nothing.
+
+        Examples
+        --------
+        >>> val1: Maybe[int] = Just(1)
+        >>> val2: Maybe[str] = Just("a")
+        >>> val1.zip(val2)
+        Just((1, 'a'))
+        """
+        return self.bind(
+            lambda value: other.map(lambda other_value: (value, other_value))
+        )
 
     @overload
-    def flatten(self: Just[Just[TypeResult]]) -> Maybe[TypeResult]: ...
+    def flatten(self: _MaybeImpl[Just[U]]) -> Maybe[U]: ...
 
     @overload
-    def flatten(self: Just[Nothing[TypeResult]]) -> Maybe[TypeResult]: ...
+    def flatten(self: _MaybeImpl[Nothing[U]]) -> Maybe[U]: ...
 
-    def flatten(self) -> Maybe[Any]:
+    @overload
+    def flatten(self: _MaybeImpl[Maybe[U]]) -> Maybe[U]: ...
+
+    @overload
+    def flatten(self: Nothing[Any]) -> Maybe[Never]: ...
+
+    def flatten(self: _MaybeImpl[Any]) -> Maybe[Any]:
         """Flattens a nested Maybe Monad by one level.
 
-        This method is used to "unwrap" a Monad that contains another Monad.
-        In functional programming, this is often referred to as `flatten` or `join`.
-        It ensures that nested structures like `Just(Just(x))` are reduced to
-        `Just(x)`.
-
         Returns
         -------
-        result: Maybe[TypeResult]
-            The inner Maybe Monad extracted from the outer container.
+        maybe: Maybe[U]
+            Returns the nested Maybe Monad if Just, otherwise Nothing.
 
         Examples
         --------
-        >>> val: Maybe[Maybe[int]] = Just(Just(1))
-        >>> val.flatten()
+        >>> Just(Just(1)).flatten()
         Just(1)
-        >>> empty_inner: Maybe[Maybe[int]] = Just(Nothing())
-        >>> empty_inner.flatten()
-        Nothing()
         """
-        return cast(Maybe[Any], self._value)
+        match m := self._as_maybe():
+            case Just(value):
+                return cast("Maybe[Any]", value)
+            case Nothing():
+                return Nothing()
+            case _:
+                assert_never(m)
 
-    def right_or(self, left_value: TypeLeft) -> Either[TypeLeft, TypeSource]:
-        """
-        Converts the Maybe Monad into an Either Monad, using `left_value` as the
-        Left value if the current monad is `Nothing`.
-
-        This method bridges the gap between optionality and error-handling. If the
-        current instance is `Just`, it wraps the internal value in a `Right`.
-        If the instance is `Nothing`, it returns a `Left` containing the
-        provided `left_value`.
+    def right_or(self, left_value: L) -> Either[L, T]:
+        """Converts the Maybe Monad into an Either Monad, mapping Just(v) to Right(v) and Nothing to
+        Left(left_value).
 
         Parameters
         ----------
-        left_value : TypeLeft
-            The value to be encapsulated in a `Left` instance if the
-            Maybe Monad is `Nothing`.
+        left_value: L
+            Left value used if the Maybe Monad is Nothing.
 
         Returns
         -------
-        either : Either[TypeLeft, TypeSource]
-            An `Either` monad where the `Right` side contains the value if
-            the current monad is `Just`, and the `Left` side contains `left_value`
-            if the current monad is `Nothing`.
+        either: Either[L, T]
+            Returns Right with the Just value, or Left with left_value.
 
         Examples
         --------
         >>> val: Maybe[int] = Just(1)
-        >>> val.right_or("Error")
+        >>> val.right_or("missing")
         Right(1)
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.right_or("Error")
-        Left(Error)
         """
-        return Right(self._value)
+        from pymoliath.either import Left, Right
 
-    def right_or_else(
-        self, left_function: Callable[[], TypeLeft]
-    ) -> Either[TypeLeft, TypeSource]:
-        """Convert the Maybe Monad into an Either Monad using a generator function for the Left value.
+        match m := self._as_maybe():
+            case Just(value):
+                return Right(value)
+            case Nothing():
+                return Left(left_value)
+            case _:
+                assert_never(m)
 
-        This method bridges the gap between optionality and error handling by allowing the
-        caller to provide a computation that generates a Left value if the current
-        Maybe instance is `Nothing`. If the instance is `Just`, it returns a
-        `Right` containing the internal value.
+    def right_or_else(self, left_function: Callable[[], L]) -> Either[L, T]:
+        """Converts the Maybe Monad into an Either Monad, mapping Just(v) to Right(v) and Nothing to
+        Left(left_function()).
 
         Parameters
         ----------
-        left_function : Callable[[], TypeLeft]
-            A function that produces a value of type `TypeLeft` to be returned
-            when the Maybe Monad is `Nothing`.
+        left_function: Callable[[], L]
+            Function computing the Left value if the Maybe Monad is Nothing.
 
         Returns
         -------
-        either : Either[TypeLeft, TypeSource]
-            An `Either` monad where the `Right` side contains the value if the
-            current monad is `Just`, and the `Left` side contains the result of
-            `left_function()` if the current monad is `Nothing`.
+        either: Either[L, T]
+            Returns Right with the Just value, or Left with the left_function result.
 
         Examples
         --------
-        >>> val: Maybe[int] = Just(1)
-        >>> val.right_or_else(lambda: "Error")
-        Right(1)
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.right_or_else(lambda: "Error")
-        Left(Error)
+        >>> val: Maybe[int] = Nothing()
+        >>> val.right_or_else(lambda: "missing")
+        Left(missing)
         """
-        return Right(self._value)
+        from pymoliath.either import Left, Right
 
-    def unwrap(self) -> TypeSource:
-        """
-        Extracts and returns the internal value from the Just monad.
+        match m := self._as_maybe():
+            case Just(value):
+                return Right(value)
+            case Nothing():
+                return Left(left_function())
+            case _:
+                assert_never(m)
 
-        If the current instance is a `Just` monad, it returns the encapsulated
-        value. If the instance is `Nothing`, this method will result in an
-        unexpected behavior (accessing an internal private member), as `unwrap`
-        is intended to be used only when the presence of a value is guaranteed.
+    def unwrap(self) -> T:
+        """Returns the Just value, or otherwise raises an Exception.
 
         Returns
         -------
-        value: TypeSource
-            The value contained within the Just monad.
+        result: T
+            Returns the Just value.
+
+        Raises
+        ------
+        Exception
+            If the Maybe Monad is Nothing.
 
         Examples
         --------
         >>> val: Maybe[int] = Just(1)
         >>> val.unwrap()
         1
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.unwrap()
-        Traceback (most recent call last):
-            ...
-        Exception: Unwrap error on Maybe monad
         """
-        return self._value
+        match m := self._as_maybe():
+            case Just(value):
+                return value
+            case Nothing():
+                raise Exception("Unwrap error on Maybe monad")
+            case _:
+                assert_never(m)
 
-    def unwrap_or(self, default_value: TypeSource) -> TypeSource:
-        """
-        Extracts the value from the Just monad, providing a fallback value if it is Nothing.
-
-        This method provides a safe way to access the underlying value of the Maybe
-        monad. If the monad contains a value (Just), the value is returned.
-        If the monad is Nothing, the provided `default_value` is returned instead.
+    def unwrap_or(self, default_value: T) -> T:
+        """Returns the Just value, or otherwise a provided default value of the same type.
 
         Parameters
         ----------
-        default_value : TypeSource
-            The value to return if the current Maybe instance is `Nothing`.
+        default_value: T
+            Default value of T
 
         Returns
         -------
-        TypeSource
-            The value contained within the Just monad, or the `default_value`
-            if the monad is `Nothing`.
+        result: T
+            Returns the Just value or the default value.
 
         Examples
         --------
-        >>> val: Maybe[int] = Just(1)
+        >>> val: Maybe[int] = Nothing()
         >>> val.unwrap_or(0)
-        1
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.unwrap_or(0)
         0
         """
-        return self._value
+        match m := self._as_maybe():
+            case Just(value):
+                return value
+            case Nothing():
+                return default_value
+            case _:
+                assert_never(m)
 
-    def unwrap_or_else(self, nothing_function: Callable[[], TypeSource]) -> TypeSource:
-        """Returns the internal value of the Just or a default value generated by a function if the Monad is Nothing.
-
-        This method allows for the extraction of a value from a `Just` container. If the container is `Nothing`,
-        instead of raising an error or returning a static default, it executes a provided callback function
-        to generate a fallback value.
+    def unwrap_or_else(self, nothing_function: Callable[[], T]) -> T:
+        """Returns the Just value, or otherwise calls the nothing_function.
 
         Parameters
         ----------
-        nothing_function: Callable[[], TypeSource]
-            A callable that produces a value of type `TypeSource` to be returned
-            if the current Maybe instance is `Nothing`.
+        nothing_function: Callable[[], T]
+            Function which will be called if the Maybe Monad is Nothing.
 
         Returns
         -------
-        value: TypeSource
-            The value contained within the Just monad, or the result of calling
-            `nothing_function` if the monad is Nothing.
+        result: T
+            Returns the Just value or the nothing_function result.
 
         Examples
         --------
-        >>> val: Maybe[int] = Just(1)
+        >>> val: Maybe[int] = Nothing()
         >>> val.unwrap_or_else(lambda: 0)
-        1
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.unwrap_or_else(lambda: 0)
         0
         """
-        return self._value
+        match m := self._as_maybe():
+            case Just(value):
+                return value
+            case Nothing():
+                return nothing_function()
+            case _:
+                assert_never(m)
 
-    def inspect(self, function: Callable[[TypeSource], None]) -> Maybe[TypeSource]:
-        """Perform an inspection or side-effect on the value inside the Just monad.
-
-        This method executes a provided function (such as printing or logging) on the
-        internal value if the monad is `Just`. If the monad is `Nothing`, the
-        function is skipped, and the `Nothing` instance is returned. This is
-        useful for debugging or triggering side-effects without consuming the monad.
+    def inspect(self, function: Callable[[T], None]) -> Maybe[T]:
+        """Calls function with the Just value (if any) and returns the Maybe Monad unchanged.
 
         Parameters
         ----------
-        function: Callable[[TypeSource], None]
-            A function that accepts the value inside the `Just` monad and
-            performs an operation (e.g., printing).
+        function: Callable[[T], None]
+            Inspection function which takes the Just value of the Maybe monad
 
         Returns
         -------
-        maybe: Maybe[TypeSource]
-            Returns the current Maybe instance, allowing for method chaining.
+        maybe: Maybe[T]
 
         Examples
         --------
@@ -695,73 +589,56 @@ class Just(Generic[TypeSource]):
         >>> val.inspect(lambda x: print(f"Value is: {x}"))
         Value is: 42
         Just(42)
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.inspect(lambda x: print(f"Value is: {x}"))
-        Nothing()
         """
-        function(self._value)
-        return self
+        match m := self._as_maybe():
+            case Just(value):
+                function(value)
+            case Nothing():
+                pass
+            case _:
+                assert_never(m)
+        return m
 
     def match(
-        self,
-        just_function: Callable[[TypeSource], TypeResult],
-        nothing_function: Callable[[], TypeResult],
-    ) -> TypeResult:
-        """
-        Execute a function based on whether the Monad contains a value.
-
-        This method provides a clean, functional way to branch logic. If the
-        monad is `Just`, the `just_function` is applied to the internal value.
-        If the monad is `Nothing`, the `nothing_function` is executed.
+        self, just_function: Callable[[T], U], nothing_function: Callable[[], U]
+    ) -> U:
+        """Matches the Maybe Monad to either a Just function or a Nothing function with the same
+        return type.
 
         Parameters
         ----------
-        just_function: Callable[[TypeSource], TypeResult]
-            A function to execute if the monad contains a value.
-        nothing_function: Callable[[], TypeResult]
-            A function to execute if the monad is `Nothing`.
-
-        Returns
-        -------
-        result: TypeResult
-            The result of the executed function.
+        just_function: Callable[[T], U]
+            Callback function for Maybe monads of type Just
+        nothing_function: Callable[[], U]
+            Callback function for Maybe monads of type Nothing
 
         Examples
         --------
         >>> val: Maybe[int] = Just(10)
-        >>> val.match(lambda x: x * 2, lambda: 0)
-        20
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.match(lambda x: x * 2, lambda: 0)
-        0
+        >>> val.match(lambda x: f"Just: {x}", lambda: "Nothing")
+        'Just: 10'
         """
-        return just_function(self._value)
+        match m := self._as_maybe():
+            case Just(value):
+                return just_function(value)
+            case Nothing():
+                return nothing_function()
+            case _:
+                assert_never(m)
 
     def is_nothing(self) -> bool:
-        """
-        Check if the Maybe Monad is Nothing.
-
-        Returns
-        -------
-        result: bool
-            Returns False, since this instance is a `Just` monad.
+        """Returns True if the Maybe Monad is Nothing, otherwise False.
 
         Examples
         --------
-        >>> val: Maybe[int] = Just(5)
+        >>> val: Maybe[int] = Nothing()
         >>> val.is_nothing()
-        False
+        True
         """
-        return False
+        return isinstance(self, Nothing)
 
     def is_just(self) -> bool:
-        """
-        Check if the Maybe Monad is Just.
-
-        Returns
-        -------
-        result: bool
-            Returns True, since this instance is a `Just` monad.
+        """Returns True if the Maybe Monad is Just, otherwise False.
 
         Examples
         --------
@@ -769,821 +646,166 @@ class Just(Generic[TypeSource]):
         >>> val.is_just()
         True
         """
-        return True
+        return isinstance(self, Just)
 
-    def to_optional(self) -> TypeSource | None:
-        """
-        Convert the Maybe Monad to a standard Python optional value.
-
-        This bridges the gap between the functional `Maybe` type and standard
-        Python `None` handling.
-
-        Returns
-        -------
-        value: TypeSource | None
-            The value contained within the `Just` monad, or `None` if `Nothing`.
+    def to_optional(self) -> T | None:
+        """Converts the Maybe Monad into an optional value: the Just value or None.
 
         Examples
         --------
-        >>> val: Maybe[int] = Just(10)
+        >>> val: Maybe[int] = Just(5)
         >>> val.to_optional()
-        10
-        >>> empty: Maybe[int] = Nothing()
-        >>> print(empty.to_optional())
-        None
+        5
         """
-        return self._value
+        match m := self._as_maybe():
+            case Just(value):
+                return value
+            case Nothing():
+                return None
+            case _:
+                assert_never(m)
 
     @staticmethod
-    def from_optional(value: TypeSource | None) -> Maybe[TypeSource]:
-        """
-        Create a Maybe Monad from a standard Python optional value.
-
-        Parameters
-        ----------
-        value: TypeSource | None
-            The optional value to convert.
-
-        Returns
-        -------
-        maybe: Maybe[TypeSource]
-            A `Just` monad if the value is not `None`, otherwise a `Nothing` monad.
+    def from_optional(value: U | None) -> Maybe[U]:
+        """Creates a Maybe Monad from an optional value: Nothing for None, otherwise Just.
 
         Examples
         --------
-        >>> Just.from_optional(5)
-        Just(5)
         >>> Just.from_optional(None)
         Nothing()
         """
         return from_optional(value)
 
     def __str__(self) -> str:
-        """
-        Return the string representation of the Just Monad.
-
-        Returns
-        -------
-        str
-            A string representation of the internal value wrapped in `Just`.
+        """Returns the string representation of the Maybe Monad.
 
         Examples
         --------
         >>> str(Just(42))
         'Just(42)'
+        >>> str(Nothing())
+        'Nothing()'
         """
-        return f"Just({self._value})"
+        match m := self._as_maybe():
+            case Just(value):
+                return f"Just({value})"
+            case Nothing():
+                return "Nothing()"
+            case _:
+                assert_never(m)
 
-    def __eq__(self, __o: object) -> bool:
-        """
-        Compare the Just Monad to another object for equality.
+    def __repr__(self) -> str:
+        """Returns the string representation of the Maybe Monad (same as __str__)."""
+        return str(self)
 
-        Returns
-        -------
-        bool
-            True if the other object is a `Just` monad with the same
-            string representation.
+    def __eq__(self, other: object) -> bool:
+        """Returns True if `other` is the same variant wrapping a value of the same type and string.
 
         Examples
         --------
         >>> Just(1) == Just(1)
         True
-        >>> Just(1) == Just(2)
+        >>> Just(1) == Nothing()
         False
         """
-        return isinstance(__o, Just) and str(self) == str(__o)
-
-    def __repr__(self) -> str:
-        """
-        Return the official string representation of the Just Monad.
-
-        Returns
-        -------
-        str
-            The same as `__str__`.
-
-        Examples
-        --------
-        >>> repr(Just(10))
-        'Just(10)'
-        """
-        return str(self)
-
-
-class Nothing(Generic[TypeSource]):
-    """
-    The Nothing variant of the Maybe Monad.
-
-    The `Nothing` class represents the absence of a value. It is a phantom type,
-    meaning it is generic over `TypeSource` even though it does not store any
-    internal data. This ensures that operations like `map`, `bind`, and `apply`
-    properly propagate the expected types instead of collapsing to `Any`.
-
-    Examples
-    -------
-    >>> empty = Nothing()
-    >>> print(type(empty))
-    <class 'pymoliath.maybe.Nothing'>
-    """
-
-    __slots__ = ()
-
-    _instance: ClassVar[Nothing[Any] | None] = None
-
-    def __new__(cls) -> Nothing[TypeSource]:
-        """
-        Returns the single shared Nothing instance, creating it on first call.
-
-        Since `Nothing` holds no data and is conceptually equivalent to any other
-        `Nothing` of the same type, this implementation uses a singleton pattern
-        to optimize memory and performance by sharing a single instance.
-
-        Returns
-        -------
-        Nothing[TypeSource]
-            The singleton instance of the Nothing monad.
-
-        Examples
-        -------
-        >>> n1 = Nothing()
-        >>> n2 = Nothing()
-        >>> n1 is n2
-        True
-        """
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cast(Nothing[TypeSource], cls._instance)
-
-    def map(self, function: Callable[[Any], TypeResult]) -> Maybe[TypeResult]:
-        """Apply a function to the value inside the Nothing container.
-
-        The `map` method is the standard Functor interface for the Maybe monad.
-        Since this instance is `Nothing`, the function is not applied, and the
-        operation returns a new `Nothing` instance while preserving the type
-        structure of the result.
-
-        Parameters
-        ----------
-        function: Callable[[Any], TypeResult]
-            A function that accepts a value and returns a value of type `TypeResult`.
-
-        Returns
-        -------
-        maybe: Maybe[TypeResult]
-            A `Nothing` instance of type `TypeResult`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.map(lambda x: x + 1)
-        Nothing()
-        >>> empty.map(str.upper)
-        Nothing()
-        """
-        return Nothing()
-
-    def bind(self, function: Callable[[Any], Maybe[TypeResult]]) -> Maybe[TypeResult]:
-        """Maybe Monad bind interface (>>=, bind, flatMap).
-
-        The `bind` method allows for chaining operations where the transformation
-        function itself returns a `Maybe` type. Since this instance is `Nothing`,
-        the function is skipped, and the result is automatically returned as `Nothing`.
-
-        Parameters
-        ----------
-        function: Callable[[Any], Maybe[TypeResult]]
-            A function that accepts a value and returns a `Maybe` monad of type
-            `TypeResult`.
-
-        Returns
-        -------
-        maybe: Maybe[TypeResult]
-            A `Nothing` instance of type `TypeResult`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> def get_next_maybe(x: int) -> Maybe[int]:
-        ...     return Just(x + 1) if x < 10 else Nothing()
-        >>> empty.bind(get_next_maybe)
-        Nothing()
-        """
-        return Nothing()
-
-    def apply(self, applicative: Maybe[Callable[..., TypeResult]]) -> Maybe[TypeResult]:
-        """
-        Maybe Monad applicative interface for Maybe Monads containing a value (<*>).
-
-        The `apply` method takes a `Maybe` containing a function and applies it
-        to the value contained within this `Nothing` monad. Since the current
-        instance is `Nothing`, the result is `Nothing`.
-
-        Parameters
-        ----------
-        applicative: Maybe[Callable[..., TypeResult]]
-            An applicative maybe monad containing a callable function.
-
-        Returns
-        -------
-        maybe: Maybe[TypeResult]
-            Returns `Nothing`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> func: Maybe[Callable[[int], int]] = Just(lambda x: x * 2)
-        >>> empty.apply(func)
-        Nothing()
-        """
-        return Nothing()
-
-    def apply2(self, applicative_value: Maybe[Any]) -> Maybe[Any]:
-        """
-        Maybe Monad applicative interface for Maybe Monads containing a function (<*>).
-
-        The `apply2` method allows for applying a function contained within a
-        `Nothing` monad to a value contained within another `Maybe` monad.
-        Since the current instance is `Nothing`, the result is `Nothing`.
-
-        Parameters
-        ----------
-        applicative_value: Maybe[Any]
-            The Maybe monad containing the value to which the function will be applied.
-
-        Returns
-        -------
-        maybe: Maybe[Any]
-            Returns this `Nothing`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> val: Maybe[int] = Just(5)
-        >>> empty.apply2(val)
-        Nothing()
-        """
-        return self
-
-    def filter(self, filter_function: Callable[[Any], bool]) -> Maybe[TypeSource]:
-        """
-        Filters the contained value based on a predicate.
-
-        Since the current instance is `Nothing`, the `filter_function` is
-        not applied, and the operation returns `Nothing`.
-
-        Parameters
-        ----------
-        filter_function: Callable[[Any], bool]
-            A predicate function that accepts the value inside the `Nothing`
-            monad and returns a boolean.
-
-        Returns
-        -------
-        result: Maybe[TypeSource]
-            Returns this `Nothing`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.filter(lambda x: x > 5)
-        Nothing()
-        """
-        return self
-
-    def is_just_and(self, function: Callable[[Any], bool]) -> bool:
-        """
-        Checks if the Maybe Monad is a Just and satisfies a given predicate.
-
-        Since the current instance is `Nothing`, the predicate is not evaluated,
-        and the method returns `False`.
-
-        Parameters
-        ----------
-        function: Callable[[Any], bool]
-            A predicate function that accepts the value inside the `Nothing`
-            monad and returns a boolean result.
-
-        Returns
-        -------
-        result: bool
-            Returns `False`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.is_just_and(lambda x: x > 5)
-        False
-        """
-        return False
-
-    def map_or(
-        self, default_value: TypeResult, function: Callable[[Any], TypeResult]
-    ) -> TypeResult:
-        """
-        Apply a transformation function to the Just value, providing a fallback value if Nothing.
-
-        Since the current instance is `Nothing`, the transformation function is
-        skipped and the `default_value` is returned.
-
-        Parameters
-        ----------
-        default_value: TypeResult
-            The fallback value to be returned if the current Maybe instance is Nothing.
-        function: Callable[[Any], TypeResult]
-            A transformation function that accepts the value inside the `Nothing`
-            monad and returns a value of type `TypeResult`.
-
-        Returns
-        -------
-        result: TypeResult
-            Returns `default_value`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.map_or(0, lambda x: x * 2)
-        0
-        """
-        return default_value
-
-    def and_(self, other: Maybe[Any]) -> Maybe[TypeSource]:
-        """
-        Returns `other` if the Maybe Monad is a Just, otherwise Nothing.
-
-        Since the current instance is `Nothing`, the operation short-circuits
-        and returns `Nothing`.
-
-        Parameters
-        ----------
-        other: Maybe[Any]
-            The Maybe monad to be returned if the current instance is `Just`.
-
-        Returns
-        -------
-        result: Maybe[TypeSource]
-            Returns this `Nothing`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> other: Maybe[int] = Just(2)
-        >>> empty.and_(other)
-        Nothing()
-        """
-        return self
-
-    def or_(self, other: Maybe[TypeSource]) -> Maybe[TypeSource]:
-        """
-        Returns this Maybe Monad if it is a Just, otherwise returns `other`.
-
-        Since the current instance is `Nothing`, the `other` monad is returned.
-
-        Parameters
-        ----------
-        other: Maybe[TypeSource]
-            The Maybe Monad to be returned if the current instance is `Nothing`.
-
-        Returns
-        -------
-        result: Maybe[TypeSource]
-            Returns `other`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> other: Maybe[int] = Just(2)
-        >>> empty.or_(other)
-        Just(2)
-        """
-        return other
-
-    def zip(self, other: Maybe[Any]) -> Maybe[Any]:
-        """
-        Combines this Maybe Monad with another into a Maybe Monad of a tuple.
-
-        Since the current instance is `Nothing`, the result is `Nothing`.
-
-        Parameters
-        ----------
-        other: Maybe[Any]
-            The Maybe monad to be zipped with the current instance.
-
-        Returns
-        -------
-        result: Maybe[Any]
-            Returns this `Nothing`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> other: Maybe[int] = Just(2)
-        >>> empty.zip(other)
-        Nothing()
-        """
-        return self
-
-    def flatten(self) -> Maybe[TypeSource]:
-        """
-        Flattens a nested Maybe Monad by one level.
-
-        Since the current instance is `Nothing`, the result is `Nothing`.
-
-        Returns
-        -------
-        result: Maybe[TypeSource]
-            Returns this `Nothing`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[Maybe[int]] = Nothing()
-        >>> empty.flatten()
-        Nothing()
-        """
-        return self
-
-    def right_or(self, left_value: TypeLeft) -> Either[TypeLeft, Any]:
-        """
-        Converts the Maybe Monad into an Either Monad, using `left_value` as the
-        Left value if the current monad is `Nothing`.
-
-        Since the current instance is `Nothing`, it returns a `Left` containing
-        the provided `left_value`.
-
-        Parameters
-        ----------
-        left_value: TypeLeft
-            The value to be encapsulated in a `Left` instance if the
-            Maybe Monad is `Nothing`.
-
-        Returns
-        -------
-        either: Either[TypeLeft, Any]
-            Returns `Left` with `left_value`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.right_or("Error")
-        Left(Error)
-        """
-        from pymoliath.either import Left
-
-        return Left(left_value)
-
-    def right_or_else(
-        self, left_function: Callable[[], TypeLeft]
-    ) -> Either[TypeLeft, Any]:
-        """
-        Converts the Maybe Monad into an Either Monad using a generator function for the
-        Left value if the current Maybe instance is `Nothing`.
-
-        Since the current instance is `Nothing`, it returns a `Left` containing
-        the result of `left_function()`.
-
-        Parameters
-        ----------
-        left_function: Callable[[], TypeLeft]
-            A function that produces a value of type `TypeLeft` to be returned
-            when the Maybe Monad is `Nothing`.
-
-        Returns
-        -------
-        either: Either[TypeLeft, Any]
-            Returns `Left` with the result of `left_function()`, since this
-            Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.right_or_else(lambda: "Error")
-        Left(Error)
-        """
-        from pymoliath.either import Left
-
-        return Left(left_function())
-
-    def unwrap(self) -> TypeSource:
-        """
-        Extracts and returns the internal value from the Just monad.
-
-        Since the current instance is `Nothing`, this method will result in an
-        Exception being raised.
-
-        Returns
-        -------
-        value: TypeSource
-            Never returns; always raises an Exception.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.unwrap()
-        Traceback (most recent call last):
-            ...
-        Exception: Unwrap error on Maybe monad
-        """
-        raise Exception("Unwrap error on Maybe monad")
-
-    def unwrap_or(self, default_value: TypeSource) -> TypeSource:
-        """
-        Extracts the value from the Just monad, providing a fallback value if it is Nothing.
-
-        Since the current instance is `Nothing`, the `default_value` is returned.
-
-        Parameters
-        ----------
-        default_value: TypeSource
-            The value to return if the current Maybe instance is `Nothing`.
-
-        Returns
-        -------
-        value: TypeSource
-            Returns `default_value`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.unwrap_or(0)
-        0
-        """
-        return default_value
-
-    def unwrap_or_else(self, nothing_function: Callable[[], TypeSource]) -> TypeSource:
-        """
-        Returns the internal value of the Just or a default value generated by a function
-        if the Monad is Nothing.
-
-        Since the current instance is `Nothing`, the result of calling
-        `nothing_function` is returned.
-
-        Parameters
-        ----------
-        nothing_function: Callable[[], TypeSource]
-            A callable that produces a value of type `TypeSource` to be returned
-            if the current Maybe instance is `Nothing`.
-
-        Returns
-        -------
-        value: TypeSource
-            Returns the result of calling `nothing_function`, since this
-            Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.unwrap_or_else(lambda: 0)
-        0
-        """
-        return nothing_function()
-
-    def inspect(self, function: Callable[[Any], None]) -> Maybe[TypeSource]:
-        """
-        Perform an inspection or side-effect on the value inside the Just monad.
-
-        Since the current instance is `Nothing`, the provided function is skipped,
-        and the `Nothing` instance is returned.
-
-        Parameters
-        ----------
-        function: Callable[[Any], None]
-            A function that accepts the value inside the `Nothing`
-            monad and performs an operation (e.g., printing).
-
-        Returns
-        -------
-        maybe: Maybe[TypeSource]
-            Returns this `Nothing`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.inspect(lambda x: print(f"Value is: {x}"))
-        Nothing()
-        """
-        return self
-
-    def match(
-        self,
-        just_function: Callable[[Any], TypeResult],
-        nothing_function: Callable[[], TypeResult],
-    ) -> TypeResult:
-        """
-        Execute a function based on whether the Monad contains a value.
-
-        Since the current instance is `Nothing`, the `nothing_function` is
-        executed and its result is returned.
-
-        Parameters
-        ----------
-        just_function: Callable[[Any], TypeResult]
-            A function to execute if the monad contains a value.
-        nothing_function: Callable[[], TypeResult]
-            A function to execute if the monad is `Nothing`.
-
-        Returns
-        -------
-        result: TypeResult
-            Returns the result of calling `nothing_function`, since this
-            Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.match(lambda x: x * 2, lambda: 0)
-        0
-        """
-        return nothing_function()
-
-    def is_nothing(self) -> bool:
-        """
-        Check if the Maybe Monad is Nothing.
-
-        Returns
-        -------
-        result: bool
-            Returns `True`, since this instance is a `Nothing` monad.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.is_nothing()
-        True
-        """
-        return True
-
-    def is_just(self) -> bool:
-        """
-        Check if the Maybe Monad is Just.
-
-        Returns
-        -------
-        result: bool
-            Returns `False`, since this instance is a `Nothing` monad.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> empty.is_just()
-        False
-        """
-        return False
-
-    def to_optional(self) -> TypeSource | None:
-        """
-        Convert the Maybe Monad to a standard Python optional value.
-
-        Returns
-        -------
-        value: TypeSource | None
-            Returns `None`, since this Maybe Monad is `Nothing`.
-
-        Examples
-        --------
-        >>> empty: Maybe[int] = Nothing()
-        >>> print(empty.to_optional())
-        None
-        """
-        return None
-
-    @staticmethod
-    def from_optional(value: TypeSource | None) -> Maybe[TypeSource]:
-        """
-        Create a Maybe Monad from a standard Python optional value.
-
-        Parameters
-        ----------
-        value: TypeSource | None
-            The optional value to convert.
-
-        Returns
-        -------
-        maybe: Maybe[TypeSource]
-            A `Just` monad if the value is not `None`, otherwise a `Nothing`
-            monad.
-
-        Examples
-        --------
-        >>> Nothing.from_optional(5)
-        Just(5)
-        >>> Nothing.from_optional(None)
-        Nothing()
-        """
-        return from_optional(value)
-
-    def __str__(self) -> str:
-        """
-        Return the string representation of the Nothing Monad.
-
-        Returns
-        -------
-        str
-            The string representation of the Nothing monad.
-
-        Examples
-        --------
-        >>> str(Nothing())
-        'Nothing()'
-        """
-        return "Nothing()"
-
-    def __eq__(self, __o: object) -> bool:
-        """
-        Compare the Nothing Monad to another object for equality.
-
-        Returns
-        -------
-        bool
-            True if the other object is also a `Nothing` monad.
-
-        Examples
-        --------
-        >>> Nothing() == Nothing()
-        True
-        >>> Nothing() == Just(1)
-        False
-        """
-        return isinstance(__o, Nothing)
-
-    def __repr__(self) -> str:
-        """
-        Return the official string representation of the Nothing Monad.
-
-        Returns
-        -------
-        str
-            The same as `__str__`.
-
-        Examples
-        --------
-        >>> repr(Nothing())
-        'Nothing()'
-        """
-        return str(self)
-
-
-Maybe: TypeAlias = Just[TypeSource] | Nothing[TypeSource]
-
-
-def from_optional(value: TypeSource | None) -> Maybe[TypeSource]:
-    """Converts a standard Python optional value into a Maybe Monad.
-
-    This helper utility allows for seamless integration between standard Python
-    `None` handling and the `Maybe` functional pattern. It wraps a value
-    in a `Just` container if it exists, or returns `Nothing` if the
-    input is `None`.
-
-    Parameters
-    ----------
-    value: TypeSource | None
-        The optional value to be converted into a Maybe Monad.
-
-    Returns
-    -------
-    maybe: Maybe[TypeSource]
-        A `Just` instance containing the value, or a `Nothing` instance
-        if the input was `None`.
+        if type(self) is not type(other):
+            return False
+        match m := self._as_maybe():
+            case Just(value):
+                other_value = cast("Just[Any]", other).value
+                return type(value) is type(other_value) and str(value) == str(
+                    other_value
+                )
+            case Nothing():
+                return True
+            case _:
+                assert_never(m)
+
+    __hash__ = None  # type: ignore[assignment]
+
+
+@final
+@dataclass(frozen=True, slots=True, repr=False, eq=False)
+class Just(_MaybeImpl[T]):
+    """The Just variant of the Maybe Monad, wrapping a value.
 
     Examples
     --------
-    >>> from_optional("hello")
-    Just(hello)
+    >>> Just(42)
+    Just(42)
+    """
+
+    value: T
+
+
+@final
+@dataclass(frozen=True, slots=True, repr=False, eq=False)
+class Nothing(_MaybeImpl[T]):
+    """The Nothing variant of the Maybe Monad, representing the absence of a value (a singleton).
+
+    Examples
+    --------
+    >>> Nothing()
+    Nothing()
+    """
+
+    _instance: ClassVar[Nothing[Any] | None] = None
+
+    def __new__(cls) -> Nothing[T]:
+        # Nothing carries no data, so all instances (of any T) are the same object.
+        if cls._instance is None:
+            cls._instance = object.__new__(cls)
+        return cast("Nothing[T]", cls._instance)
+
+
+# Nothing's type parameter has deliberately no default: if it defaulted to Never, pyright would pin
+# a lambda's type to Never as soon as one branch returns Nothing
+# (`lambda x: Just(x) if x else Nothing()`).
+type Maybe[T] = Just[T] | Nothing[T]
+
+
+def from_optional(value: T | None) -> Maybe[T]:
+    """Creates a Maybe Monad from an optional value: Nothing for None, otherwise Just.
+
+    Parameters
+    ----------
+    value: T | None
+        Maybeal value.
+
+    Returns
+    -------
+    maybe: Maybe[T]
+
+    Examples
+    --------
     >>> from_optional(None)
     Nothing()
+    >>> from_optional(1)
+    Just(1)
     """
     if value is None:
         return Nothing()
     return Just(value)
 
 
-def safe(function: Callable[[], TypeResult]) -> Maybe[TypeResult]:
-    """Executes a potentially unsafe function and captures its result in a Maybe Monad.
-
-    This utility is used to encapsulate "dangerous" operations that might
-    raise exceptions (like network requests, file I/O, or parsing). Instead
-    of allowing the exception to crash the program, it catches the error
-    and returns `Nothing`, allowing for safer, more declarative error handling.
+def safe(function: Callable[[], T]) -> Maybe[T]:
+    """Calls function and wraps its return value in Just, or returns Nothing if it raises an Exception.
 
     Parameters
     ----------
-    function: Callable[[], TypeResult]
-        A callable that may raise an exception during execution.
+    function: Callable[[], T]
+        Zero-argument function which may raise an Exception.
 
     Returns
     -------
-    maybe: Maybe[TypeResult]
-        A `Just` instance containing the result of the function call if
-        it succeeds, otherwise a `Nothing` instance if an exception is caught.
+    maybe: Maybe[T]
 
     Examples
     --------
-    >>> def risky_call():
-    ...     raise ValueError("Boom")
-    >>> safe(risky_call)
+    >>> safe(lambda: 1)
+    Just(1)
+    >>> safe(lambda: 1 / 0)
     Nothing()
-    >>> def safe_call():
-    ...     return 42
-    >>> safe(safe_call)
-    Just(42)
     """
     try:
         return Just(function())

@@ -22,6 +22,30 @@ uv sync
 
 > This command initializes a virtual environment and ensures all required packages are installed.
 
+Pymoliath requires Python 3.12 or newer.
+
+## Typing
+
+The sum types (`Result`, `Either`, `Option`, `Maybe`, `Try`) are sealed, Rust-like: both variants carry
+all type parameters, every method is implemented once, and a `match` over the variants is exhaustive.
+Lambdas passed to `map`/`bind`/... are therefore inferred from the receiver:
+
+```python
+def parse(text: str) -> Result[int, str]:
+    return Ok(int(text)) if text.isdigit() else Err("not a number")
+
+
+parse("4").bind(lambda x: Ok(x / 2) if x else Err("zero"))  # Result[float, str]
+```
+
+The one trade-off is invariance: a bare `Ok(10)` without context is an `Ok[int, Never]` and not
+assignable to a `Result[int, str]`. Construct values directly in a `return` or an annotated assignment,
+just as Rust needs a type annotation there:
+
+```python
+value: Result[int, str] = Ok(10)
+```
+
 # Testing
 
 Execute the test suite using `pytest` to ensure correctness across all modules:
@@ -70,10 +94,10 @@ uv run pdoc -t .pdoc/rust pymoliath
 | Component        | Description                                                     | Docs                                        |
 | ---------------- | --------------------------------------------------------------- | ------------------------------------------- |
 | `Maybe`          | Optional value, Haskell-style (`Just`/`Nothing`)                | [maybe](./pymoliath/maybe.py)               |
-| `Option`         | Optional value, Rust-style (`Some`/`None`)                       | [option](./pymoliath/option.py)             |
+| `Option`         | Optional value, Rust-style (`Some`/`Nil`)                       | [option](./pymoliath/option.py)             |
 | `Either`         | Two-track value, Haskell-style (`Left`/`Right`)                 | [either](./pymoliath/either.py)             |
 | `Result`         | Two-track value, Rust-style (`Ok`/`Err`)                        | [result](./pymoliath/result.py)             |
-| `Try`            | Computation that might raise, Scala-style (`Success`/`Failure`) | [try](./pymoliath/try.py)                   |
+| `Try`            | Computation that might raise, Scala-style (`Success`/`Failure`) | [exception](./pymoliath/exception.py)       |
 | `IO`             | Deferred side-effecting computation                             | [io](./pymoliath/io.py)                     |
 | `ListMonad`      | Eager list with Rust `Iterator`-inspired combinators            | [list](./pymoliath/list.py)                 |
 | `Sequence`       | Lazily-evaluated counterpart of `ListMonad`                     | [lazy](./pymoliath/lazy.py#sequence.py)     |

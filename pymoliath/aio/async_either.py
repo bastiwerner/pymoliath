@@ -28,29 +28,30 @@ asyncio.run(AsyncEither.from_coroutine(fetch_ten))  # Right(10)
 
 from __future__ import annotations
 
-from typing import (
-    Any,
-    Awaitable,
-    Callable,
-    Generator,
-    Generic,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from collections.abc import Awaitable, Callable, Generator
+from typing import Any, Generic, Never, assert_never, cast
+
+from typing_extensions import TypeVar
 
 from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.either import Either, Left, Right
 from pymoliath.util import curry
 
-TypeLeft = TypeVar("TypeLeft")
-TypeRight = TypeVar("TypeRight")
-TypeResult = TypeVar("TypeResult")
-TypePure = TypeVar("TypePure")
+L = TypeVar("L")
+R = TypeVar("R")
+U = TypeVar("U")
+F = TypeVar("F")
+
+# Function-scoped TypeVars for the static constructors: the class-scoped L/R would be Unknown when
+# called on the unspecialized class (`AsyncEither.from_right(1)`).
+V = TypeVar("V")
+W = TypeVar("W")
+# Like Right's Left type: `Never` unless the context (e.g. an annotation) asks for another one.
+W_Never = TypeVar("W_Never", default=Never)
 
 
-class AsyncEither(Generic[TypeLeft, TypeRight]):
-    """Async Either Monad: a deferred computation which resolves to an Either[TypeLeft, TypeRight] once awaited.
+class AsyncEither(Generic[L, R]):
+    """Async Either Monad: a deferred computation which resolves to an Either[L, R] once awaited.
 
     Directly awaitable - nothing in a chain of map/map_left/bind/bind_left/... runs until the
     AsyncEither itself is awaited (`await an_async_either`), mirroring AsyncMaybe
@@ -69,14 +70,12 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
 
     __slots__ = ("_run",)
 
-    def __init__(
-        self, run: Callable[[], Awaitable[Either[TypeLeft, TypeRight]]]
-    ) -> None:
+    def __init__(self, run: Callable[[], Awaitable[Either[L, R]]]) -> None:
         """AsyncEither constructor which takes a zero-argument async callable resolving to an Either.
 
         Parameters
         ----------
-        run: Callable[[], Awaitable[Either[TypeLeft, TypeRight]]]
+        run: Callable[[], Awaitable[Either[L, R]]]
             Zero-argument callable returning a fresh awaitable each call, resolving to an Either.
             To stay re-awaitable, `run` must produce a *new* awaitable every call rather than
             handing back an already-created (and possibly already-consumed) coroutine object -
@@ -91,8 +90,8 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         """
         self._run = run
 
-    def __await__(self) -> Generator[Any, None, Either[TypeLeft, TypeRight]]:
-        """Runs the pipeline and resolves to the final Either[TypeLeft, TypeRight].
+    def __await__(self) -> Generator[Any, None, Either[L, R]]:
+        """Runs the pipeline and resolves to the final Either[L, R].
 
         Examples
         --------
@@ -103,17 +102,17 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         return self._run().__await__()
 
     @staticmethod
-    def from_right(value: TypeRight) -> AsyncEither[Any, TypeRight]:
+    def from_right(value: V) -> AsyncEither[W_Never, V]:
         """Lifts a plain value into an already-Right AsyncEither.
 
         Parameters
         ----------
-        value: TypeRight
+        value: V
             Value to be wrapped as Right once awaited.
 
         Returns
         -------
-        async_either: AsyncEither[Any, TypeRight]
+        async_either: AsyncEither[W_Never, V]
 
         Examples
         --------
@@ -122,24 +121,26 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Right(10)
         """
 
-        async def run() -> Either[Any, TypeRight]:
+        async def run() -> Either[W_Never, V]:
             """Resolves immediately to Right(value)."""
             return Right(value)
 
         return AsyncEither(run)
 
     @staticmethod
-    def from_left(value: TypeLeft) -> AsyncEither[TypeLeft, Any]:
+    # V is deliberately only in the return type: like a bare Left, the Right type is left open to be
+    # solved from context.
+    def from_left(value: W) -> AsyncEither[W, V]:  # pyright: ignore[reportInvalidTypeVarUse]
         """Lifts a plain value into an already-Left AsyncEither.
 
         Parameters
         ----------
-        value: TypeLeft
+        value: W
             Value to be wrapped as Left once awaited.
 
         Returns
         -------
-        async_either: AsyncEither[TypeLeft, Any]
+        async_either: AsyncEither[W, V]
 
         Examples
         --------
@@ -148,7 +149,7 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Left(error)
         """
 
-        async def run() -> Either[TypeLeft, Any]:
+        async def run() -> Either[W, V]:
             """Resolves immediately to Left(value)."""
             return Left(value)
 
@@ -156,18 +157,18 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
 
     @staticmethod
     def from_either(
-        either: Either[TypeLeft, TypeRight],
-    ) -> AsyncEither[TypeLeft, TypeRight]:
+        either: Either[W, V],
+    ) -> AsyncEither[W, V]:
         """Lifts an existing sync Either (Left or Right) into an AsyncEither.
 
         Parameters
         ----------
-        either: Either[TypeLeft, TypeRight]
+        either: Either[W, V]
             Either to be wrapped, resolved unchanged once awaited.
 
         Returns
         -------
-        async_either: AsyncEither[TypeLeft, TypeRight]
+        async_either: AsyncEither[W, V]
 
         Examples
         --------
@@ -178,7 +179,7 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Left(error)
         """
 
-        async def run() -> Either[TypeLeft, TypeRight]:
+        async def run() -> Either[W, V]:
             """Resolves immediately to `either`."""
             return either
 
@@ -186,20 +187,20 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
 
     @staticmethod
     def from_coroutine(
-        coroutine_function: Callable[[], Awaitable[TypeRight]],
-    ) -> AsyncEither[Any, TypeRight]:
+        coroutine_function: Callable[[], Awaitable[V]],
+    ) -> AsyncEither[W_Never, V]:
         """Wraps a zero-argument async callable producing a raw value as a Right once awaited.
 
         Parameters
         ----------
-        coroutine_function: Callable[[], Awaitable[TypeRight]]
+        coroutine_function: Callable[[], Awaitable[V]]
             Zero-argument callable returning a fresh awaitable each call (e.g. an `async def`
             function, not an already-created coroutine object, so the AsyncEither stays
             re-awaitable).
 
         Returns
         -------
-        async_either: AsyncEither[Any, TypeRight]
+        async_either: AsyncEither[W_Never, V]
 
         Examples
         --------
@@ -209,25 +210,23 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Right(10)
         """
 
-        async def run() -> Either[Any, TypeRight]:
+        async def run() -> Either[W_Never, V]:
             """Awaits `coroutine_function` and wraps its result as Right."""
             return Right(await coroutine_function())
 
         return AsyncEither(run)
 
-    def map(
-        self, function: Callable[[TypeRight], Union[TypeResult, Awaitable[TypeResult]]]
-    ) -> AsyncEither[TypeLeft, TypeResult]:
+    def map(self, function: Callable[[R], U | Awaitable[U]]) -> AsyncEither[L, U]:
         """AsyncEither functor interface (>=, map) over the Right channel.
 
         Parameters
         ----------
-        function: Callable[[TypeRight], Union[TypeResult, Awaitable[TypeResult]]]
+        function: Callable[[R], U | Awaitable[U]]
             Sync or async function applied to the resolved value if Right.
 
         Returns
         -------
-        async_either: AsyncEither[TypeLeft, TypeResult]
+        async_either: AsyncEither[L, U]
             Returns a new AsyncEither which resolves to Right with the function result, or the
             original Left untouched without calling `function`, if this AsyncEither resolves to
             Left.
@@ -241,28 +240,29 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Left(error)
         """
 
-        async def run() -> Either[TypeLeft, TypeResult]:
+        async def run() -> Either[L, U]:
             """Awaits self, then applies `function`, short-circuiting on Left."""
-            either = await self
-            if isinstance(either, Left):
-                return either
-            return Right(await _resolve(function(either.unwrap())))
+            match either := await self:
+                case Left(value):
+                    return Left(value)
+                case Right(value):
+                    return Right(await _resolve(function(value)))
+                case _:
+                    assert_never(either)
 
         return AsyncEither(run)
 
-    def map_left(
-        self, function: Callable[[TypeLeft], Union[TypeResult, Awaitable[TypeResult]]]
-    ) -> AsyncEither[TypeResult, TypeRight]:
+    def map_left(self, function: Callable[[L], F | Awaitable[F]]) -> AsyncEither[F, R]:
         """AsyncEither functor interface (>=, map) over the Left channel.
 
         Parameters
         ----------
-        function: Callable[[TypeLeft], Union[TypeResult, Awaitable[TypeResult]]]
+        function: Callable[[L], F | Awaitable[F]]
             Sync or async function applied to the resolved value if Left.
 
         Returns
         -------
-        async_either: AsyncEither[TypeResult, TypeRight]
+        async_either: AsyncEither[F, R]
             Returns a new AsyncEither which resolves to Left with the function result, or the
             original Right untouched without calling `function`, if this AsyncEither resolves to
             Right.
@@ -276,40 +276,37 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Right(10)
         """
 
-        async def run() -> Either[TypeResult, TypeRight]:
+        async def run() -> Either[F, R]:
             """Awaits self, then applies `function`, short-circuiting on Right."""
-            either = await self
-            match either:
+            match either := await self:
                 case Left(value):
                     return Left(await _resolve(function(value)))
+                case Right(value):
+                    return Right(value)
                 case _:
-                    return either
+                    assert_never(either)
 
         return AsyncEither(run)
 
     def bind(
         self,
         function: Callable[
-            [TypeRight],
-            Union[
-                AsyncEither[TypeLeft, TypeResult],
-                Either[TypeLeft, TypeResult],
-                Awaitable[Either[TypeLeft, TypeResult]],
-            ],
+            [R],
+            AsyncEither[L, U] | Either[L, U] | Awaitable[Either[L, U]],
         ],
-    ) -> AsyncEither[TypeLeft, TypeResult]:
+    ) -> AsyncEither[L, U]:
         """AsyncEither bind interface (>>=, bind, flatMap) over the Right channel.
 
         Parameters
         ----------
-        function: Callable[[TypeRight], AsyncEither[TypeLeft, TypeResult] | Either[TypeLeft, TypeResult] | Awaitable[Either[TypeLeft, TypeResult]]]
+        function: Callable[[R], AsyncEither[L, U] | Either[L, U] | Awaitable[Either[L, U]]]
             Function applied to the resolved value if Right, returning another AsyncEither, a
             plain Either, or an awaitable resolving to an Either - whichever shape is returned is
             auto-detected.
 
         Returns
         -------
-        async_either: AsyncEither[TypeLeft, TypeResult]
+        async_either: AsyncEither[L, U]
             Returns a new AsyncEither with the function result if Right, otherwise the original
             Left untouched without calling `function`.
 
@@ -322,41 +319,40 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Left(error)
         """
 
-        async def run() -> Either[TypeLeft, TypeResult]:
+        async def run() -> Either[L, U]:
             """Awaits self, then chains into `function`'s result, short-circuiting on Left."""
-            either = await self
-            if isinstance(either, Left):
-                return either
-            result = function(either.unwrap())
-            if isinstance(result, AsyncEither):
-                return await result
-            return await _resolve(result)
+            match either := await self:
+                case Left(value):
+                    return Left(value)
+                case Right(value):
+                    result = function(value)
+                    if isinstance(result, AsyncEither):
+                        return await result
+                    return await _resolve(result)
+                case _:
+                    assert_never(either)
 
         return AsyncEither(run)
 
     def bind_left(
         self,
         function: Callable[
-            [TypeLeft],
-            Union[
-                AsyncEither[TypeResult, TypeRight],
-                Either[TypeResult, TypeRight],
-                Awaitable[Either[TypeResult, TypeRight]],
-            ],
+            [L],
+            AsyncEither[F, R] | Either[F, R] | Awaitable[Either[F, R]],
         ],
-    ) -> AsyncEither[TypeResult, TypeRight]:
+    ) -> AsyncEither[F, R]:
         """AsyncEither bind interface (>>=, bind, flatMap) over the Left channel.
 
         Parameters
         ----------
-        function: Callable[[TypeLeft], AsyncEither[TypeResult, TypeRight] | Either[TypeResult, TypeRight] | Awaitable[Either[TypeResult, TypeRight]]]
+        function: Callable[[L], AsyncEither[F, R] | Either[F, R] | Awaitable[Either[F, R]]]
             Function applied to the resolved value if Left, returning another AsyncEither, a
             plain Either, or an awaitable resolving to an Either - whichever shape is returned is
             auto-detected.
 
         Returns
         -------
-        async_either: AsyncEither[TypeResult, TypeRight]
+        async_either: AsyncEither[F, R]
             Returns a new AsyncEither with the function result if Left, otherwise the original
             Right untouched without calling `function`.
 
@@ -369,35 +365,36 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Right(10)
         """
 
-        async def run() -> Either[TypeResult, TypeRight]:
+        async def run() -> Either[F, R]:
             """Awaits self, then chains into `function`'s result, short-circuiting on Right."""
-            either = await self
-            match either:
+            match either := await self:
                 case Left(value):
                     result = function(value)
                     if isinstance(result, AsyncEither):
                         return await result
                     return await _resolve(result)
+                case Right(value):
+                    return Right(value)
                 case _:
-                    return either
+                    assert_never(either)
 
         return AsyncEither(run)
 
     def apply(
-        self, applicative: AsyncEither[TypeLeft, Callable[..., TypeResult]]
-    ) -> AsyncEither[TypeLeft, TypeResult]:
+        self, applicative: AsyncEither[F, Callable[..., U]]
+    ) -> AsyncEither[L | F, U]:
         """AsyncEither applicative interface for AsyncEithers containing a value (<*>).
 
         Parameters
         ----------
-        applicative: AsyncEither[TypeLeft, TypeApplicative] (TypeApplicative: any callable type)
+        applicative: AsyncEither[F, Callable[..., U]]
             Applicative AsyncEither which contains a function and will be applied to the
-            AsyncEither containing a value.
+            AsyncEither containing a value. As with `Either.apply`, the Left types may differ.
 
         Returns
         -------
-        async_either: AsyncEither[TypeLeft, TypeResult]
-            Applies an AsyncEither containing a value of type TypeRight to an AsyncEither
+        async_either: AsyncEither[L | F, U]
+            Applies an AsyncEither containing a value of type R to an AsyncEither
             containing a function.
 
         Examples
@@ -409,29 +406,33 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Right(20)
         """
 
-        def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> AsyncEither[TypeLeft, TypeResult]:
-            """Maps the applicative's function, curried, over this AsyncEither's value."""
-            return self.map(curry(applicative_function))
+        applicative_: AsyncEither[L | F, Callable[..., U]] = cast(Any, applicative)
+        self_: AsyncEither[L | F, R] = cast(Any, self)
 
-        return applicative.bind(binder)
+        def binder(
+            applicative_function: Callable[..., U],
+        ) -> AsyncEither[L | F, U]:
+            """Maps the applicative's function, curried, over this AsyncEither's value."""
+            return self_.map(curry(applicative_function))
+
+        return applicative_.bind(binder)
 
     def apply2(
-        self: AsyncEither[TypeLeft, Callable[..., TypeResult]],
-        applicative_value: AsyncEither[TypeLeft, Any],
-    ) -> AsyncEither[TypeLeft, TypeResult]:
+        self: AsyncEither[L, Callable[..., U]],
+        applicative_value: AsyncEither[F, Any],
+    ) -> AsyncEither[L | F, U]:
         """AsyncEither applicative interface for AsyncEithers containing a function (<*>).
 
         Parameters
         ----------
-        applicative_value: AsyncEither[TypeLeft, TypePure]
+        applicative_value: AsyncEither[F, Any]
             AsyncEither value which will be applied to the AsyncEither containing a function.
+            As with `Either.apply2`, the Left types may differ.
 
         Returns
         -------
-        async_either: AsyncEither[TypeLeft, TypeResult]
-            Applies an AsyncEither containing a function to an AsyncEither of type TypePure
+        async_either: AsyncEither[L | F, U]
+            Applies an AsyncEither containing a function to an AsyncEither of type U
             (value or function).
 
         Examples
@@ -443,27 +444,28 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Right(20)
         """
 
+        self_: AsyncEither[L | F, Callable[..., U]] = cast(Any, self)
+        value_: AsyncEither[L | F, Any] = cast(Any, applicative_value)
+
         def binder(
-            applicative_function: Callable[..., TypeResult],
-        ) -> AsyncEither[TypeLeft, TypeResult]:
+            applicative_function: Callable[..., U],
+        ) -> AsyncEither[L | F, U]:
             """Maps the curried applicative function, held by this AsyncEither, over `applicative_value`."""
-            return applicative_value.map(curry(applicative_function))
+            return value_.map(curry(applicative_function))
 
-        return self.bind(binder)
+        return self_.bind(binder)
 
-    def and_(
-        self, other: AsyncEither[TypeLeft, TypeResult]
-    ) -> AsyncEither[TypeLeft, TypeResult]:
+    def and_(self, other: AsyncEither[L, U]) -> AsyncEither[L, U]:
         """Returns `other` if this AsyncEither resolves to Right, otherwise the original Left.
 
         Parameters
         ----------
-        other: AsyncEither[TypeLeft, TypeResult]
+        other: AsyncEither[L, U]
             AsyncEither to be returned if this AsyncEither resolves to Right.
 
         Returns
         -------
-        async_either: AsyncEither[TypeLeft, TypeResult]
+        async_either: AsyncEither[L, U]
 
         Examples
         --------
@@ -475,17 +477,17 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         """
         return self.bind(lambda _: other)
 
-    def or_(self, other: AsyncEither[Any, TypeRight]) -> AsyncEither[Any, TypeRight]:
+    def or_(self, other: AsyncEither[F, R]) -> AsyncEither[F, R]:
         """Returns this AsyncEither if it resolves to Right, otherwise `other`.
 
         Parameters
         ----------
-        other: AsyncEither[Any, TypeRight]
+        other: AsyncEither[F, R]
             AsyncEither to be returned if this AsyncEither resolves to Left.
 
         Returns
         -------
-        async_either: AsyncEither[Any, TypeRight]
+        async_either: AsyncEither[F, R]
 
         Examples
         --------
@@ -496,28 +498,29 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Right(2)
         """
 
-        async def run() -> Either[Any, TypeRight]:
+        async def run() -> Either[F, R]:
             """Awaits self, falling back to `other` if this AsyncEither resolves to Left."""
-            either = await self
-            if isinstance(either, Right):
-                return either
-            return await other
+            match either := await self:
+                case Left():
+                    return await other
+                case Right(value):
+                    return Right(value)
+                case _:
+                    assert_never(either)
 
         return AsyncEither(run)
 
-    def zip(
-        self, other: AsyncEither[TypeLeft, TypePure]
-    ) -> AsyncEither[TypeLeft, Tuple[TypeRight, TypePure]]:
+    def zip(self, other: AsyncEither[L, U]) -> AsyncEither[L, tuple[R, U]]:
         """Combines this AsyncEither with another into an AsyncEither of a tuple, or Left if either is Left.
 
         Parameters
         ----------
-        other: AsyncEither[TypeLeft, TypePure]
+        other: AsyncEither[L, U]
             AsyncEither to be zipped with this AsyncEither.
 
         Returns
         -------
-        async_either: AsyncEither[TypeLeft, Tuple[TypeRight, TypePure]]
+        async_either: AsyncEither[L, tuple[R, U]]
 
         Examples
         --------
@@ -528,24 +531,26 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Left(error)
         """
 
-        async def run() -> Either[TypeLeft, Tuple[TypeRight, TypePure]]:
+        async def run() -> Either[L, tuple[R, U]]:
             """Awaits both self and `other`, combining their values if both are Right."""
-            either = await self
-            if isinstance(either, Left):
-                return either
-            other_either = await other
-            return other_either.map(lambda o: (either.unwrap(), o))
+            match either := await self:
+                case Left(value):
+                    return Left(value)
+                case Right(value):
+                    return (await other).map(lambda other_value: (value, other_value))
+                case _:
+                    assert_never(either)
 
         return AsyncEither(run)
 
     def flatten(
-        self: AsyncEither[TypeLeft, AsyncEither[TypeLeft, TypeResult]],
-    ) -> AsyncEither[TypeLeft, TypeResult]:
+        self: AsyncEither[L, AsyncEither[L, U]],
+    ) -> AsyncEither[L, U]:
         """Flattens a nested AsyncEither by one level.
 
         Returns
         -------
-        async_either: AsyncEither[TypeLeft, TypeResult]
+        async_either: AsyncEither[L, U]
             Returns the nested AsyncEither's eventual result, or the original Left without
             awaiting it if this AsyncEither resolves to Left.
 
@@ -557,28 +562,31 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Right(1)
         """
 
-        async def run() -> Either[TypeLeft, TypeResult]:
+        async def run() -> Either[L, U]:
             """Awaits self, then awaits the nested AsyncEither if Right."""
-            either = await self
-            if isinstance(either, Left):
-                return either
-            return await either.unwrap()
+            match either := await self:
+                case Left(value):
+                    return Left(value)
+                case Right(nested):
+                    return await nested
+                case _:
+                    assert_never(either)
 
         return AsyncEither(run)
 
     def inspect(
-        self, function: Callable[[TypeRight], Union[None, Awaitable[None]]]
-    ) -> AsyncEither[TypeLeft, TypeRight]:
-        """Inspect the AsyncEither's resolved value of TypeRight.
+        self, function: Callable[[R], None | Awaitable[None]]
+    ) -> AsyncEither[L, R]:
+        """Inspect the AsyncEither's resolved value of R.
 
         Parameters
         ----------
-        function: Callable[[TypeRight], Union[None, Awaitable[None]]]
+        function: Callable[[R], None | Awaitable[None]]
             Sync or async inspection function called with the resolved value if Right.
 
         Returns
         -------
-        async_either: AsyncEither[TypeLeft, TypeRight]
+        async_either: AsyncEither[L, R]
 
         Examples
         --------
@@ -588,28 +596,28 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Right(10)
         """
 
-        async def run() -> Either[TypeLeft, TypeRight]:
+        async def run() -> Either[L, R]:
             """Awaits self, calling `function` for its side effect only if Right."""
             either = await self
             if isinstance(either, Right):
-                await _resolve(function(either.unwrap()))
+                await _resolve(function(either.value))
             return either
 
         return AsyncEither(run)
 
     def inspect_left(
-        self, function: Callable[[TypeLeft], Union[None, Awaitable[None]]]
-    ) -> AsyncEither[TypeLeft, TypeRight]:
-        """Inspect the AsyncEither's resolved value of TypeLeft.
+        self, function: Callable[[L], None | Awaitable[None]]
+    ) -> AsyncEither[L, R]:
+        """Inspect the AsyncEither's resolved value of L.
 
         Parameters
         ----------
-        function: Callable[[TypeLeft], Union[None, Awaitable[None]]]
+        function: Callable[[L], None | Awaitable[None]]
             Sync or async inspection function called with the resolved value if Left.
 
         Returns
         -------
-        async_either: AsyncEither[TypeLeft, TypeRight]
+        async_either: AsyncEither[L, R]
 
         Examples
         --------
@@ -619,14 +627,11 @@ class AsyncEither(Generic[TypeLeft, TypeRight]):
         Left(error)
         """
 
-        async def run() -> Either[TypeLeft, TypeRight]:
+        async def run() -> Either[L, R]:
             """Awaits self, calling `function` for its side effect only if Left."""
             either = await self
-            match either:
-                case Left(value):
-                    await _resolve(function(value))
-                case _:
-                    pass
+            if isinstance(either, Left):
+                await _resolve(function(either.value))
             return either
 
         return AsyncEither(run)

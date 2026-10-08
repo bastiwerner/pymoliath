@@ -175,7 +175,7 @@ class TestAsyncTry(unittest.IsolatedAsyncioTestCase):
 
     async def test_bind_failure_on_success(self):
         result = await AsyncTry.from_success(10).bind_failure(
-            lambda e: AsyncTry.from_success(str(e))
+            lambda e: AsyncTry.from_success(len(str(e)))
         )
         self.assertEqual(Success(10), result)
 
