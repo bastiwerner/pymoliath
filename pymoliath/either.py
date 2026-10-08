@@ -87,8 +87,7 @@ match either_value:
 ```
 
 `Either` is a type alias, so use `is_either` (or `isinstance(x, EITHER_TYPES)`) for runtime checks
-and `is_left`/`is_right` to narrow an `Either` to one of its variants. Every common method also
-exists as a curried module-level function for use with `pymoliath.util.flow`.
+and `is_left`/`is_right` to narrow an `Either` to one of its variants.
 """
 
 from __future__ import annotations
@@ -273,6 +272,34 @@ class _EitherImpl(Generic[L, R]):
         Right(20)
         >>> Left("value").apply(Left("function"))
         Left('function')
+        """
+        raise NotImplementedError
+
+    def apply2(
+        self: _EitherImpl[L, Callable[[U], V]], value: Either[L, U]
+    ) -> Either[L, V]:
+        """Applies the function wrapped in this Either Monad to the value wrapped in `value`.
+
+        The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both are
+        empty/errors, this (the function side) takes precedence. Functions of several
+        arguments can be applied one argument at a time when they are curried, e.g.
+        `Right(lambda a: lambda b: a + b).apply2(x).apply2(y)`; `map2`/`map3` take them uncurried.
+
+        Parameters
+        ----------
+        value: Either[L, U]
+            Either Monad which contains the argument.
+
+        Returns
+        -------
+        result: Either[L, V]
+
+        Examples
+        --------
+        >>> func: Either[str, Callable[[int], int]] = Right(lambda y: 10 + y)
+        >>> val: Either[str, int] = Right(5)
+        >>> func.apply2(val)
+        Right(15)
         """
         raise NotImplementedError
 
@@ -753,6 +780,11 @@ class Left(_EitherImpl[L_Never, R_Never]):
             return function  # type: ignore[return-value]
         return self  # type: ignore[return-value]
 
+    def apply2(
+        self: Left[L_Never, Callable[[U], V]], value: Either[L_Never, U]
+    ) -> Left[L_Never, V]:
+        return self  # type: ignore[return-value]
+
     def is_right_and(self, function: Callable[[R_Never], bool]) -> bool:
         return False
 
@@ -882,6 +914,13 @@ class Right(_EitherImpl[L_Never, R_Never], Generic[R_Never, L_Never]):
         if isinstance(function, Right):
             return Right(function.value(self.value))
         return function  # type: ignore[return-value]
+
+    def apply2(
+        self: Right[Callable[[U], V], L_Never], value: Either[L_Never, U]
+    ) -> Either[L_Never, V]:
+        if isinstance(value, Right):
+            return Right(self.value(value.value))
+        return value  # type: ignore[return-value]
 
     def is_right_and(self, function: Callable[[R_Never], bool]) -> bool:
         return function(self.value)
@@ -1096,105 +1135,6 @@ def either_safe(
         return Right(function())
     except exceptions as e:
         return Left(e)
-
-
-# Curried module-level functions, for point-free pipelines (see `pymoliath.util.flow`).
-
-
-def map(function: Callable[[U], V]) -> Callable[[Either[F, U]], Either[F, V]]:
-    """Curried `Either.map`.
-
-    Examples
-    --------
-    >>> map(lambda x: x + 1)(Right(1))
-    Right(2)
-    """
-    return lambda either: either.map(function)
-
-
-def map_left(function: Callable[[F], V]) -> Callable[[Either[F, U]], Either[V, U]]:
-    """Curried `Either.map_left`.
-
-    Examples
-    --------
-    >>> map_left(str.upper)(Left("e"))
-    Left('E')
-    """
-    return lambda either: either.map_left(function)
-
-
-def bind(
-    function: Callable[[U], Either[F, V]],
-) -> Callable[[Either[F, U]], Either[F, V]]:
-    """Curried `Either.bind`.
-
-    Examples
-    --------
-    >>> bind(lambda x: Right(x + 1))(Right(1))
-    Right(2)
-    """
-    return lambda either: either.bind(function)
-
-
-def bind_left(
-    function: Callable[[F], Either[V, U]],
-) -> Callable[[Either[F, U]], Either[V, U]]:
-    """Curried `Either.bind_left`.
-
-    Examples
-    --------
-    >>> bind_left(lambda e: Right(len(e)))(Left("abc"))
-    Right(3)
-    """
-    return lambda either: either.bind_left(function)
-
-
-def unwrap_or(default_value: U) -> Callable[[Either[Any, U]], U]:
-    """Curried `Either.unwrap_or`.
-
-    Examples
-    --------
-    >>> unwrap_or(0)(Left("e"))
-    0
-    """
-    return lambda either: either.unwrap_or(default_value)
-
-
-def unwrap_or_else(function: Callable[[F], U]) -> Callable[[Either[F, U]], U]:
-    """Curried `Either.unwrap_or_else`.
-
-    Examples
-    --------
-    >>> unwrap_or_else(len)(Left("abc"))
-    3
-    """
-    return lambda either: either.unwrap_or_else(function)
-
-
-def inspect(function: Callable[[U], None]) -> Callable[[Either[F, U]], Either[F, U]]:
-    """Curried `Either.inspect`.
-
-    Examples
-    --------
-    >>> inspect(print)(Right(1))
-    1
-    Right(1)
-    """
-    return lambda either: either.inspect(function)
-
-
-def inspect_left(
-    function: Callable[[F], None],
-) -> Callable[[Either[F, U]], Either[F, U]]:
-    """Curried `Either.inspect_left`.
-
-    Examples
-    --------
-    >>> inspect_left(print)(Left("e"))
-    e
-    Left('e')
-    """
-    return lambda either: either.inspect_left(function)
 
 
 # Imported last: maybe.py imports Left/Right from this module, so the cycle resolves once at

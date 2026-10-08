@@ -409,6 +409,33 @@ class AsyncEither(Generic[L, R]):
         """
         return function.bind(lambda inner: self.map(inner))
 
+    def apply2(
+        self: AsyncEither[L, Callable[[U], V]], value: AsyncEither[L, U]
+    ) -> AsyncEither[L, V]:
+        """Applies the function wrapped in this AsyncEither to the value wrapped in `value` (<*>).
+
+        The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both fail, the
+        Left of this (the function side) takes precedence. Curried functions of several arguments
+        can be applied one argument at a time; `map2` takes them uncurried.
+
+        Parameters
+        ----------
+        value: AsyncEither[L, U]
+            AsyncEither which contains the argument.
+
+        Returns
+        -------
+        async_value: AsyncEither[L, V]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func = AsyncEither.from_right(lambda y: 10 + y)
+        >>> asyncio.run(func.apply2(AsyncEither.from_right(5)))
+        Right(15)
+        """
+        return self.bind(lambda inner: value.map(inner))
+
     def and_(self, other: AsyncEither[L, U]) -> AsyncEither[L, U]:
         """Returns `other` if this AsyncEither resolves to Right, otherwise the original Left.
 

@@ -3,7 +3,6 @@ from collections.abc import Callable
 from unittest.mock import Mock
 
 from pymoliath import Right, Left, Ok, Err
-from pymoliath import exception as try_
 from pymoliath.exception import (
     TRY_TYPES,
     Try,
@@ -16,7 +15,7 @@ from pymoliath.exception import (
     map3,
     safe,
 )
-from pymoliath.util import compose, flow
+from pymoliath.util import compose
 
 
 class TestTryMonad(unittest.TestCase):
@@ -354,6 +353,25 @@ class TestTryMonad(unittest.TestCase):
             str(result3.unwrap_failure_or(Exception("error"))),
         )
 
+    def test_apply2(self):
+        def increment(x: int) -> int:
+            return x + 1
+
+        function: Try[Callable[[int], int]] = Success(increment)
+        failed: Try[Callable[[int], int]] = Failure(ValueError("function"))
+        value: Try[int] = Success(1)
+        error: Try[int] = Failure(ValueError("value"))
+
+        self.assertEqual(Success(2), function.apply2(value))
+        self.assertEqual(Failure(ValueError("value")), function.apply2(error))
+        self.assertEqual(Failure(ValueError("function")), failed.apply2(error))
+        self.assertEqual(value.apply(function), function.apply2(value))
+
+        add: Try[Callable[[int], Callable[[int], int]]] = Success(
+            lambda a: lambda b: a + b
+        )
+        self.assertEqual(Success(3), add.apply2(Success(1)).apply2(Success(2)))
+
 
 class TestTryValueSemantics(unittest.TestCase):
     def test_failure_equality_compares_exception_type_and_args(self):
@@ -406,19 +424,3 @@ class TestTryFeatures(unittest.TestCase):
 
     def test_and_then(self):
         self.assertEqual(Success(2), Success(1).and_then(lambda x: Success(x + 1)))
-
-    def test_curried_functions_with_flow(self):
-        def double(x: int) -> int:
-            return x * 2
-
-        def check(x: int) -> Try[int]:
-            return Success(x) if x < 10 else Failure(ValueError("too big"))
-
-        start: Try[int] = Success(2)
-        self.assertEqual(
-            4, flow(start, try_.map(double), try_.bind(check), try_.unwrap_or(0))
-        )
-        too_big: Try[int] = Success(5)
-        self.assertEqual(
-            0, flow(too_big, try_.map(double), try_.bind(check), try_.unwrap_or(0))
-        )

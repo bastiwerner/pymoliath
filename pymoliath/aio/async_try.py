@@ -423,6 +423,31 @@ class AsyncTry(Generic[T]):
         """
         return function.bind(lambda inner: self.map(inner))
 
+    def apply2(self: AsyncTry[Callable[[U], V]], value: AsyncTry[U]) -> AsyncTry[V]:
+        """Applies the function wrapped in this AsyncTry to the value wrapped in `value` (<*>).
+
+        The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both fail, the
+        Failure of this (the function side) takes precedence. Curried functions of several arguments
+        can be applied one argument at a time; `map2` takes them uncurried.
+
+        Parameters
+        ----------
+        value: AsyncTry[U]
+            AsyncTry which contains the argument.
+
+        Returns
+        -------
+        async_value: AsyncTry[V]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func = AsyncTry.from_success(lambda y: 10 + y)
+        >>> asyncio.run(func.apply2(AsyncTry.from_success(5)))
+        Success(15)
+        """
+        return self.bind(lambda inner: value.map(inner))
+
     def and_(self, other: AsyncTry[U]) -> AsyncTry[U]:
         """Returns `other` if this AsyncTry resolves to Success, otherwise the original Failure.
 

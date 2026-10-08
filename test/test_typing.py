@@ -23,10 +23,8 @@ from pymoliath.aio.async_try import AsyncTry
 from pymoliath.either import Either, Left, Right
 from pymoliath.exception import Failure, Success, Try
 from pymoliath.maybe import Just, Maybe, Nothing
-from pymoliath import result as result_
 from pymoliath.option import Nil, Option, Some, is_some
 from pymoliath.result import Err, Ok, Result, is_err, is_ok, map2, result_safe
-from pymoliath.util import flow
 
 
 def parse(value: str) -> Result[int, str]:
@@ -264,8 +262,18 @@ def test_flatten_map2_and_apply() -> None:
     assert_type(Some(Some(1)).flatten(), Option[int])
 
     assert_type(map2(parse("1"), parse("2"), lambda a, b: a / b), Result[float, str])
-    function: Result[Callable[[int], str], str] = Ok(str)
+
+    def show(value: int) -> str:
+        return str(value)
+
+    function: Result[Callable[[int], str], str] = Ok(show)
     assert_type(parse("1").apply(function), Result[str, str])
+    assert_type(function.apply2(parse("1")), Result[str, str])
+    add: Result[Callable[[int], Callable[[int], int]], str] = Ok(
+        lambda a: lambda b: a + b
+    )
+    assert_type(add.apply2(parse("1")).apply2(parse("2")), Result[int, str])
+    function.apply2(Ok("text"))  # pyright: ignore[reportArgumentType]
     assert_type(parse("1").match(ok=lambda x: x * 2, err=lambda e: len(e)), int)
     assert_type(parse("1").merge(), int | str)
 
@@ -283,16 +291,6 @@ def test_unwrap_and_safe() -> None:
         result_safe(lambda: int("x"), exceptions=(ValueError, KeyError)),
         Result[int, ValueError | KeyError],
     )
-
-
-def test_flow_keeps_the_types() -> None:
-    def double(x: int) -> int:
-        return x * 2
-
-    assert_type(flow(parse("1"), result_.map(double)), Result[int, str])
-    assert_type(flow(parse("1"), result_.map(double), result_.unwrap_or(0)), int)
-    # Lambdas passed directly to flow are inferred step by step.
-    assert_type(flow(1, lambda x: x + 1, lambda x: str(x)), str)
 
 
 def test_fixed_types_reject_mismatches() -> None:

@@ -65,28 +65,16 @@ Further notes:
 - **`match`** takes keyword-only callbacks: `result.match(ok=..., err=...)`, `either.match(left=...,
   right=...)`, `option.match(some=..., nil=...)`, `maybe.match(just=..., nothing=...)`,
   `try_.match(success=..., failure=...)`.
-- **Applicatives:** `apply` takes a wrapped one-argument function. For several arguments use the
-  module-level `map2`/`map3`. When several values are errors, the first one (the function side for
-  `apply`) wins.
+- **Applicatives:** `value.apply(function)` and its mirror `function.apply2(value)` take a wrapped
+  one-argument function; curried functions can be applied argument by argument
+  (`Ok(add).apply2(x).apply2(y)`). For uncurried functions of several arguments use the module-level
+  `map2`/`map3`. When several values are errors, the function side (or the first argument) wins.
 - **Narrowing:** the aliases (`Result`, `Option`, ...) are not classes, so use `is_result(x)` or
   `isinstance(x, RESULT_TYPES)` at runtime, and `is_ok`/`is_err`/`is_some`/... (which return `TypeIs`)
   to narrow a value to a variant.
 - **`safe` helpers** (`result_safe`, `either_safe`, `option.safe`, `maybe.safe`, `exception.safe`)
   catch `Exception` by default; pass `exceptions=(ValueError,)` to narrow both what is caught and the
   error type.
-- **Pipelines:** every module has curried functions (`result.map(f)`, `result.bind(f)`,
-  `result.unwrap_or(0)`, ...) that compose with `pymoliath.util.flow`, which is typed step by step:
-
-  ```python
-  from pymoliath import result
-  from pymoliath.util import flow
-
-  flow(parse("4"), result.map(double), result.bind(validate), result.unwrap_or(0))
-  ```
-
-  A lambda passed *directly* to `flow` is inferred from the previous step. A lambda passed to a curried
-  function is not (its input type is not known yet), so use annotated functions there, or method
-  chaining.
 
 # Testing
 
@@ -160,5 +148,5 @@ uv run pdoc -t .pdoc/rust pymoliath
 | `State`          | Computation that threads state through                          | [state](./pymoliath/state.py)               |
 | `LazyMonad`      | Deferred, memoized computation                                  | [lazy](./pymoliath/lazy/README.md.py)       |
 | `Continuation`   | Continuation-passing style (CPS) computation                    | [continuation](./pymoliath/continuation.py) |
-| `pymoliath.util` | FP prelude helpers (`compose`, `curry`, `pipe`, `flow`, ...)    | [util](./pymoliath/util.py)                 |
+| `pymoliath.util` | FP prelude helpers (`compose`, `curry`, `pipe`, ...)            | [util](./pymoliath/util.py)                 |
 | `UnwrapError`    | Raised by `unwrap` on `Err`/`Left`/`Nil`/`Nothing`               | [errors](./pymoliath/errors.py)             |

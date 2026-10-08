@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import unittest
 from unittest.mock import AsyncMock, Mock
 
@@ -270,3 +271,20 @@ class TestAsyncEither(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Right(10), await pipeline)
         self.assertEqual(Right(10), await pipeline)
         self.assertEqual([10, 10], calls)
+
+    async def test_apply2(self):
+        def increment(x: int) -> int:
+            return x + 1
+
+        function: AsyncEither[str, Callable[[int], int]] = AsyncEither.from_right(
+            increment
+        )
+        failed: AsyncEither[str, Callable[[int], int]] = AsyncEither.from_left(
+            "function"
+        )
+        value: AsyncEither[str, int] = AsyncEither.from_right(1)
+        error: AsyncEither[str, int] = AsyncEither.from_left("value")
+
+        self.assertEqual(Right(2), await function.apply2(value))
+        self.assertEqual(Left("value"), await function.apply2(error))
+        self.assertEqual(Left("function"), await failed.apply2(error))

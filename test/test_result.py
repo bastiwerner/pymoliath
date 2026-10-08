@@ -2,10 +2,8 @@ import math
 import unittest
 from collections.abc import Callable
 from decimal import Decimal
-from typing import Any
 from unittest.mock import Mock
 
-from pymoliath import result
 from pymoliath.errors import UnwrapError
 from pymoliath.option import Nil, Option, Some
 from pymoliath.result import (
@@ -21,7 +19,7 @@ from pymoliath.result import (
     map3,
     result_safe,
 )
-from pymoliath.util import compose, flow
+from pymoliath.util import compose
 
 
 class TestResultMonad(unittest.TestCase):
@@ -329,6 +327,25 @@ class TestResultMonad(unittest.TestCase):
         self.assertEqual("ok 10", describe(Ok(10)))
         self.assertEqual("err error", describe(Err("error")))
 
+    def test_apply2(self):
+        def increment(x: int) -> int:
+            return x + 1
+
+        function: Result[Callable[[int], int], str] = Ok(increment)
+        failed: Result[Callable[[int], int], str] = Err("function")
+        value: Result[int, str] = Ok(1)
+        error: Result[int, str] = Err("value")
+
+        self.assertEqual(Ok(2), function.apply2(value))
+        self.assertEqual(Err("value"), function.apply2(error))
+        self.assertEqual(Err("function"), failed.apply2(error))
+        self.assertEqual(value.apply(function), function.apply2(value))
+
+        add: Result[Callable[[int], Callable[[int], int]], str] = Ok(
+            lambda a: lambda b: a + b
+        )
+        self.assertEqual(Ok(3), add.apply2(Ok(1)).apply2(Ok(2)))
+
 
 class TestResultValueSemantics(unittest.TestCase):
     def test_equality_compares_values_not_strings(self):
@@ -436,43 +453,3 @@ class TestResultFeatures(unittest.TestCase):
     def test_from_option(self):
         self.assertEqual(Ok(1), from_option(Some(1), "missing"))
         self.assertEqual(Err("missing"), from_option(Nil(), "missing"))
-
-    def test_curried_functions_with_flow(self):
-        def double(x: int) -> int:
-            return x * 2
-
-        def validate(x: int) -> Result[int, str]:
-            return Ok(x) if x < 10 else Err("too big")
-
-        start: Result[int, str] = Ok(2)
-        self.assertEqual(
-            4,
-            flow(start, result.map(double), result.bind(validate), result.unwrap_or(0)),
-        )
-        too_big: Result[int, str] = Ok(5)
-        self.assertEqual(
-            0,
-            flow(
-                too_big, result.map(double), result.bind(validate), result.unwrap_or(0)
-            ),
-        )
-        seen: list[Any] = []
-        error: Result[int, str] = Err("e")
-        self.assertEqual(
-            "E",
-            flow(
-                error,
-                result.inspect(seen.append),
-                result.inspect_err(seen.append),
-                result.map_err(str.upper),
-                result.unwrap_or_else(lambda e: e),
-            ),
-        )
-        self.assertEqual(["e"], seen)
-
-        # Lambdas passed to curried functions are not inferred (the input type is not known
-        # yet), so pipelines use annotated functions.
-        def recover(e: str) -> Result[int, str]:
-            return Ok(len(e))
-
-        self.assertEqual(Ok(1), result.bind_err(recover)(error))

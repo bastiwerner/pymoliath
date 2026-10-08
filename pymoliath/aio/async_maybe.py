@@ -284,6 +284,33 @@ class AsyncMaybe(Generic[T]):
         """
         return function.bind(lambda inner: self.map(inner))
 
+    def apply2(
+        self: AsyncMaybe[Callable[[U], V]], value: AsyncMaybe[U]
+    ) -> AsyncMaybe[V]:
+        """Applies the function wrapped in this AsyncMaybe to the value wrapped in `value` (<*>).
+
+        The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both fail, the
+        Nothing of this (the function side) takes precedence. Curried functions of several arguments
+        can be applied one argument at a time; `map2` takes them uncurried.
+
+        Parameters
+        ----------
+        value: AsyncMaybe[U]
+            AsyncMaybe which contains the argument.
+
+        Returns
+        -------
+        async_value: AsyncMaybe[V]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func = AsyncMaybe.from_value(lambda y: 10 + y)
+        >>> asyncio.run(func.apply2(AsyncMaybe.from_value(5)))
+        Just(15)
+        """
+        return self.bind(lambda inner: value.map(inner))
+
     def filter(
         self, filter_function: Callable[[T], bool | Awaitable[bool]]
     ) -> AsyncMaybe[T]:

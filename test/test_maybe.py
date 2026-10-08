@@ -2,7 +2,6 @@ import unittest
 from typing import Any, Callable
 from unittest.mock import MagicMock, Mock
 
-from pymoliath import maybe
 from pymoliath.either import Either, Left, Right
 from pymoliath.errors import UnwrapError
 from pymoliath.maybe import (
@@ -18,7 +17,7 @@ from pymoliath.maybe import (
     map3,
     safe,
 )
-from pymoliath.util import compose, flow
+from pymoliath.util import compose
 
 
 class TestMaybe(unittest.TestCase):
@@ -345,6 +344,25 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual("just 10", describe(Just(10)))
         self.assertEqual("nothing", describe(Nothing()))
 
+    def test_apply2(self):
+        def increment(x: int) -> int:
+            return x + 1
+
+        function: Maybe[Callable[[int], int]] = Just(increment)
+        failed: Maybe[Callable[[int], int]] = Nothing()
+        value: Maybe[int] = Just(1)
+        error: Maybe[int] = Nothing()
+
+        self.assertEqual(Just(2), function.apply2(value))
+        self.assertEqual(Nothing(), function.apply2(error))
+        self.assertEqual(Nothing(), failed.apply2(error))
+        self.assertEqual(value.apply(function), function.apply2(value))
+
+        add: Maybe[Callable[[int], Callable[[int], int]]] = Just(
+            lambda a: lambda b: a + b
+        )
+        self.assertEqual(Just(3), add.apply2(Just(1)).apply2(Just(2)))
+
 
 class TestMaybeValueSemantics(unittest.TestCase):
     def test_equality_and_hash(self):
@@ -393,19 +411,3 @@ class TestMaybeFeatures(unittest.TestCase):
         self.assertEqual(Right(Nothing()), Nothing().transpose())
         error: Maybe[Either[str, int]] = Just(Left("e"))
         self.assertEqual(Left("e"), error.transpose())
-
-    def test_curried_functions_with_flow(self):
-        def increment(x: int) -> int:
-            return x + 1
-
-        def positive(x: int) -> bool:
-            return x > 0
-
-        start: Maybe[int] = Just(2)
-        self.assertEqual(
-            3,
-            flow(
-                start, maybe.map(increment), maybe.filter(positive), maybe.unwrap_or(0)
-            ),
-        )
-        self.assertEqual(0, maybe.unwrap_or_else(lambda: 0)(Nothing()))

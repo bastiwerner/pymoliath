@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import unittest
 from unittest.mock import AsyncMock, Mock
 
@@ -201,3 +202,16 @@ class TestAsyncOption(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Some(10), await pipeline)
         self.assertEqual(Some(10), await pipeline)
         self.assertEqual([10, 10], calls)
+
+    async def test_apply2(self):
+        def increment(x: int) -> int:
+            return x + 1
+
+        function: AsyncOption[Callable[[int], int]] = AsyncOption.from_value(increment)
+        failed: AsyncOption[Callable[[int], int]] = AsyncOption.from_option(Nil())
+        value: AsyncOption[int] = AsyncOption.from_value(1)
+        error: AsyncOption[int] = AsyncOption.from_option(Nil())
+
+        self.assertEqual(Some(2), await function.apply2(value))
+        self.assertEqual(Nil(), await function.apply2(error))
+        self.assertEqual(Nil(), await failed.apply2(error))

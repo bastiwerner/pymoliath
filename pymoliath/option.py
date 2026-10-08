@@ -78,8 +78,7 @@ match option_value:
 ```
 
 `Option` is a type alias, so use `is_option` (or `isinstance(x, OPTION_TYPES)`) for runtime checks
-and `is_some`/`is_nil` to narrow an `Option` to one of its variants. Every common method also
-exists as a curried module-level function for use with `pymoliath.util.flow`.
+and `is_some`/`is_nil` to narrow an `Option` to one of its variants.
 """
 
 from __future__ import annotations
@@ -204,6 +203,33 @@ class _OptionImpl(Generic[T]):
         >>> func: Option[Callable[[int], int]] = Some(lambda x: x * 2)
         >>> val.apply(func)
         Some(20)
+        """
+        raise NotImplementedError
+
+    def apply2(self: _OptionImpl[Callable[[U], V]], value: Option[U]) -> Option[V]:
+        """Applies the function wrapped in this Option Monad to the value wrapped in `value`.
+
+        The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both are
+        empty/errors, this (the function side) takes precedence. Functions of several
+        arguments can be applied one argument at a time when they are curried, e.g.
+        `Some(lambda a: lambda b: a + b).apply2(x).apply2(y)`; `map2`/`map3` take them uncurried.
+
+        Parameters
+        ----------
+        value: Option[U]
+            Option Monad which contains the argument.
+
+        Returns
+        -------
+        result: Option[V]
+
+        Examples
+        --------
+        >>> func: Option[Callable[[int], int]] = Some(lambda y: 10 + y)
+        >>> func.apply2(Some(5))
+        Some(15)
+        >>> func.apply2(Nil())
+        Nil()
         """
         raise NotImplementedError
 
@@ -630,6 +656,11 @@ class Some(_OptionImpl[T]):
             return Some(function.value(self.value))
         return function
 
+    def apply2(self: Some[Callable[[U], V]], value: Option[U]) -> Option[V]:
+        if isinstance(value, Some):
+            return Some(self.value(value.value))
+        return value
+
     def filter(self, filter_function: Callable[[T], bool]) -> Option[T]:
         return self if filter_function(self.value) else Nil()
 
@@ -740,6 +771,9 @@ class Nil(_OptionImpl[Never]):
         return function()
 
     def apply(self, function: Option[Callable[[Never], U]]) -> Nil:
+        return self
+
+    def apply2(self, value: Option[U]) -> Nil:
         return self
 
     def filter(self, filter_function: Callable[[Never], bool]) -> Nil:
@@ -953,76 +987,6 @@ def safe(
         return Some(function())
     except exceptions:
         return Nil()
-
-
-# Curried module-level functions, for point-free pipelines (see `pymoliath.util.flow`).
-
-
-def map(function: Callable[[U], V]) -> Callable[[Option[U]], Option[V]]:
-    """Curried `Option.map`.
-
-    Examples
-    --------
-    >>> map(lambda x: x + 1)(Some(1))
-    Some(2)
-    """
-    return lambda option: option.map(function)
-
-
-def bind(function: Callable[[U], Option[V]]) -> Callable[[Option[U]], Option[V]]:
-    """Curried `Option.bind`.
-
-    Examples
-    --------
-    >>> bind(lambda x: Some(x + 1))(Some(1))
-    Some(2)
-    """
-    return lambda option: option.bind(function)
-
-
-def filter(function: Callable[[U], bool]) -> Callable[[Option[U]], Option[U]]:
-    """Curried `Option.filter`.
-
-    Examples
-    --------
-    >>> filter(lambda x: x > 1)(Some(1))
-    Nil()
-    """
-    return lambda option: option.filter(function)
-
-
-def unwrap_or(default_value: U) -> Callable[[Option[U]], U]:
-    """Curried `Option.unwrap_or`.
-
-    Examples
-    --------
-    >>> unwrap_or(0)(Nil())
-    0
-    """
-    return lambda option: option.unwrap_or(default_value)
-
-
-def unwrap_or_else(function: Callable[[], U]) -> Callable[[Option[U]], U]:
-    """Curried `Option.unwrap_or_else`.
-
-    Examples
-    --------
-    >>> unwrap_or_else(lambda: 0)(Nil())
-    0
-    """
-    return lambda option: option.unwrap_or_else(function)
-
-
-def inspect(function: Callable[[U], None]) -> Callable[[Option[U]], Option[U]]:
-    """Curried `Option.inspect`.
-
-    Examples
-    --------
-    >>> inspect(print)(Some(1))
-    1
-    Some(1)
-    """
-    return lambda option: option.inspect(function)
 
 
 # Imported last: result.py imports Some/Nil from this module, so the cycle resolves once at import

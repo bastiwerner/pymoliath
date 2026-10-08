@@ -403,6 +403,33 @@ class AsyncResult(Generic[T, E]):
         """
         return function.bind(lambda inner: self.map(inner))
 
+    def apply2(
+        self: AsyncResult[Callable[[U], V], E], value: AsyncResult[U, E]
+    ) -> AsyncResult[V, E]:
+        """Applies the function wrapped in this AsyncResult to the value wrapped in `value` (<*>).
+
+        The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both fail, the
+        Err of this (the function side) takes precedence. Curried functions of several arguments
+        can be applied one argument at a time; `map2` takes them uncurried.
+
+        Parameters
+        ----------
+        value: AsyncResult[U, E]
+            AsyncResult which contains the argument.
+
+        Returns
+        -------
+        async_value: AsyncResult[V, E]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func = AsyncResult.from_ok(lambda y: 10 + y)
+        >>> asyncio.run(func.apply2(AsyncResult.from_ok(5)))
+        Ok(15)
+        """
+        return self.bind(lambda inner: value.map(inner))
+
     def and_(self, other: AsyncResult[U, E]) -> AsyncResult[U, E]:
         """Returns `other` if this AsyncResult resolves to Ok, otherwise Err.
 

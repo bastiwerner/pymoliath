@@ -1,3 +1,4 @@
+from collections.abc import Callable
 import unittest
 from unittest.mock import AsyncMock, Mock
 
@@ -202,3 +203,16 @@ class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(Just(10), await pipeline)
         self.assertEqual(Just(10), await pipeline)
         self.assertEqual([10, 10], calls)
+
+    async def test_apply2(self):
+        def increment(x: int) -> int:
+            return x + 1
+
+        function: AsyncMaybe[Callable[[int], int]] = AsyncMaybe.from_value(increment)
+        failed: AsyncMaybe[Callable[[int], int]] = AsyncMaybe.from_maybe(Nothing())
+        value: AsyncMaybe[int] = AsyncMaybe.from_value(1)
+        error: AsyncMaybe[int] = AsyncMaybe.from_maybe(Nothing())
+
+        self.assertEqual(Just(2), await function.apply2(value))
+        self.assertEqual(Nothing(), await function.apply2(error))
+        self.assertEqual(Nothing(), await failed.apply2(error))

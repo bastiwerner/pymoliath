@@ -2,7 +2,6 @@ import unittest
 from typing import Any, Callable
 from unittest.mock import MagicMock, Mock
 
-from pymoliath import option
 from pymoliath.errors import UnwrapError
 from pymoliath.option import (
     OPTION_TYPES,
@@ -18,7 +17,7 @@ from pymoliath.option import (
     safe,
 )
 from pymoliath.result import Err, Ok, Result
-from pymoliath.util import compose, flow
+from pymoliath.util import compose
 
 
 class TestOption(unittest.TestCase):
@@ -344,6 +343,25 @@ class TestOption(unittest.TestCase):
         self.assertEqual("some 10", describe(Some(10)))
         self.assertEqual("nil", describe(Nil()))
 
+    def test_apply2(self):
+        def increment(x: int) -> int:
+            return x + 1
+
+        function: Option[Callable[[int], int]] = Some(increment)
+        failed: Option[Callable[[int], int]] = Nil()
+        value: Option[int] = Some(1)
+        error: Option[int] = Nil()
+
+        self.assertEqual(Some(2), function.apply2(value))
+        self.assertEqual(Nil(), function.apply2(error))
+        self.assertEqual(Nil(), failed.apply2(error))
+        self.assertEqual(value.apply(function), function.apply2(value))
+
+        add: Option[Callable[[int], Callable[[int], int]]] = Some(
+            lambda a: lambda b: a + b
+        )
+        self.assertEqual(Some(3), add.apply2(Some(1)).apply2(Some(2)))
+
 
 class TestOptionValueSemantics(unittest.TestCase):
     def test_equality_and_hash(self):
@@ -395,31 +413,3 @@ class TestOptionFeatures(unittest.TestCase):
         self.assertEqual(Ok(Nil()), Nil().transpose())
         error: Option[Result[int, str]] = Some(Err("e"))
         self.assertEqual(Err("e"), error.transpose())
-
-    def test_curried_functions_with_flow(self):
-        # Lambdas passed to curried functions are not inferred (the input type is not known
-        # yet), so pipelines use annotated functions.
-        def increment(x: int) -> int:
-            return x + 1
-
-        def positive(x: int) -> bool:
-            return x > 0
-
-        def wrap(x: int) -> Option[int]:
-            return Some(x)
-
-        seen: list[int] = []
-        start: Option[int] = Some(2)
-        self.assertEqual(
-            3,
-            flow(
-                start,
-                option.map(increment),
-                option.filter(positive),
-                option.bind(wrap),
-                option.inspect(seen.append),
-                option.unwrap_or(0),
-            ),
-        )
-        self.assertEqual([3], seen)
-        self.assertEqual(0, option.unwrap_or_else(lambda: 0)(Nil()))

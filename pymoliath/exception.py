@@ -75,8 +75,7 @@ match try_value:
 ```
 
 `Try` is a type alias, so use `is_try` (or `isinstance(x, TRY_TYPES)`) for runtime checks and
-`is_success`/`is_failure` to narrow a `Try` to one of its variants. Every common method also
-exists as a curried module-level function for use with `pymoliath.util.flow`.
+`is_success`/`is_failure` to narrow a `Try` to one of its variants.
 """
 
 from __future__ import annotations
@@ -244,6 +243,33 @@ class _TryImpl(Generic[T]):
         >>> val: Try[int] = Success(10)
         >>> val.apply(func)
         Success(20)
+        """
+        raise NotImplementedError
+
+    def apply2(self: _TryImpl[Callable[[U], V]], value: Try[U]) -> Try[V]:
+        """Applies the function wrapped in this Try Monad to the value wrapped in `value`.
+
+        The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both are
+        empty/errors, this (the function side) takes precedence. Any exception raised by the function is caught and turned into a Failure. Functions of several
+        arguments can be applied one argument at a time when they are curried, e.g.
+        `Success(lambda a: lambda b: a + b).apply2(x).apply2(y)`; `map2`/`map3` take them uncurried.
+
+        Parameters
+        ----------
+        value: Try[U]
+            Try Monad which contains the argument.
+
+        Returns
+        -------
+        result: Try[V]
+
+        Examples
+        --------
+        >>> func: Try[Callable[[int], float]] = Success(lambda y: 10 / y)
+        >>> func.apply2(Success(5))
+        Success(2.0)
+        >>> func.apply2(Success(0))
+        Failure(ZeroDivisionError('division by zero'))
         """
         raise NotImplementedError
 
@@ -660,6 +686,14 @@ class Success(_TryImpl[T]):
                 return Failure(e)
         return function  # type: ignore[return-value]
 
+    def apply2(self: Success[Callable[[U], V]], value: Try[U]) -> Try[V]:
+        if isinstance(value, Success):
+            try:
+                return Success(self.value(value.value))
+            except Exception as e:
+                return Failure(e)
+        return value  # type: ignore[return-value]
+
     def is_success_and(self, function: Callable[[T], bool]) -> bool:
         return function(self.value)
 
@@ -783,6 +817,9 @@ class Failure(_TryImpl[T_Never]):
     def apply(self, function: Try[Callable[[T_Never], U]]) -> Failure[U]:
         if isinstance(function, Failure):
             return function  # type: ignore[return-value]
+        return self  # type: ignore[return-value]
+
+    def apply2(self: Failure[Callable[[U], V]], value: Try[U]) -> Failure[V]:
         return self  # type: ignore[return-value]
 
     def is_success_and(self, function: Callable[[T_Never], bool]) -> bool:
@@ -1009,76 +1046,3 @@ def safe(
         return Success(function())
     except exceptions as e:
         return Failure(e)
-
-
-# Curried module-level functions, for point-free pipelines (see `pymoliath.util.flow`).
-
-
-def map(function: Callable[[U], V]) -> Callable[[Try[U]], Try[V]]:
-    """Curried `Try.map`.
-
-    Examples
-    --------
-    >>> map(lambda x: x + 1)(Success(1))
-    Success(2)
-    """
-    return lambda attempt: attempt.map(function)
-
-
-def bind(function: Callable[[U], Try[V]]) -> Callable[[Try[U]], Try[V]]:
-    """Curried `Try.bind`.
-
-    Examples
-    --------
-    >>> bind(lambda x: Success(x + 1))(Success(1))
-    Success(2)
-    """
-    return lambda attempt: attempt.bind(function)
-
-
-def unwrap_or(default_value: U) -> Callable[[Try[U]], U]:
-    """Curried `Try.unwrap_or`.
-
-    Examples
-    --------
-    >>> unwrap_or(0)(Failure(ValueError("boom")))
-    0
-    """
-    return lambda attempt: attempt.unwrap_or(default_value)
-
-
-def unwrap_or_else(function: Callable[[Exception], U]) -> Callable[[Try[U]], U]:
-    """Curried `Try.unwrap_or_else`.
-
-    Examples
-    --------
-    >>> unwrap_or_else(lambda e: len(str(e)))(Failure(ValueError("boom")))
-    4
-    """
-    return lambda attempt: attempt.unwrap_or_else(function)
-
-
-def inspect(function: Callable[[U], None]) -> Callable[[Try[U]], Try[U]]:
-    """Curried `Try.inspect`.
-
-    Examples
-    --------
-    >>> inspect(print)(Success(1))
-    1
-    Success(1)
-    """
-    return lambda attempt: attempt.inspect(function)
-
-
-def inspect_failure(
-    function: Callable[[Exception], None],
-) -> Callable[[Try[U]], Try[U]]:
-    """Curried `Try.inspect_failure`.
-
-    Examples
-    --------
-    >>> inspect_failure(print)(Failure(ValueError("boom")))
-    boom
-    Failure(ValueError('boom'))
-    """
-    return lambda attempt: attempt.inspect_failure(function)

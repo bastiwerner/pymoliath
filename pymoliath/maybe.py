@@ -78,8 +78,7 @@ match maybe_value:
 ```
 
 `Maybe` is a type alias, so use `is_maybe` (or `isinstance(x, MAYBE_TYPES)`) for runtime checks
-and `is_just`/`is_nothing` to narrow a `Maybe` to one of its variants. Every common method also
-exists as a curried module-level function for use with `pymoliath.util.flow`.
+and `is_just`/`is_nothing` to narrow a `Maybe` to one of its variants.
 """
 
 from __future__ import annotations
@@ -204,6 +203,33 @@ class _MaybeImpl(Generic[T]):
         >>> func: Maybe[Callable[[int], int]] = Just(lambda x: x * 2)
         >>> val.apply(func)
         Just(20)
+        """
+        raise NotImplementedError
+
+    def apply2(self: _MaybeImpl[Callable[[U], V]], value: Maybe[U]) -> Maybe[V]:
+        """Applies the function wrapped in this Maybe Monad to the value wrapped in `value`.
+
+        The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both are
+        empty/errors, this (the function side) takes precedence. Functions of several
+        arguments can be applied one argument at a time when they are curried, e.g.
+        `Just(lambda a: lambda b: a + b).apply2(x).apply2(y)`; `map2`/`map3` take them uncurried.
+
+        Parameters
+        ----------
+        value: Maybe[U]
+            Maybe Monad which contains the argument.
+
+        Returns
+        -------
+        result: Maybe[V]
+
+        Examples
+        --------
+        >>> func: Maybe[Callable[[int], int]] = Just(lambda y: 10 + y)
+        >>> func.apply2(Just(5))
+        Just(15)
+        >>> func.apply2(Nothing())
+        Nothing()
         """
         raise NotImplementedError
 
@@ -630,6 +656,11 @@ class Just(_MaybeImpl[T]):
             return Just(function.value(self.value))
         return function
 
+    def apply2(self: Just[Callable[[U], V]], value: Maybe[U]) -> Maybe[V]:
+        if isinstance(value, Just):
+            return Just(self.value(value.value))
+        return value
+
     def filter(self, filter_function: Callable[[T], bool]) -> Maybe[T]:
         return self if filter_function(self.value) else Nothing()
 
@@ -740,6 +771,9 @@ class Nothing(_MaybeImpl[Never]):
         return function()
 
     def apply(self, function: Maybe[Callable[[Never], U]]) -> Nothing:
+        return self
+
+    def apply2(self, value: Maybe[U]) -> Nothing:
         return self
 
     def filter(self, filter_function: Callable[[Never], bool]) -> Nothing:
@@ -951,76 +985,6 @@ def safe(
         return Just(function())
     except exceptions:
         return Nothing()
-
-
-# Curried module-level functions, for point-free pipelines (see `pymoliath.util.flow`).
-
-
-def map(function: Callable[[U], V]) -> Callable[[Maybe[U]], Maybe[V]]:
-    """Curried `Maybe.map`.
-
-    Examples
-    --------
-    >>> map(lambda x: x + 1)(Just(1))
-    Just(2)
-    """
-    return lambda maybe: maybe.map(function)
-
-
-def bind(function: Callable[[U], Maybe[V]]) -> Callable[[Maybe[U]], Maybe[V]]:
-    """Curried `Maybe.bind`.
-
-    Examples
-    --------
-    >>> bind(lambda x: Just(x + 1))(Just(1))
-    Just(2)
-    """
-    return lambda maybe: maybe.bind(function)
-
-
-def filter(function: Callable[[U], bool]) -> Callable[[Maybe[U]], Maybe[U]]:
-    """Curried `Maybe.filter`.
-
-    Examples
-    --------
-    >>> filter(lambda x: x > 1)(Just(1))
-    Nothing()
-    """
-    return lambda maybe: maybe.filter(function)
-
-
-def unwrap_or(default_value: U) -> Callable[[Maybe[U]], U]:
-    """Curried `Maybe.unwrap_or`.
-
-    Examples
-    --------
-    >>> unwrap_or(0)(Nothing())
-    0
-    """
-    return lambda maybe: maybe.unwrap_or(default_value)
-
-
-def unwrap_or_else(function: Callable[[], U]) -> Callable[[Maybe[U]], U]:
-    """Curried `Maybe.unwrap_or_else`.
-
-    Examples
-    --------
-    >>> unwrap_or_else(lambda: 0)(Nothing())
-    0
-    """
-    return lambda maybe: maybe.unwrap_or_else(function)
-
-
-def inspect(function: Callable[[U], None]) -> Callable[[Maybe[U]], Maybe[U]]:
-    """Curried `Maybe.inspect`.
-
-    Examples
-    --------
-    >>> inspect(print)(Just(1))
-    1
-    Just(1)
-    """
-    return lambda maybe: maybe.inspect(function)
 
 
 # Imported last: either.py imports Just/Nothing from this module, so the cycle resolves once at

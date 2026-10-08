@@ -2,7 +2,6 @@ import unittest
 from collections.abc import Callable
 from unittest.mock import Mock
 
-from pymoliath import either
 from pymoliath.either import (
     EITHER_TYPES,
     Either,
@@ -17,7 +16,7 @@ from pymoliath.either import (
 )
 from pymoliath.errors import UnwrapError
 from pymoliath.maybe import Just, Nothing
-from pymoliath.util import compose, flow
+from pymoliath.util import compose
 
 
 class TestEitherResultMonad(unittest.TestCase):
@@ -318,6 +317,25 @@ class TestEitherResultMonad(unittest.TestCase):
         self.assertEqual("right 10", describe(Right(10)))
         self.assertEqual("left error", describe(Left("error")))
 
+    def test_apply2(self):
+        def increment(x: int) -> int:
+            return x + 1
+
+        function: Either[str, Callable[[int], int]] = Right(increment)
+        failed: Either[str, Callable[[int], int]] = Left("function")
+        value: Either[str, int] = Right(1)
+        error: Either[str, int] = Left("value")
+
+        self.assertEqual(Right(2), function.apply2(value))
+        self.assertEqual(Left("value"), function.apply2(error))
+        self.assertEqual(Left("function"), failed.apply2(error))
+        self.assertEqual(value.apply(function), function.apply2(value))
+
+        add: Either[str, Callable[[int], Callable[[int], int]]] = Right(
+            lambda a: lambda b: a + b
+        )
+        self.assertEqual(Right(3), add.apply2(Right(1)).apply2(Right(2)))
+
 
 class TestEitherValueSemantics(unittest.TestCase):
     def test_equality_and_hash(self):
@@ -370,19 +388,3 @@ class TestEitherFeatures(unittest.TestCase):
         self.assertEqual(Right(2), value.and_then(lambda x: Right(x + 1)))
         error: Either[str, int] = Left("abc")
         self.assertEqual(Right(3), error.or_else(lambda e: Right(len(e))))
-
-    def test_curried_functions_with_flow(self):
-        def double(x: int) -> int:
-            return x * 2
-
-        def check(x: int) -> Either[str, int]:
-            return Right(x) if x < 10 else Left("too big")
-
-        start: Either[str, int] = Right(2)
-        self.assertEqual(
-            4, flow(start, either.map(double), either.bind(check), either.unwrap_or(0))
-        )
-        error: Either[str, int] = Left("abc")
-        self.assertEqual(
-            3, flow(error, either.map_left(str.upper), either.unwrap_or_else(len))
-        )

@@ -284,6 +284,33 @@ class AsyncOption(Generic[T]):
         """
         return function.bind(lambda inner: self.map(inner))
 
+    def apply2(
+        self: AsyncOption[Callable[[U], V]], value: AsyncOption[U]
+    ) -> AsyncOption[V]:
+        """Applies the function wrapped in this AsyncOption to the value wrapped in `value` (<*>).
+
+        The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both fail, the
+        Nil of this (the function side) takes precedence. Curried functions of several arguments
+        can be applied one argument at a time; `map2` takes them uncurried.
+
+        Parameters
+        ----------
+        value: AsyncOption[U]
+            AsyncOption which contains the argument.
+
+        Returns
+        -------
+        async_value: AsyncOption[V]
+
+        Examples
+        --------
+        >>> import asyncio
+        >>> func = AsyncOption.from_value(lambda y: 10 + y)
+        >>> asyncio.run(func.apply2(AsyncOption.from_value(5)))
+        Some(15)
+        """
+        return self.bind(lambda inner: value.map(inner))
+
     def filter(
         self, filter_function: Callable[[T], bool | Awaitable[bool]]
     ) -> AsyncOption[T]:

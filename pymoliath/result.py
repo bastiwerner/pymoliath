@@ -96,18 +96,6 @@ match result_value:
 
 `Result` is a type alias, so use `is_result` (or `isinstance(x, RESULT_TYPES)`) for runtime checks
 and `is_ok`/`is_err` to narrow a `Result` to one of its variants.
-
-## Pipelines
-
-Every common method also exists as a curried module-level function, which composes with
-`pymoliath.util.flow`:
-
-```python
-from pymoliath import result
-from pymoliath.util import flow
-
-flow(parse("4"), result.map(double), result.bind(validate), result.unwrap_or(0))
-```
 """
 
 from __future__ import annotations
@@ -292,6 +280,37 @@ class _ResultImpl(Generic[T, E]):
         Ok(20)
         >>> Err("value").apply(Err("function"))
         Err('function')
+        """
+        raise NotImplementedError
+
+    def apply2(
+        self: _ResultImpl[Callable[[U], V], E], value: Result[U, E]
+    ) -> Result[V, E]:
+        """Applies the function wrapped in this Result Monad to the value wrapped in `value`.
+
+        The mirror image of `apply` (`func.apply2(val)` is `val.apply(func)`). If both are
+        empty/errors, this (the function side) takes precedence. Functions of several
+        arguments can be applied one argument at a time when they are curried, e.g.
+        `Ok(lambda a: lambda b: a + b).apply2(x).apply2(y)`; `map2`/`map3` take them uncurried.
+
+        Parameters
+        ----------
+        value: Result[U, E]
+            Result Monad which contains the argument.
+
+        Returns
+        -------
+        result: Result[V, E]
+
+        Examples
+        --------
+        >>> func: Result[Callable[[int], int], str] = Ok(lambda y: 10 + y)
+        >>> val: Result[int, str] = Ok(5)
+        >>> func.apply2(val)
+        Ok(15)
+        >>> add: Result[Callable[[int], Callable[[int], int]], str] = Ok(lambda a: lambda b: a + b)
+        >>> add.apply2(Ok(1)).apply2(Ok(2))
+        Ok(3)
         """
         raise NotImplementedError
 
@@ -777,6 +796,13 @@ class Ok(_ResultImpl[T, E_Never]):
             return Ok(function.value(self.value))
         return function  # type: ignore[return-value]
 
+    def apply2(
+        self: Ok[Callable[[U], V], E_Never], value: Result[U, E_Never]
+    ) -> Result[V, E_Never]:
+        if isinstance(value, Ok):
+            return Ok(self.value(value.value))
+        return value  # type: ignore[return-value]
+
     def is_ok_and(self, function: Callable[[T], bool]) -> bool:
         return function(self.value)
 
@@ -908,6 +934,11 @@ class Err(_ResultImpl[T_Never, E_Never]):
     ) -> Err[U, E_Never]:
         if isinstance(function, Err):
             return function  # type: ignore[return-value]
+        return self  # type: ignore[return-value]
+
+    def apply2(
+        self: Err[Callable[[U], V], E_Never], value: Result[U, E_Never]
+    ) -> Err[V, E_Never]:
         return self  # type: ignore[return-value]
 
     def is_ok_and(self, function: Callable[[T_Never], bool]) -> bool:
@@ -1138,105 +1169,6 @@ def result_safe(
         return Ok(function())
     except exceptions as e:
         return Err(e)
-
-
-# Curried module-level functions, for point-free pipelines (see `pymoliath.util.flow`).
-
-
-def map(function: Callable[[U], V]) -> Callable[[Result[U, F]], Result[V, F]]:
-    """Curried `Result.map`.
-
-    Examples
-    --------
-    >>> map(lambda x: x + 1)(Ok(1))
-    Ok(2)
-    """
-    return lambda result: result.map(function)
-
-
-def map_err(function: Callable[[F], V]) -> Callable[[Result[U, F]], Result[U, V]]:
-    """Curried `Result.map_err`.
-
-    Examples
-    --------
-    >>> map_err(str.upper)(Err("e"))
-    Err('E')
-    """
-    return lambda result: result.map_err(function)
-
-
-def bind(
-    function: Callable[[U], Result[V, F]],
-) -> Callable[[Result[U, F]], Result[V, F]]:
-    """Curried `Result.bind`.
-
-    Examples
-    --------
-    >>> bind(lambda x: Ok(x + 1))(Ok(1))
-    Ok(2)
-    """
-    return lambda result: result.bind(function)
-
-
-def bind_err(
-    function: Callable[[F], Result[U, V]],
-) -> Callable[[Result[U, F]], Result[U, V]]:
-    """Curried `Result.bind_err`.
-
-    Examples
-    --------
-    >>> bind_err(lambda e: Ok(len(e)))(Err("abc"))
-    Ok(3)
-    """
-    return lambda result: result.bind_err(function)
-
-
-def unwrap_or(default_value: U) -> Callable[[Result[U, Any]], U]:
-    """Curried `Result.unwrap_or`.
-
-    Examples
-    --------
-    >>> unwrap_or(0)(Err("e"))
-    0
-    """
-    return lambda result: result.unwrap_or(default_value)
-
-
-def unwrap_or_else(function: Callable[[F], U]) -> Callable[[Result[U, F]], U]:
-    """Curried `Result.unwrap_or_else`.
-
-    Examples
-    --------
-    >>> unwrap_or_else(len)(Err("abc"))
-    3
-    """
-    return lambda result: result.unwrap_or_else(function)
-
-
-def inspect(function: Callable[[U], None]) -> Callable[[Result[U, F]], Result[U, F]]:
-    """Curried `Result.inspect`.
-
-    Examples
-    --------
-    >>> inspect(print)(Ok(1))
-    1
-    Ok(1)
-    """
-    return lambda result: result.inspect(function)
-
-
-def inspect_err(
-    function: Callable[[F], None],
-) -> Callable[[Result[U, F]], Result[U, F]]:
-    """Curried `Result.inspect_err`.
-
-    Examples
-    --------
-    >>> inspect_err(print)(Err("e"))
-    e
-    Err('e')
-    """
-    return lambda result: result.inspect_err(function)
 
 
 # Imported last: option.py imports Ok/Err from this module, so the cycle resolves once at import
