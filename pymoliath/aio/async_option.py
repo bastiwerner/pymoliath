@@ -34,7 +34,6 @@ from typing import Any, Generic, TypeVar, assert_never
 
 from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.option import Nil, Option, Some
-from pymoliath.util import curry
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -42,6 +41,10 @@ U = TypeVar("U")
 # Function-scoped TypeVar for the static constructors: the class-scoped T would be Unknown when
 # called on the unspecialized class (`AsyncOption.from_value(1)`).
 V = TypeVar("V")
+# Function-scoped TypeVars for `map2`.
+A = TypeVar("A")
+B = TypeVar("B")
+C = TypeVar("C")
 
 
 class AsyncOption(Generic[T]):
@@ -255,20 +258,21 @@ class AsyncOption(Generic[T]):
 
         return AsyncOption(run)
 
-    def apply(self, applicative: AsyncOption[Callable[..., U]]) -> AsyncOption[U]:
-        """AsyncOption applicative interface for AsyncOptions containing a value (<*>).
+    def apply(self, function: AsyncOption[Callable[[T], U]]) -> AsyncOption[U]:
+        """Applies the function wrapped in `function` to this AsyncOption's value (<*>).
+
+        If both fail, Nil takes precedence, as in `Option.apply`. For functions of
+        several arguments, use the module-level `map2`.
 
         Parameters
         ----------
-        applicative: AsyncOption[Callable[..., U]]
-            Applicative AsyncOption which contains a function and will be applied to the AsyncOption
-            containing a value.
+        function: AsyncOption[Callable[[T], U]]
+            AsyncOption which contains a function of one argument.
 
         Returns
         -------
         async_option: AsyncOption[U]
-            Applies an AsyncOption containing a value of type T to an AsyncOption containing
-            a function.
+            Returns the function applied to this AsyncOption's value.
 
         Examples
         --------
@@ -278,48 +282,7 @@ class AsyncOption(Generic[T]):
         >>> asyncio.run(val.apply(func))
         Some(20)
         """
-
-        def binder(
-            applicative_function: Callable[..., U],
-        ) -> AsyncOption[U]:
-            """Maps the applicative's function, curried, over this AsyncOption's value."""
-            return self.map(curry(applicative_function))
-
-        return applicative.bind(binder)
-
-    def apply2(
-        self: AsyncOption[Callable[..., U]],
-        applicative_value: AsyncOption[Any],
-    ) -> AsyncOption[U]:
-        """AsyncOption applicative interface for AsyncOptions containing a function (<*>).
-
-        Parameters
-        ----------
-        applicative_value: AsyncOption[Any]
-            AsyncOption value which will be applied to the AsyncOption containing a function.
-
-        Returns
-        -------
-        async_option: AsyncOption[U]
-            Applies an AsyncOption containing a function to an AsyncOption of any type (value or
-            function).
-
-        Examples
-        --------
-        >>> import asyncio
-        >>> func = AsyncOption.from_value(lambda x: x * 2)
-        >>> val = AsyncOption.from_value(10)
-        >>> asyncio.run(func.apply2(val))
-        Some(20)
-        """
-
-        def binder(
-            applicative_function: Callable[..., U],
-        ) -> AsyncOption[U]:
-            """Maps the curried applicative function, held by this AsyncOption, over `applicative_value`."""
-            return applicative_value.map(curry(applicative_function))
-
-        return self.bind(binder)
+        return function.bind(lambda inner: self.map(inner))
 
     def filter(
         self, filter_function: Callable[[T], bool | Awaitable[bool]]
@@ -525,3 +488,21 @@ class AsyncOption(Generic[T]):
         'AsyncOption(<function...>)'
         """
         return str(self)
+
+
+def map2(
+    first: AsyncOption[A], second: AsyncOption[B], function: Callable[[A, B], C]
+) -> AsyncOption[C]:
+    """Combines the values of two AsyncOptions with a two-argument function once both are awaited.
+
+    The first Nil wins: if `first` fails, `second` is not awaited.
+
+    Examples
+    --------
+    >>> import asyncio
+    >>> asyncio.run(map2(AsyncOption.from_value(1), AsyncOption.from_value(2), lambda a, b: a + b))
+    Some(3)
+    >>> asyncio.run(map2(AsyncOption.from_value(1), AsyncOption.from_option(Nil()), lambda a, b: a + b))
+    Nil()
+    """
+    return first.bind(lambda a: second.map(lambda b: function(a, b)))

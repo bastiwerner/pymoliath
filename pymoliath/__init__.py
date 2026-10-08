@@ -4,6 +4,7 @@
 """
 
 from . import aio, continuation, util
+from .errors import UnwrapError
 from .either import Either, Left, Right
 from .exception import Failure, Success, Try
 from .io import IO
@@ -22,6 +23,7 @@ __all__ = [
     "Either",
     "either",
     "Err",
+    "errors",
     "exception",
     "Failure",
     "IO",
@@ -50,6 +52,7 @@ __all__ = [
     "state",
     "Success",
     "Try",
+    "UnwrapError",
     "util",
     "Writer",
     "writer",

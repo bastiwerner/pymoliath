@@ -2,9 +2,23 @@ import unittest
 from typing import Any, Callable
 from unittest.mock import MagicMock, Mock
 
-from pymoliath.option import Nil, Option, Some, from_optional, safe
-from pymoliath.result import Err, Ok
-from pymoliath.util import compose
+from pymoliath import option
+from pymoliath.errors import UnwrapError
+from pymoliath.option import (
+    OPTION_TYPES,
+    Nil,
+    Option,
+    Some,
+    from_optional,
+    is_nil,
+    is_option,
+    is_some,
+    map2,
+    map3,
+    safe,
+)
+from pymoliath.result import Err, Ok, Result
+from pymoliath.util import compose, flow
 
 
 class TestOption(unittest.TestCase):
@@ -119,9 +133,6 @@ class TestOption(unittest.TestCase):
         self.assertEqual(some_value.apply(Some(lambda x: x)), some_value)
         self.assertEqual(nothing_value.apply(Some(lambda x: x)), nothing_value)
 
-        self.assertEqual(Some(lambda x: x).apply2(some_value), some_value)
-        self.assertEqual(Some(lambda x: x).apply2(nothing_value), nothing_value)
-
     def test_monad_applicative_homomorphism_law(self):
         """Applicative homomorphism law: pure f <*> pure x = pure (f x)
         https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
@@ -137,9 +148,6 @@ class TestOption(unittest.TestCase):
         self.assertEqual(Some(x).apply(Some(f)), Some(f(x)))
         self.assertEqual(Nil().apply(Some(f)), Nil())
 
-        self.assertEqual(Some(f).apply2(Some(x)), Some(f(x)))
-        self.assertEqual(Some(f).apply2(Nil()), Nil())
-
     def test_monad_applicative_composition_law(self):
         """Applicative composition law: pure (.) <*> u <*> v <*> w = u <*> (v <*> w)
         https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
@@ -147,33 +155,32 @@ class TestOption(unittest.TestCase):
         The second law is the homomorphism law. If we wrap a function and an object in pure.
         We can then apply the wrapped function over the wrapped object.
         """
-        w = Some(42)
-        u = Some(lambda x: x + 42)
-        v = Some(lambda x: x * 42)
 
         def composition(
-            f: Callable[[Any], Any], g: Callable[[Any], Any]
-        ) -> Callable[[Any], Any]:
-            return compose(f, g)
+            f: Callable[[int], int],
+        ) -> Callable[[Callable[[int], int]], Callable[[int], int]]:
+            return lambda g: lambda x: f(g(x))
 
+        w: Option[int] = Some(42)
+        u: Option[Callable[[int], int]] = Some(lambda x: x + 42)
+        v: Option[Callable[[int], int]] = Some(lambda x: x * 42)
         self.assertEqual(
             w.apply(v.apply(u.apply(Some(composition)))), w.apply(v).apply(u)
         )
-        self.assertEqual(
-            Some(composition).apply2(u).apply2(v).apply2(w), u.apply2(v.apply2(w))
-        )
 
-        w = Some(42)
         u = Nil()
         v = Nil()
-
         self.assertEqual(
             w.apply(v.apply(u.apply(Some(composition)))), w.apply(v).apply(u)
         )
+
+    def test_map2_and_map3(self):
+        self.assertEqual(Some(3), map2(Some(1), Some(2), lambda a, b: a + b))
+        self.assertEqual(Nil(), map2(Some(1), Nil(), lambda a, b: a))
         self.assertEqual(
-            Some(lambda f, g: compose(f, g)).apply2(u).apply2(v).apply2(w),
-            u.apply2(v.apply2(w)),
+            Some(6), map3(Some(1), Some(2), Some(3), lambda a, b, c: a + b + c)
         )
+        self.assertEqual(Nil(), map3(Some(1), Some(2), Nil(), lambda a, b, c: a))
 
     def test_maybe_monad_representation(self):
         some = Some("a")
@@ -188,7 +195,8 @@ class TestOption(unittest.TestCase):
 
     def test_nil_is_singleton(self):
         self.assertIs(Nil(), Nil())
-        self.assertIs(Nil[int](), Nil[str]())
+        empty: Option[int] = Nil()
+        self.assertIs(empty, Nil())
 
     def test_maybe_from_and_to_optional(self):
         maybe_dict: Option[dict[Any, Any]] = from_optional({})
@@ -271,19 +279,22 @@ class TestOption(unittest.TestCase):
         self.assertEqual(Ok(10), some_value.ok_or_else(lambda: "error"))
         self.assertEqual(Err("error"), nothing.ok_or_else(lambda: "error"))
 
-    def maybe_safe_function(self):
+    def test_safe_function(self):
         exception_function = MagicMock(side_effect=Exception("error"))
         maybe_unsafe = safe(lambda: exception_function())
         maybe_safe = safe(lambda: 10)
 
         self.assertEqual(Nil(), maybe_unsafe)
         self.assertEqual(Some(10), maybe_safe)
+        self.assertEqual(Nil(), safe(lambda: int("x"), exceptions=(ValueError,)))
+        with self.assertRaises(KeyError):
+            safe(lambda: {}["missing"], exceptions=(ValueError,))
 
     def test_maybe_unwrap(self):
         some = Some("a")
         nothing = Nil()
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(UnwrapError):
             nothing.unwrap()
 
         self.assertEqual("a", some.unwrap())
@@ -305,15 +316,19 @@ class TestOption(unittest.TestCase):
         some = Some("a")
         nothing = Nil()
 
-        self.assertEqual("a", some.match(lambda x: x, lambda: "default"))
+        self.assertEqual("a", some.match(some=lambda x: x, nil=lambda: "default"))
         self.assertEqual(
             "default",
-            some.bind(lambda x: Nil()).match(lambda x: x, lambda: "default"),
+            some.bind(lambda x: Nil()).match(some=lambda x: x, nil=lambda: "default"),
         )
-        self.assertEqual("default", nothing.match(lambda x: x, lambda: "default"))
+        self.assertEqual(
+            "default", nothing.match(some=lambda x: x, nil=lambda: "default")
+        )
         self.assertEqual(
             "default",
-            nothing.bind(lambda x: Some(x)).match(lambda x: x, lambda: "default"),
+            nothing.bind(lambda x: Some(x)).match(
+                some=lambda x: x, nil=lambda: "default"
+            ),
         )
 
     def test_option_supports_structural_pattern_matching(self):
@@ -328,3 +343,83 @@ class TestOption(unittest.TestCase):
 
         self.assertEqual("some 10", describe(Some(10)))
         self.assertEqual("nil", describe(Nil()))
+
+
+class TestOptionValueSemantics(unittest.TestCase):
+    def test_equality_and_hash(self):
+        self.assertEqual(Some({"a": 1, "b": 2}), Some({"b": 2, "a": 1}))
+        self.assertNotEqual(Some(1), Some("1"))
+        self.assertNotEqual(Some(1), Nil())
+        self.assertEqual(1, len({Some(1), Some(1)}))
+        self.assertEqual(1, len({Nil(), Nil()}))
+        with self.assertRaises(TypeError):
+            hash(Some([]))
+
+    def test_repr(self):
+        self.assertEqual("Some('1')", repr(Some("1")))
+        self.assertEqual("Some(1)", str(Some(1)))
+        self.assertEqual("Nil()", repr(Nil()))
+
+    def test_runtime_checks(self):
+        value: Option[int] = Some(1)
+        self.assertTrue(is_some(value))
+        self.assertFalse(is_nil(value))
+        self.assertTrue(is_nil(Nil()))
+        self.assertTrue(is_option(Nil()))
+        self.assertFalse(is_option(None))
+        self.assertIsInstance(Some(1), OPTION_TYPES)
+
+
+class TestOptionFeatures(unittest.TestCase):
+    def test_map_or_else(self):
+        empty: Option[int] = Nil()
+        self.assertEqual(0, empty.map_or_else(lambda: 0, lambda x: x * 2))
+        self.assertEqual(4, Some(2).map_or_else(lambda: 0, lambda x: x * 2))
+
+    def test_xor(self):
+        one: Option[int] = Some(1)
+        empty: Option[int] = Nil()
+        self.assertEqual(Some(1), one.xor(empty))
+        self.assertEqual(Some(1), empty.xor(one))
+        self.assertEqual(Nil(), one.xor(Some(2)))
+        self.assertEqual(Nil(), empty.xor(Nil()))
+
+    def test_aliases(self):
+        empty: Option[int] = Nil()
+        self.assertEqual(Some(2), Some(1).and_then(lambda x: Some(x + 1)))
+        self.assertEqual(Some(1), empty.or_else(lambda: Some(1)))
+        self.assertEqual(Some(3), Some(3).or_else(lambda: Some(1)))
+
+    def test_transpose(self):
+        self.assertEqual(Ok(Some(1)), Some(Ok(1)).transpose())
+        self.assertEqual(Ok(Nil()), Nil().transpose())
+        error: Option[Result[int, str]] = Some(Err("e"))
+        self.assertEqual(Err("e"), error.transpose())
+
+    def test_curried_functions_with_flow(self):
+        # Lambdas passed to curried functions are not inferred (the input type is not known
+        # yet), so pipelines use annotated functions.
+        def increment(x: int) -> int:
+            return x + 1
+
+        def positive(x: int) -> bool:
+            return x > 0
+
+        def wrap(x: int) -> Option[int]:
+            return Some(x)
+
+        seen: list[int] = []
+        start: Option[int] = Some(2)
+        self.assertEqual(
+            3,
+            flow(
+                start,
+                option.map(increment),
+                option.filter(positive),
+                option.bind(wrap),
+                option.inspect(seen.append),
+                option.unwrap_or(0),
+            ),
+        )
+        self.assertEqual([3], seen)
+        self.assertEqual(0, option.unwrap_or_else(lambda: 0)(Nil()))

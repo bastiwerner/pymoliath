@@ -12,10 +12,32 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest",
- "pyright",
- "ruff",
- "pdoc>=16.0.0",
+    "pyright",
+    "ruff",
+    "pdoc>=16.0.0",
+    "mypy>=2.4.0",
+    "pyperf>=2.10.0",
 ]
+
+[tool.mypy]
+strict = true
+# The sum types, their async wrappers and the helpers they use. Reader/State/IO/Lazy/Writer are not
+# mypy-clean yet (pyright covers the whole package).
+files = [
+    "pymoliath/result.py",
+    "pymoliath/either.py",
+    "pymoliath/option.py",
+    "pymoliath/maybe.py",
+    "pymoliath/exception.py",
+    "pymoliath/errors.py",
+    "pymoliath/util.py",
+    "pymoliath/aio/async_result.py",
+    "pymoliath/aio/async_either.py",
+    "pymoliath/aio/async_option.py",
+    "pymoliath/aio/async_maybe.py",
+    "pymoliath/aio/async_try.py",
+]
+follow_imports = "silent"
 
 [tool.ruff]
 target-version = "py312"

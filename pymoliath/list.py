@@ -595,7 +595,7 @@ class ListMonad(List[TypeSource]):
         Examples
         --------
         >>> ListMonad(["aaa", "a", "aa"]).min_by_key(len)
-        Some(a)
+        Some('a')
         >>> ListMonad([]).min_by_key(len)
         Nil()
         """
@@ -621,7 +621,7 @@ class ListMonad(List[TypeSource]):
         Examples
         --------
         >>> ListMonad(["aaa", "a", "aa"]).max_by_key(len)
-        Some(aaa)
+        Some('aaa')
         >>> ListMonad([]).max_by_key(len)
         Nil()
         """

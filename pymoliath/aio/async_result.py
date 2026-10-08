@@ -29,13 +29,12 @@ asyncio.run(AsyncResult.from_coroutine(fetch_ten))  # Ok(10)
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Generator
-from typing import Any, Generic, Never, assert_never, cast
+from typing import Any, Generic, Never, assert_never
 
 from typing_extensions import TypeVar
 
 from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.result import Err, Ok, Result
-from pymoliath.util import curry
 
 T = TypeVar("T")
 E = TypeVar("E")
@@ -48,6 +47,10 @@ V = TypeVar("V")
 X = TypeVar("X")
 # Like Ok's error type: `Never` unless the context (e.g. an annotation) asks for another one.
 X_Never = TypeVar("X_Never", default=Never)
+# Function-scoped TypeVars for `map2`.
+A = TypeVar("A")
+B = TypeVar("B")
+C = TypeVar("C")
 
 
 class AsyncResult(Generic[T, E]):
@@ -144,7 +147,7 @@ class AsyncResult(Generic[T, E]):
         --------
         >>> import asyncio
         >>> asyncio.run(AsyncResult.from_err("error"))
-        Err(error)
+        Err('error')
         """
 
         async def run() -> Result[V, X]:
@@ -172,7 +175,7 @@ class AsyncResult(Generic[T, E]):
         >>> asyncio.run(AsyncResult.from_result(Ok(10)))
         Ok(10)
         >>> asyncio.run(AsyncResult.from_result(Err("error")))
-        Err(error)
+        Err('error')
         """
 
         async def run() -> Result[V, X]:
@@ -232,7 +235,7 @@ class AsyncResult(Generic[T, E]):
         >>> asyncio.run(AsyncResult.from_ok(5).map(lambda x: x + 1))
         Ok(6)
         >>> asyncio.run(AsyncResult.from_err("error").map(lambda x: x + 1))
-        Err(error)
+        Err('error')
         """
 
         async def run() -> Result[U, E]:
@@ -265,7 +268,7 @@ class AsyncResult(Generic[T, E]):
         --------
         >>> import asyncio
         >>> asyncio.run(AsyncResult.from_err("error").map_err(str.upper))
-        Err(ERROR)
+        Err('ERROR')
         >>> asyncio.run(AsyncResult.from_ok(10).map_err(str.upper))
         Ok(10)
         """
@@ -310,7 +313,7 @@ class AsyncResult(Generic[T, E]):
         >>> asyncio.run(AsyncResult.from_ok(5).bind(lambda x: AsyncResult.from_ok(x + 1)))
         Ok(6)
         >>> asyncio.run(AsyncResult.from_err("error").bind(lambda x: AsyncResult.from_ok(x + 1)))
-        Err(error)
+        Err('error')
         """
 
         async def run() -> Result[U, E]:
@@ -374,22 +377,21 @@ class AsyncResult(Generic[T, E]):
 
         return AsyncResult(run)
 
-    def apply(
-        self, applicative: AsyncResult[Callable[..., U], F]
-    ) -> AsyncResult[U, E | F]:
-        """AsyncResult applicative interface for AsyncResults containing a value (<*>).
+    def apply(self, function: AsyncResult[Callable[[T], U], E]) -> AsyncResult[U, E]:
+        """Applies the function wrapped in `function` to this AsyncResult's value (<*>).
+
+        If both fail, the Err of `function` takes precedence, as in `Result.apply`. For functions of
+        several arguments, use the module-level `map2`.
 
         Parameters
         ----------
-        applicative: AsyncResult[Callable[..., U], F]
-            Applicative AsyncResult which contains a function and will be applied to the
-            AsyncResult containing a value. As with `Result.apply`, the error types may differ.
+        function: AsyncResult[Callable[[T], U], E]
+            AsyncResult which contains a function of one argument.
 
         Returns
         -------
-        async_result: AsyncResult[U, E | F]
-            Applies an AsyncResult containing a value of type T to an AsyncResult containing
-            a function.
+        async_result: AsyncResult[U, E]
+            Returns the function applied to this AsyncResult's value.
 
         Examples
         --------
@@ -399,54 +401,7 @@ class AsyncResult(Generic[T, E]):
         >>> asyncio.run(val.apply(func))
         Ok(20)
         """
-
-        applicative_: AsyncResult[Callable[..., U], E | F] = cast(Any, applicative)
-        self_: AsyncResult[T, E | F] = cast(Any, self)
-
-        def binder(
-            applicative_function: Callable[..., U],
-        ) -> AsyncResult[U, E | F]:
-            """Maps the applicative's function, curried, over this AsyncResult's value."""
-            return self_.map(curry(applicative_function))
-
-        return applicative_.bind(binder)
-
-    def apply2(
-        self: AsyncResult[Callable[..., U], E],
-        applicative_value: AsyncResult[Any, F],
-    ) -> AsyncResult[U, E | F]:
-        """AsyncResult applicative interface for AsyncResults containing a function (<*>).
-
-        Parameters
-        ----------
-        applicative_value: AsyncResult[Any, F]
-            AsyncResult value which will be applied to the AsyncResult containing a function.
-
-        Returns
-        -------
-        async_result: AsyncResult[U, E | F]
-            Applies an AsyncResult containing a function to an AsyncResult of type U (value
-            or function).
-
-        Examples
-        --------
-        >>> import asyncio
-        >>> func = AsyncResult.from_ok(lambda x: x * 2)
-        >>> val = AsyncResult.from_ok(10)
-        >>> asyncio.run(func.apply2(val))
-        Ok(20)
-        """
-
-        self_: AsyncResult[Callable[..., U], E | F] = cast(Any, self)
-        value_: AsyncResult[Any, E | F] = cast(Any, applicative_value)
-
-        def binder(
-            applicative_function: Callable[..., U],
-        ) -> AsyncResult[U, E | F]:
-            """Maps the curried applicative function, held by this AsyncResult, over `applicative_value`."""
-            return value_.map(curry(applicative_function))
-
-        return self_.bind(binder)
+        return function.bind(lambda inner: self.map(inner))
 
     def and_(self, other: AsyncResult[U, E]) -> AsyncResult[U, E]:
         """Returns `other` if this AsyncResult resolves to Ok, otherwise Err.
@@ -466,7 +421,7 @@ class AsyncResult(Generic[T, E]):
         >>> asyncio.run(AsyncResult.from_ok(1).and_(AsyncResult.from_ok(2)))
         Ok(2)
         >>> asyncio.run(AsyncResult.from_err("error").and_(AsyncResult.from_ok(2)))
-        Err(error)
+        Err('error')
         """
         return self.bind(lambda _: other)
 
@@ -521,7 +476,7 @@ class AsyncResult(Generic[T, E]):
         >>> asyncio.run(AsyncResult.from_ok(1).zip(AsyncResult.from_ok(2)))
         Ok((1, 2))
         >>> asyncio.run(AsyncResult.from_err("error").zip(AsyncResult.from_ok(2)))
-        Err(error)
+        Err('error')
         """
 
         async def run() -> Result[tuple[T, U], E]:
@@ -617,7 +572,7 @@ class AsyncResult(Generic[T, E]):
         >>> import asyncio
         >>> asyncio.run(AsyncResult.from_err("error").inspect_err(lambda e: print(f"Error: {e}")))
         Error: error
-        Err(error)
+        Err('error')
         """
 
         async def run() -> Result[T, E]:
@@ -648,3 +603,21 @@ class AsyncResult(Generic[T, E]):
         'AsyncResult(<function...>)'
         """
         return str(self)
+
+
+def map2(
+    first: AsyncResult[A, X], second: AsyncResult[B, X], function: Callable[[A, B], C]
+) -> AsyncResult[C, X]:
+    """Combines the values of two AsyncResults with a two-argument function once both are awaited.
+
+    The first Err wins: if `first` fails, `second` is not awaited.
+
+    Examples
+    --------
+    >>> import asyncio
+    >>> asyncio.run(map2(AsyncResult.from_ok(1), AsyncResult.from_ok(2), lambda a, b: a + b))
+    Ok(3)
+    >>> asyncio.run(map2(AsyncResult.from_err("first"), AsyncResult.from_err("second"), lambda a, b: a + b))
+    Err('first')
+    """
+    return first.bind(lambda a: second.map(lambda b: function(a, b)))

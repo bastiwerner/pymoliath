@@ -26,9 +26,9 @@ Pymoliath requires Python 3.12 or newer.
 
 ## Typing
 
-The sum types (`Result`, `Either`, `Option`, `Maybe`, `Try`) are sealed, Rust-like: both variants carry
-all type parameters, every method is implemented once, and a `match` over the variants is exhaustive.
-Lambdas passed to `map`/`bind`/... are therefore inferred from the receiver:
+The sum types (`Result`, `Either`, `Option`, `Maybe`, `Try`) are sealed (`@final` variants) and
+Rust-like: both variants carry all type parameters, and a `match` over the variants is exhaustive.
+Lambdas passed to `map`/`bind`/... are inferred from the receiver:
 
 ```python
 def parse(text: str) -> Result[int, str]:
@@ -38,13 +38,55 @@ def parse(text: str) -> Result[int, str]:
 parse("4").bind(lambda x: Ok(x / 2) if x else Err("zero"))  # Result[float, str]
 ```
 
-The one trade-off is invariance: a bare `Ok(10)` without context is an `Ok[int, Never]` and not
-assignable to a `Result[int, str]`. Construct values directly in a `return` or an annotated assignment,
-just as Rust needs a type annotation there:
+The type parameters are covariant and the side a variant does not use is `Never`: a bare `Ok(10)`
+is an `Ok[int, Never]`, a bare `Err("e")` an `Err[Never, str]`, and `Nil()`/`Nothing()` are
+singletons of type `Option[Never]`/`Maybe[Never]`. All of them are assignable to a matching
+`Result[int, str]` or `Option[int]` without annotations.
+
+Like in Rust, the receiver fixes the types a method accepts. `bind` on a `Result[int, str]` needs a
+function returning a `Result[U, str]`, and a bare `Ok(10)` (error type `Never`) has to be annotated
+before it can be bound to fallible code:
 
 ```python
 value: Result[int, str] = Ok(10)
+value.bind(parse_more)  # OK
+Ok(10).bind(parse_more)  # type error: the error type of a bare Ok is Never
 ```
+
+Further notes:
+
+- **Values:** the variants are frozen, slotted dataclasses with value equality and hashing (`{Ok(1),
+  Ok(1)}` has one element, and an unhashable payload makes the container unhashable). `Failure`
+  compares exceptions by type and `args`. `repr` shows the payload's `repr` (`Ok('1')`), and `str` stays
+  human-readable (`Ok(1)`).
+- **`unwrap`** on `Err`/`Left`/`Nil`/`Nothing` raises `pymoliath.errors.UnwrapError`, which keeps the
+  container in `.container` and chains a wrapped exception as `__cause__`. `Failure.unwrap()` re-raises
+  the original exception.
+- **`match`** takes keyword-only callbacks: `result.match(ok=..., err=...)`, `either.match(left=...,
+  right=...)`, `option.match(some=..., nil=...)`, `maybe.match(just=..., nothing=...)`,
+  `try_.match(success=..., failure=...)`.
+- **Applicatives:** `apply` takes a wrapped one-argument function. For several arguments use the
+  module-level `map2`/`map3`. When several values are errors, the first one (the function side for
+  `apply`) wins.
+- **Narrowing:** the aliases (`Result`, `Option`, ...) are not classes, so use `is_result(x)` or
+  `isinstance(x, RESULT_TYPES)` at runtime, and `is_ok`/`is_err`/`is_some`/... (which return `TypeIs`)
+  to narrow a value to a variant.
+- **`safe` helpers** (`result_safe`, `either_safe`, `option.safe`, `maybe.safe`, `exception.safe`)
+  catch `Exception` by default; pass `exceptions=(ValueError,)` to narrow both what is caught and the
+  error type.
+- **Pipelines:** every module has curried functions (`result.map(f)`, `result.bind(f)`,
+  `result.unwrap_or(0)`, ...) that compose with `pymoliath.util.flow`, which is typed step by step:
+
+  ```python
+  from pymoliath import result
+  from pymoliath.util import flow
+
+  flow(parse("4"), result.map(double), result.bind(validate), result.unwrap_or(0))
+  ```
+
+  A lambda passed *directly* to `flow` is inferred from the previous step. A lambda passed to a curried
+  function is not (its input type is not known yet), so use annotated functions there, or method
+  chaining.
 
 # Testing
 
@@ -75,10 +117,22 @@ uv run --no-sync ruff format         # Apply formatting changes
 
 # Type Checking
 
-Static type checking is enforced using [pyright](https://microsoft.github.io/pyright/), configured via `pyrightconfig.json`.
+Static type checking is enforced using [pyright](https://microsoft.github.io/pyright/) (configured via
+`pyrightconfig.json`) and [mypy](https://mypy.readthedocs.io/) in strict mode (configured in
+`pyproject.toml`, covering the sum-type modules). `test/test_typing.py` holds the `assert_type`
+regression tests for pyright.
 
 ```bash
 uv run --no-sync pyright
+uv run --no-sync mypy
+```
+
+# Benchmarks
+
+Micro-benchmarks for the Result Monad use [pyperf](https://pyperf.readthedocs.io/):
+
+```bash
+uv run --no-sync python bench/bench_result.py
 ```
 
 # Documentation
@@ -106,4 +160,5 @@ uv run pdoc -t .pdoc/rust pymoliath
 | `State`          | Computation that threads state through                          | [state](./pymoliath/state.py)               |
 | `LazyMonad`      | Deferred, memoized computation                                  | [lazy](./pymoliath/lazy/README.md.py)       |
 | `Continuation`   | Continuation-passing style (CPS) computation                    | [continuation](./pymoliath/continuation.py) |
-| `pymoliath.util` | FP prelude helpers (`compose`, `curry`, `pipe`, ...)            | [util](./pymoliath/util.py)                 |
+| `pymoliath.util` | FP prelude helpers (`compose`, `curry`, `pipe`, `flow`, ...)    | [util](./pymoliath/util.py)                 |
+| `UnwrapError`    | Raised by `unwrap` on `Err`/`Left`/`Nil`/`Nothing`               | [errors](./pymoliath/errors.py)             |

@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from pymoliath.aio import AsyncOption
+from pymoliath.aio.async_option import map2
 from pymoliath.option import Nil, Some
 
 
@@ -133,12 +134,25 @@ class TestAsyncOption(unittest.IsolatedAsyncioTestCase):
         result = await AsyncOption.from_value(10).apply(AsyncOption.from_value(f))
         self.assertEqual(Some(20), result)
 
-    async def test_apply2(self):
+    async def test_map2(self):
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        self.assertEqual(
+            Some(3),
+            await map2(AsyncOption.from_value(1), AsyncOption.from_value(2), add),
+        )
+        empty: AsyncOption[int] = AsyncOption.from_option(Nil())
+        self.assertEqual(Nil(), await map2(empty, AsyncOption.from_value(2), add))
+        self.assertEqual(Nil(), await map2(AsyncOption.from_value(1), empty, add))
+
+    async def test_apply_function_side_wins(self):
         def f(x: int) -> int:
             return x * 2
 
-        result = await AsyncOption.from_value(f).apply2(AsyncOption.from_value(10))
-        self.assertEqual(Some(20), result)
+        self.assertEqual(
+            Some(20), await AsyncOption.from_value(10).apply(AsyncOption.from_value(f))
+        )
 
     async def test_and(self):
         result = await AsyncOption.from_value(10).and_(AsyncOption.from_value("a"))

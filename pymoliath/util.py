@@ -7,16 +7,28 @@ function composition (`compose`, `pipe`), auto-currying (`curry`), and the class
 
 ```python
 pipe(str.strip, str.upper)(" hello ")  # "HELLO"
+flow(" hello ", str.strip, str.upper)  # "HELLO", typed step by step
 curry(lambda x, y: x + y)(1)(2)  # 3
 ```
 """
 
 from functools import partial, reduce
-from typing import Any, Callable, TypeVar, Union
+from typing import Any, Callable, TypeVar, Union, overload
 
 TypeSource = TypeVar("TypeSource")
 TypeResult = TypeVar("TypeResult")
 TypePure = TypeVar("TypePure")
+
+A = TypeVar("A")
+B = TypeVar("B")
+C = TypeVar("C")
+D = TypeVar("D")
+E = TypeVar("E")
+F = TypeVar("F")
+G = TypeVar("G")
+H = TypeVar("H")
+I = TypeVar("I")  # noqa: E741
+J = TypeVar("J")
 
 
 def compose(
@@ -187,3 +199,120 @@ def flip(
         return function(a, b)
 
     return flipped
+
+
+@overload
+def flow(value: A, /) -> A: ...
+@overload
+def flow(value: A, f1: Callable[[A], B], /) -> B: ...
+@overload
+def flow(value: A, f1: Callable[[A], B], f2: Callable[[B], C], /) -> C: ...
+@overload
+def flow(
+    value: A,
+    f1: Callable[[A], B],
+    f2: Callable[[B], C],
+    f3: Callable[[C], D],
+    /,
+) -> D: ...
+@overload
+def flow(
+    value: A,
+    f1: Callable[[A], B],
+    f2: Callable[[B], C],
+    f3: Callable[[C], D],
+    f4: Callable[[D], E],
+    /,
+) -> E: ...
+@overload
+def flow(
+    value: A,
+    f1: Callable[[A], B],
+    f2: Callable[[B], C],
+    f3: Callable[[C], D],
+    f4: Callable[[D], E],
+    f5: Callable[[E], F],
+    /,
+) -> F: ...
+@overload
+def flow(
+    value: A,
+    f1: Callable[[A], B],
+    f2: Callable[[B], C],
+    f3: Callable[[C], D],
+    f4: Callable[[D], E],
+    f5: Callable[[E], F],
+    f6: Callable[[F], G],
+    /,
+) -> G: ...
+@overload
+def flow(
+    value: A,
+    f1: Callable[[A], B],
+    f2: Callable[[B], C],
+    f3: Callable[[C], D],
+    f4: Callable[[D], E],
+    f5: Callable[[E], F],
+    f6: Callable[[F], G],
+    f7: Callable[[G], H],
+    /,
+) -> H: ...
+@overload
+def flow(
+    value: A,
+    f1: Callable[[A], B],
+    f2: Callable[[B], C],
+    f3: Callable[[C], D],
+    f4: Callable[[D], E],
+    f5: Callable[[E], F],
+    f6: Callable[[F], G],
+    f7: Callable[[G], H],
+    f8: Callable[[H], I],
+    /,
+) -> I: ...
+@overload
+def flow(
+    value: A,
+    f1: Callable[[A], B],
+    f2: Callable[[B], C],
+    f3: Callable[[C], D],
+    f4: Callable[[D], E],
+    f5: Callable[[E], F],
+    f6: Callable[[F], G],
+    f7: Callable[[G], H],
+    f8: Callable[[H], I],
+    f9: Callable[[I], J],
+    /,
+) -> J: ...
+
+
+def flow(value: Any, *functions: Callable[[Any], Any]) -> Any:
+    """Pipes `value` through `functions` left to right: `flow(x, f, g)` is `g(f(x))`.
+
+    Unlike `pipe`, every step is typed (up to nine steps), so type checkers follow the value through
+    the pipeline and infer the parameter of each lambda from the previous step. It pairs with the
+    curried module-level functions of the monads, e.g. `pymoliath.result.map`.
+
+    Parameters
+    ----------
+    value: A
+        The initial value.
+    functions: Callable
+        One-argument functions, applied in order.
+
+    Returns
+    -------
+    result
+        The result of the last function (or `value` if there are none).
+
+    Example
+    -------
+    >>> flow(" hello ", str.strip, str.upper)
+    'HELLO'
+    >>> from pymoliath import result
+    >>> flow(result.Ok(1), result.map(lambda x: x + 1), result.unwrap_or(0))
+    2
+    """
+    for function in functions:
+        value = function(value)
+    return value

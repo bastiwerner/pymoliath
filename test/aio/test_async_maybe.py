@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from pymoliath.aio import AsyncMaybe
+from pymoliath.aio.async_maybe import map2
 from pymoliath.maybe import Just, Nothing
 
 
@@ -135,12 +136,24 @@ class TestAsyncMaybe(unittest.IsolatedAsyncioTestCase):
         result = await AsyncMaybe.from_value(10).apply(AsyncMaybe.from_value(f))
         self.assertEqual(Just(20), result)
 
-    async def test_apply2(self):
+    async def test_map2(self):
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        self.assertEqual(
+            Just(3), await map2(AsyncMaybe.from_value(1), AsyncMaybe.from_value(2), add)
+        )
+        empty: AsyncMaybe[int] = AsyncMaybe.from_maybe(Nothing())
+        self.assertEqual(Nothing(), await map2(empty, AsyncMaybe.from_value(2), add))
+        self.assertEqual(Nothing(), await map2(AsyncMaybe.from_value(1), empty, add))
+
+    async def test_apply_function_side_wins(self):
         def f(x: int) -> int:
             return x * 2
 
-        result = await AsyncMaybe.from_value(f).apply2(AsyncMaybe.from_value(10))
-        self.assertEqual(Just(20), result)
+        self.assertEqual(
+            Just(20), await AsyncMaybe.from_value(10).apply(AsyncMaybe.from_value(f))
+        )
 
     async def test_and(self):
         result = await AsyncMaybe.from_value(10).and_(AsyncMaybe.from_value("a"))

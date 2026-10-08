@@ -8,12 +8,14 @@ that wrong code is rejected.
 
 The monads follow Rust's semantics: both variants carry all type parameters, so e.g. the error
 type of a `Result` is fixed by the receiver and `bind` on a `Result[int, str]` is a
-`Result[R, str]`.
+`Result[R, str]`. The parameters are covariant and the unused side of a variant is `Never`, so
+bare `Ok(1)`/`Err("e")`/`Nil()` are assignable to any matching `Result`/`Option`.
 """
 
 import asyncio
+from collections.abc import Callable
 
-from typing_extensions import Never, assert_type
+from typing_extensions import Never, assert_never, assert_type
 
 from pymoliath.aio.async_maybe import AsyncMaybe
 from pymoliath.aio.async_result import AsyncResult
@@ -21,8 +23,10 @@ from pymoliath.aio.async_try import AsyncTry
 from pymoliath.either import Either, Left, Right
 from pymoliath.exception import Failure, Success, Try
 from pymoliath.maybe import Just, Maybe, Nothing
-from pymoliath.option import Nil, Option, Some
-from pymoliath.result import Err, Ok, Result
+from pymoliath import result as result_
+from pymoliath.option import Nil, Option, Some, is_some
+from pymoliath.result import Err, Ok, Result, is_err, is_ok, map2, result_safe
+from pymoliath.util import flow
 
 
 def parse(value: str) -> Result[int, str]:
@@ -68,7 +72,12 @@ def test_result_constructors() -> None:
     # A bare Ok has no error type yet (`Never`), like in Rust. A bare Err leaves its Ok type open,
     # so it can be solved from context (e.g. the other branch of a conditional lambda).
     assert_type(Ok(1), Ok[int, Never])
-    assert_type(Err("error").error, str)
+    assert_type(Err("error"), Err[Never, str])
+
+    # Covariance: bare variants are assignable without annotations at the construction site.
+    bare_ok: Result[int, str] = Ok(1)
+    bare_err: Result[int, str] = Err("error")
+    assert bare_ok != bare_err
 
     widened: Result[int, str] = Ok(True)
     failed: Result[int, str] = Err("error")
@@ -152,7 +161,9 @@ def test_option_bind_with_lambda() -> None:
     assert_type(option.map(lambda x: str(x)), Option[str])
     assert_type(option.bind(lambda x: half(x)), Option[float])
     assert_type(option.bind(lambda x: Some(x / 2)), Option[float])
-    assert_type(option.ok_or("missing"), Result[int, str])
+    # Converting methods return a union of the precise variants, which is a Result[int, str].
+    converted: Result[int, str] = option.ok_or("missing")
+    assert converted == Ok(4)
     # Nil's type is left open, so it is solved from the other branch.
     assert_type(option.bind(lambda x: Nil() if x > 10 else Some(x / 2)), Option[float])
 
@@ -193,7 +204,8 @@ def test_async_bind_keeps_the_error_type() -> None:
     assert_type(async_result.bind(halve), AsyncResult[float, str])
     assert_type(AsyncResult.from_ok(1), AsyncResult[int, Never])
 
-    nothing: Maybe[int] = Nothing()
+    # A Maybe[int] from a function (an annotated `= Nothing()` would narrow to `Nothing`).
+    nothing = lookup(0)
     fallback = AsyncMaybe.from_maybe(nothing).or_(AsyncMaybe.from_value(20))
     assert_type(fallback, AsyncMaybe[int])
 
@@ -214,3 +226,78 @@ def test_async_bind_keeps_the_error_type() -> None:
 def test_async_rejects_wrong_types() -> None:
     AsyncResult.from_result(parse("4")).bind(lambda _: Err(3))  # pyright: ignore[reportArgumentType]
     AsyncResult.from_ok(10).bind(halve)  # pyright: ignore[reportArgumentType]
+
+
+def test_variant_methods_keep_the_precise_type() -> None:
+    assert_type(Ok(1).map(lambda x: str(x)), Ok[str, Never])
+    assert_type(Err("e").map_err(lambda e: len(e)), Err[Never, int])
+    assert_type(Some(1).map(lambda x: x / 2), Some[float])
+    assert_type(Nil().map(lambda x: x), Nil)
+    assert_type(Success(1).map(lambda x: str(x)), Try[str])  # map catches exceptions
+    assert_type(Right(1).map(lambda x: str(x)), Right[str, Never])
+
+
+def test_narrowing() -> None:
+    result = parse("4")
+    if is_ok(result):
+        assert_type(result, Ok[int, str])
+        assert_type(result.value, int)
+    if is_err(result):
+        assert_type(result.error, str)
+
+    match result:
+        case Ok(value):
+            assert_type(value, int)
+        case Err(error):
+            assert_type(error, str)
+        case _:
+            assert_never(result)
+
+    option = find(4)
+    if is_some(option):
+        assert_type(option.value, int)
+
+
+def test_flatten_map2_and_apply() -> None:
+    nested: Result[Result[int, str], str] = Ok(Ok(1))
+    assert_type(nested.flatten(), Result[int, str])
+    assert_type(Some(Some(1)).flatten(), Option[int])
+
+    assert_type(map2(parse("1"), parse("2"), lambda a, b: a / b), Result[float, str])
+    function: Result[Callable[[int], str], str] = Ok(str)
+    assert_type(parse("1").apply(function), Result[str, str])
+    assert_type(parse("1").match(ok=lambda x: x * 2, err=lambda e: len(e)), int)
+    assert_type(parse("1").merge(), int | str)
+
+
+def unwrap_is_never() -> None:
+    """Type-checked only, never called: unwrap on Err/Nil raises."""
+    assert_type(Err("e").unwrap(), Never)
+    assert_type(Nil().unwrap(), Never)
+
+
+def test_unwrap_and_safe() -> None:
+    assert_type(parse("1").unwrap(), int)
+    assert_type(result_safe(lambda: 1), Result[int, Exception])
+    assert_type(
+        result_safe(lambda: int("x"), exceptions=(ValueError, KeyError)),
+        Result[int, ValueError | KeyError],
+    )
+
+
+def test_flow_keeps_the_types() -> None:
+    def double(x: int) -> int:
+        return x * 2
+
+    assert_type(flow(parse("1"), result_.map(double)), Result[int, str])
+    assert_type(flow(parse("1"), result_.map(double), result_.unwrap_or(0)), int)
+    # Lambdas passed directly to flow are inferred step by step.
+    assert_type(flow(1, lambda x: x + 1, lambda x: str(x)), str)
+
+
+def test_fixed_types_reject_mismatches() -> None:
+    # unwrap_or on an Option[int] needs an int; a bare Ok(1) can't take a Result[float, str]
+    # function (its error type is Never); Nil is not an Option[int] value source.
+    find(1).unwrap_or("text")  # pyright: ignore[reportArgumentType]
+    Ok(1).and_(parse("1"))  # pyright: ignore[reportArgumentType]
+    parse("1").or_(Ok("text"))  # pyright: ignore[reportArgumentType]

@@ -33,7 +33,6 @@ from typing import Any, Generic, TypeVar, assert_never
 
 from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.exception import Failure, Success, Try
-from pymoliath.util import curry
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -41,6 +40,10 @@ U = TypeVar("U")
 # Function-scoped TypeVar for the static constructors: the class-scoped T would be Unknown when
 # called on the unspecialized class (`AsyncTry.from_success(1)`).
 V = TypeVar("V")
+# Function-scoped TypeVars for `map2`.
+A = TypeVar("A")
+B = TypeVar("B")
+C = TypeVar("C")
 
 
 class AsyncTry(Generic[T]):
@@ -142,7 +145,7 @@ class AsyncTry(Generic[T]):
         --------
         >>> import asyncio
         >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")))
-        Failure(boom)
+        Failure(ValueError('boom'))
         """
 
         async def run() -> Try[V]:
@@ -170,7 +173,7 @@ class AsyncTry(Generic[T]):
         >>> asyncio.run(AsyncTry.from_try(Success(10)))
         Success(10)
         >>> asyncio.run(AsyncTry.from_try(Failure(ValueError("boom"))))
-        Failure(boom)
+        Failure(ValueError('boom'))
         """
 
         async def run() -> Try[V]:
@@ -236,7 +239,7 @@ class AsyncTry(Generic[T]):
         >>> def boom(x: int) -> int:
         ...     raise ValueError("boom")
         >>> asyncio.run(AsyncTry.from_success(5).map(boom))
-        Failure(boom)
+        Failure(ValueError('boom'))
         """
 
         async def run() -> Try[U]:
@@ -276,7 +279,7 @@ class AsyncTry(Generic[T]):
         --------
         >>> import asyncio
         >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).map_failure(lambda e: TypeError(str(e))))
-        Failure(boom)
+        Failure(TypeError('boom'))
         >>> asyncio.run(AsyncTry.from_success(10).map_failure(lambda e: TypeError(str(e))))
         Success(10)
         """
@@ -324,7 +327,7 @@ class AsyncTry(Generic[T]):
         >>> asyncio.run(AsyncTry.from_success(5).bind(lambda x: AsyncTry.from_success(x + 1)))
         Success(6)
         >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).bind(lambda x: AsyncTry.from_success(x + 1)))
-        Failure(boom)
+        Failure(ValueError('boom'))
         """
 
         async def run() -> Try[U]:
@@ -394,20 +397,21 @@ class AsyncTry(Generic[T]):
 
         return AsyncTry(run)
 
-    def apply(self, applicative: AsyncTry[Callable[..., U]]) -> AsyncTry[U]:
-        """AsyncTry applicative interface for AsyncTrys containing a value (<*>).
+    def apply(self, function: AsyncTry[Callable[[T], U]]) -> AsyncTry[U]:
+        """Applies the function wrapped in `function` to this AsyncTry's value (<*>).
+
+        If both fail, the Failure of `function` takes precedence, as in `Try.apply`. For functions of
+        several arguments, use the module-level `map2`.
 
         Parameters
         ----------
-        applicative: AsyncTry[Callable[..., U]]
-            Applicative AsyncTry which contains a function and will be applied to the AsyncTry
-            containing a value.
+        function: AsyncTry[Callable[[T], U]]
+            AsyncTry which contains a function of one argument.
 
         Returns
         -------
         async_try: AsyncTry[U]
-            Applies an AsyncTry containing a value of type T to an AsyncTry containing
-            a function.
+            Returns the function applied to this AsyncTry's value.
 
         Examples
         --------
@@ -417,48 +421,7 @@ class AsyncTry(Generic[T]):
         >>> asyncio.run(val.apply(func))
         Success(20)
         """
-
-        def binder(
-            applicative_function: Callable[..., U],
-        ) -> AsyncTry[U]:
-            """Maps the applicative's function, curried, over this AsyncTry's value."""
-            return self.map(curry(applicative_function))
-
-        return applicative.bind(binder)
-
-    def apply2(
-        self: AsyncTry[Callable[..., U]],
-        applicative_value: AsyncTry[Any],
-    ) -> AsyncTry[U]:
-        """AsyncTry applicative interface for AsyncTrys containing a function (<*>).
-
-        Parameters
-        ----------
-        applicative_value: AsyncTry[U]
-            AsyncTry value which will be applied to the AsyncTry containing a function.
-
-        Returns
-        -------
-        async_try: AsyncTry[U]
-            Applies an AsyncTry containing a function to an AsyncTry of type U (value or
-            function).
-
-        Examples
-        --------
-        >>> import asyncio
-        >>> func = AsyncTry.from_success(lambda x: x * 2)
-        >>> val = AsyncTry.from_success(10)
-        >>> asyncio.run(func.apply2(val))
-        Success(20)
-        """
-
-        def binder(
-            applicative_function: Callable[..., U],
-        ) -> AsyncTry[U]:
-            """Maps the curried applicative function, held by this AsyncTry, over `applicative_value`."""
-            return applicative_value.map(curry(applicative_function))
-
-        return self.bind(binder)
+        return function.bind(lambda inner: self.map(inner))
 
     def and_(self, other: AsyncTry[U]) -> AsyncTry[U]:
         """Returns `other` if this AsyncTry resolves to Success, otherwise the original Failure.
@@ -478,7 +441,7 @@ class AsyncTry(Generic[T]):
         >>> asyncio.run(AsyncTry.from_success(1).and_(AsyncTry.from_success(2)))
         Success(2)
         >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).and_(AsyncTry.from_success(2)))
-        Failure(boom)
+        Failure(ValueError('boom'))
         """
         return self.bind(lambda _: other)
 
@@ -533,7 +496,7 @@ class AsyncTry(Generic[T]):
         >>> asyncio.run(AsyncTry.from_success(1).zip(AsyncTry.from_success(2)))
         Success((1, 2))
         >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).zip(AsyncTry.from_success(2)))
-        Failure(boom)
+        Failure(ValueError('boom'))
         """
 
         async def run() -> Try[tuple[T, U]]:
@@ -630,7 +593,7 @@ class AsyncTry(Generic[T]):
         >>> import asyncio
         >>> asyncio.run(AsyncTry.from_failure(ValueError("boom")).inspect_failure(lambda e: print(f"Exception: {e}")))
         Exception: boom
-        Failure(boom)
+        Failure(ValueError('boom'))
         """
 
         async def run() -> Try[T]:
@@ -665,3 +628,21 @@ class AsyncTry(Generic[T]):
         'AsyncTry(<function...>)'
         """
         return str(self)
+
+
+def map2(
+    first: AsyncTry[A], second: AsyncTry[B], function: Callable[[A, B], C]
+) -> AsyncTry[C]:
+    """Combines the values of two AsyncTrys with a two-argument function once both are awaited.
+
+    The first Failure wins: if `first` fails, `second` is not awaited.
+
+    Examples
+    --------
+    >>> import asyncio
+    >>> asyncio.run(map2(AsyncTry.from_success(1), AsyncTry.from_success(2), lambda a, b: a + b))
+    Success(3)
+    >>> asyncio.run(map2(AsyncTry.from_failure(ValueError("first")), AsyncTry.from_failure(ValueError("second")), lambda a, b: a + b))
+    Failure(ValueError('first'))
+    """
+    return first.bind(lambda a: second.map(lambda b: function(a, b)))

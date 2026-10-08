@@ -2,9 +2,23 @@ import unittest
 from typing import Any, Callable
 from unittest.mock import MagicMock, Mock
 
-from pymoliath.either import Left, Right
-from pymoliath.maybe import Just, Maybe, Nothing, from_optional, safe
-from pymoliath.util import compose
+from pymoliath import maybe
+from pymoliath.either import Either, Left, Right
+from pymoliath.errors import UnwrapError
+from pymoliath.maybe import (
+    MAYBE_TYPES,
+    Just,
+    Maybe,
+    Nothing,
+    from_optional,
+    is_just,
+    is_maybe,
+    is_nothing,
+    map2,
+    map3,
+    safe,
+)
+from pymoliath.util import compose, flow
 
 
 class TestMaybe(unittest.TestCase):
@@ -119,9 +133,6 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(just_value.apply(Just(lambda x: x)), just_value)
         self.assertEqual(nothing_value.apply(Just(lambda x: x)), nothing_value)
 
-        self.assertEqual(Just(lambda x: x).apply2(just_value), just_value)
-        self.assertEqual(Just(lambda x: x).apply2(nothing_value), nothing_value)
-
     def test_monad_applicative_homomorphism_law(self):
         """Applicative homomorphism law: pure f <*> pure x = pure (f x)
         https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
@@ -137,9 +148,6 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(Just(x).apply(Just(f)), Just(f(x)))
         self.assertEqual(Nothing().apply(Just(f)), Nothing())
 
-        self.assertEqual(Just(f).apply2(Just(x)), Just(f(x)))
-        self.assertEqual(Just(f).apply2(Nothing()), Nothing())
-
     def test_monad_applicative_composition_law(self):
         """Applicative composition law: pure (.) <*> u <*> v <*> w = u <*> (v <*> w)
         https://miklos-martin.github.io/learn/fp/2016/03/10/monad-laws-for-regular-developers.html
@@ -147,32 +155,30 @@ class TestMaybe(unittest.TestCase):
         The second law is the homomorphism law. If we wrap a function and an object in pure.
         We can then apply the wrapped function over the wrapped object.
         """
-        w = Just(42)
-        u = Just(lambda x: x + 42)
-        v = Just(lambda x: x * 42)
 
         def composition(
-            f: Callable[[Any], Any], g: Callable[[Any], Any]
-        ) -> Callable[[Any], Any]:
-            return compose(f, g)
+            f: Callable[[int], int],
+        ) -> Callable[[Callable[[int], int]], Callable[[int], int]]:
+            return lambda g: lambda x: f(g(x))
 
+        w: Maybe[int] = Just(42)
+        u: Maybe[Callable[[int], int]] = Just(lambda x: x + 42)
+        v: Maybe[Callable[[int], int]] = Just(lambda x: x * 42)
         self.assertEqual(
             w.apply(v.apply(u.apply(Just(composition)))), w.apply(v).apply(u)
         )
-        self.assertEqual(
-            Just(composition).apply2(u).apply2(v).apply2(w), u.apply2(v.apply2(w))
-        )
 
-        w = Just(42)
         u = Nothing()
         v = Nothing()
-
         self.assertEqual(
             w.apply(v.apply(u.apply(Just(composition)))), w.apply(v).apply(u)
         )
+
+    def test_map2_and_map3(self):
+        self.assertEqual(Just(3), map2(Just(1), Just(2), lambda a, b: a + b))
+        self.assertEqual(Nothing(), map2(Just(1), Nothing(), lambda a, b: a))
         self.assertEqual(
-            Just(lambda f, g: compose(f, g)).apply2(u).apply2(v).apply2(w),
-            u.apply2(v.apply2(w)),
+            Just(6), map3(Just(1), Just(2), Just(3), lambda a, b, c: a + b + c)
         )
 
     def test_maybe_monad_representation(self):
@@ -188,7 +194,8 @@ class TestMaybe(unittest.TestCase):
 
     def test_nothing_is_singleton(self):
         self.assertIs(Nothing(), Nothing())
-        self.assertIs(Nothing[int](), Nothing[str]())
+        empty: Maybe[int] = Nothing()
+        self.assertIs(empty, Nothing())
 
     def test_maybe_from_and_to_optional(self):
         maybe_dict: Maybe[dict[Any, Any]] = from_optional({})
@@ -271,19 +278,22 @@ class TestMaybe(unittest.TestCase):
         self.assertEqual(Right(10), just_value.right_or_else(lambda: "error"))
         self.assertEqual(Left("error"), nothing_value.right_or_else(lambda: "error"))
 
-    def maybe_safe_function(self):
+    def test_safe_function(self):
         exception_function = MagicMock(side_effect=Exception("error"))
         maybe_unsafe = safe(lambda: exception_function())
         maybe_safe = safe(lambda: 10)
 
         self.assertEqual(Nothing(), maybe_unsafe)
         self.assertEqual(Just(10), maybe_safe)
+        self.assertEqual(Nothing(), safe(lambda: int("x"), exceptions=(ValueError,)))
+        with self.assertRaises(KeyError):
+            safe(lambda: {}["missing"], exceptions=(ValueError,))
 
     def test_maybe_unwrap(self):
         just = Just("a")
         nothing = Nothing()
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(UnwrapError):
             nothing.unwrap()
 
         self.assertEqual("a", just.unwrap())
@@ -305,15 +315,21 @@ class TestMaybe(unittest.TestCase):
         just = Just("a")
         nothing = Nothing()
 
-        self.assertEqual("a", just.match(lambda x: x, lambda: "default"))
+        self.assertEqual("a", just.match(just=lambda x: x, nothing=lambda: "default"))
         self.assertEqual(
             "default",
-            just.bind(lambda x: Nothing()).match(lambda x: x, lambda: "default"),
+            just.bind(lambda x: Nothing()).match(
+                just=lambda x: x, nothing=lambda: "default"
+            ),
         )
-        self.assertEqual("default", nothing.match(lambda x: x, lambda: "default"))
+        self.assertEqual(
+            "default", nothing.match(just=lambda x: x, nothing=lambda: "default")
+        )
         self.assertEqual(
             "default",
-            nothing.bind(lambda x: Just(x)).match(lambda x: x, lambda: "default"),
+            nothing.bind(lambda x: Just(x)).match(
+                just=lambda x: x, nothing=lambda: "default"
+            ),
         )
 
     def test_maybe_supports_structural_pattern_matching(self):
@@ -328,3 +344,68 @@ class TestMaybe(unittest.TestCase):
 
         self.assertEqual("just 10", describe(Just(10)))
         self.assertEqual("nothing", describe(Nothing()))
+
+
+class TestMaybeValueSemantics(unittest.TestCase):
+    def test_equality_and_hash(self):
+        self.assertEqual(Just({"a": 1, "b": 2}), Just({"b": 2, "a": 1}))
+        self.assertNotEqual(Just(1), Just("1"))
+        self.assertNotEqual(Just(1), Nothing())
+        self.assertEqual(1, len({Just(1), Just(1)}))
+        self.assertEqual(1, len({Nothing(), Nothing()}))
+        with self.assertRaises(TypeError):
+            hash(Just([]))
+
+    def test_repr(self):
+        self.assertEqual("Just('1')", repr(Just("1")))
+        self.assertEqual("Just(1)", str(Just(1)))
+        self.assertEqual("Nothing()", repr(Nothing()))
+
+    def test_runtime_checks(self):
+        value: Maybe[int] = Just(1)
+        self.assertTrue(is_just(value))
+        self.assertFalse(is_nothing(value))
+        self.assertTrue(is_maybe(Nothing()))
+        self.assertFalse(is_maybe(None))
+        self.assertIsInstance(Just(1), MAYBE_TYPES)
+
+
+class TestMaybeFeatures(unittest.TestCase):
+    def test_map_or_else(self):
+        empty: Maybe[int] = Nothing()
+        self.assertEqual(0, empty.map_or_else(lambda: 0, lambda x: x * 2))
+        self.assertEqual(4, Just(2).map_or_else(lambda: 0, lambda x: x * 2))
+
+    def test_xor(self):
+        one: Maybe[int] = Just(1)
+        empty: Maybe[int] = Nothing()
+        self.assertEqual(Just(1), one.xor(empty))
+        self.assertEqual(Just(1), empty.xor(one))
+        self.assertEqual(Nothing(), one.xor(Just(2)))
+
+    def test_aliases(self):
+        empty: Maybe[int] = Nothing()
+        self.assertEqual(Just(2), Just(1).and_then(lambda x: Just(x + 1)))
+        self.assertEqual(Just(1), empty.or_else(lambda: Just(1)))
+
+    def test_transpose(self):
+        self.assertEqual(Right(Just(1)), Just(Right(1)).transpose())
+        self.assertEqual(Right(Nothing()), Nothing().transpose())
+        error: Maybe[Either[str, int]] = Just(Left("e"))
+        self.assertEqual(Left("e"), error.transpose())
+
+    def test_curried_functions_with_flow(self):
+        def increment(x: int) -> int:
+            return x + 1
+
+        def positive(x: int) -> bool:
+            return x > 0
+
+        start: Maybe[int] = Just(2)
+        self.assertEqual(
+            3,
+            flow(
+                start, maybe.map(increment), maybe.filter(positive), maybe.unwrap_or(0)
+            ),
+        )
+        self.assertEqual(0, maybe.unwrap_or_else(lambda: 0)(Nothing()))

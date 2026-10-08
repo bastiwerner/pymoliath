@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from pymoliath.aio import AsyncEither
+from pymoliath.aio.async_either import map2
 from pymoliath.either import Either, Left, Right
 
 
@@ -196,12 +197,27 @@ class TestAsyncEither(unittest.IsolatedAsyncioTestCase):
         result = await AsyncEither.from_right(10).apply(AsyncEither.from_right(f))
         self.assertEqual(Right(20), result)
 
-    async def test_apply2(self):
+    async def test_map2(self):
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        self.assertEqual(
+            Right(3),
+            await map2(AsyncEither.from_right(1), AsyncEither.from_right(2), add),
+        )
+        first: AsyncEither[str, int] = AsyncEither.from_left("first")
+        second: AsyncEither[str, int] = AsyncEither.from_left("second")
+        self.assertEqual(Left("first"), await map2(first, second, add))
+        one: AsyncEither[str, int] = AsyncEither.from_right(1)
+        self.assertEqual(Left("second"), await map2(one, second, add))
+
+    async def test_apply_function_side_wins(self):
         def f(x: int) -> int:
             return x * 2
 
-        result = await AsyncEither.from_right(f).apply2(AsyncEither.from_right(10))
-        self.assertEqual(Right(20), result)
+        self.assertEqual(
+            Right(20), await AsyncEither.from_right(10).apply(AsyncEither.from_right(f))
+        )
 
     async def test_and(self):
         result = await AsyncEither.from_right(10).and_(AsyncEither.from_right("a"))

@@ -939,7 +939,7 @@ class Sequence(Generic[TypeSource]):
         Examples
         --------
         >>> Sequence(["aaa", "a", "aa"]).min_by_key(len)
-        Some(a)
+        Some('a')
         >>> Sequence([]).min_by_key(len)
         Nil()
         """
@@ -966,7 +966,7 @@ class Sequence(Generic[TypeSource]):
         Examples
         --------
         >>> Sequence(["aaa", "a", "aa"]).max_by_key(len)
-        Some(aaa)
+        Some('aaa')
         >>> Sequence([]).max_by_key(len)
         Nil()
         """

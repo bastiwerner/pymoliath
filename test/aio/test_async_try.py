@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock
 
 from pymoliath.aio import AsyncTry
+from pymoliath.aio.async_try import map2
 from pymoliath.exception import Failure, Success
 
 
@@ -226,12 +227,29 @@ class TestAsyncTry(unittest.IsolatedAsyncioTestCase):
         result = await AsyncTry.from_success(10).apply(AsyncTry.from_success(f))
         self.assertEqual(Success(20), result)
 
-    async def test_apply2(self):
+    async def test_map2(self):
+        def add(a: int, b: int) -> int:
+            return a + b
+
+        self.assertEqual(
+            Success(3),
+            await map2(AsyncTry.from_success(1), AsyncTry.from_success(2), add),
+        )
+        first: AsyncTry[int] = AsyncTry.from_failure(ValueError("first"))
+        second: AsyncTry[int] = AsyncTry.from_failure(ValueError("second"))
+        self.assertEqual(Failure(ValueError("first")), await map2(first, second, add))
+        self.assertEqual(
+            Failure(ValueError("second")),
+            await map2(AsyncTry.from_success(1), second, add),
+        )
+
+    async def test_apply_function_side_wins(self):
         def f(x: int) -> int:
             return x * 2
 
-        result = await AsyncTry.from_success(f).apply2(AsyncTry.from_success(10))
-        self.assertEqual(Success(20), result)
+        self.assertEqual(
+            Success(20), await AsyncTry.from_success(10).apply(AsyncTry.from_success(f))
+        )
 
     async def test_and(self):
         result = await AsyncTry.from_success(10).and_(AsyncTry.from_success("a"))

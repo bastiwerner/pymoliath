@@ -34,7 +34,6 @@ from typing import Any, Generic, TypeVar, assert_never
 
 from pymoliath.aio.utils import resolve as _resolve
 from pymoliath.maybe import Just, Maybe, Nothing
-from pymoliath.util import curry
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -42,6 +41,10 @@ U = TypeVar("U")
 # Function-scoped TypeVar for the static constructors: the class-scoped T would be Unknown when
 # called on the unspecialized class (`AsyncMaybe.from_value(1)`).
 V = TypeVar("V")
+# Function-scoped TypeVars for `map2`.
+A = TypeVar("A")
+B = TypeVar("B")
+C = TypeVar("C")
 
 
 class AsyncMaybe(Generic[T]):
@@ -255,20 +258,21 @@ class AsyncMaybe(Generic[T]):
 
         return AsyncMaybe(run)
 
-    def apply(self, applicative: AsyncMaybe[Callable[..., U]]) -> AsyncMaybe[U]:
-        """AsyncMaybe applicative interface for AsyncMaybes containing a value (<*>).
+    def apply(self, function: AsyncMaybe[Callable[[T], U]]) -> AsyncMaybe[U]:
+        """Applies the function wrapped in `function` to this AsyncMaybe's value (<*>).
+
+        If both fail, Nothing takes precedence, as in `Maybe.apply`. For functions of
+        several arguments, use the module-level `map2`.
 
         Parameters
         ----------
-        applicative: AsyncMaybe[Callable[..., U]]
-            Applicative AsyncMaybe which contains a function and will be applied to the AsyncMaybe
-            containing a value.
+        function: AsyncMaybe[Callable[[T], U]]
+            AsyncMaybe which contains a function of one argument.
 
         Returns
         -------
         async_maybe: AsyncMaybe[U]
-            Applies an AsyncMaybe containing a value of type T to an AsyncMaybe containing
-            a function.
+            Returns the function applied to this AsyncMaybe's value.
 
         Examples
         --------
@@ -278,48 +282,7 @@ class AsyncMaybe(Generic[T]):
         >>> asyncio.run(val.apply(func))
         Just(20)
         """
-
-        def binder(
-            applicative_function: Callable[..., U],
-        ) -> AsyncMaybe[U]:
-            """Maps the applicative's function, curried, over this AsyncMaybe's value."""
-            return self.map(curry(applicative_function))
-
-        return applicative.bind(binder)
-
-    def apply2(
-        self: AsyncMaybe[Callable[..., U]],
-        applicative_value: AsyncMaybe[Any],
-    ) -> AsyncMaybe[U]:
-        """AsyncMaybe applicative interface for AsyncMaybes containing a function (<*>).
-
-        Parameters
-        ----------
-        applicative_value: AsyncMaybe[Any]
-            AsyncMaybe value which will be applied to the AsyncMaybe containing a function.
-
-        Returns
-        -------
-        async_maybe: AsyncMaybe[U]
-            Applies an AsyncMaybe containing a function to an AsyncMaybe of any type (value or
-            function).
-
-        Examples
-        --------
-        >>> import asyncio
-        >>> func = AsyncMaybe.from_value(lambda x: x * 2)
-        >>> val = AsyncMaybe.from_value(10)
-        >>> asyncio.run(func.apply2(val))
-        Just(20)
-        """
-
-        def binder(
-            applicative_function: Callable[..., U],
-        ) -> AsyncMaybe[U]:
-            """Maps the curried applicative function, held by this AsyncMaybe, over `applicative_value`."""
-            return applicative_value.map(curry(applicative_function))
-
-        return self.bind(binder)
+        return function.bind(lambda inner: self.map(inner))
 
     def filter(
         self, filter_function: Callable[[T], bool | Awaitable[bool]]
@@ -525,3 +488,21 @@ class AsyncMaybe(Generic[T]):
         'AsyncMaybe(<function...>)'
         """
         return str(self)
+
+
+def map2(
+    first: AsyncMaybe[A], second: AsyncMaybe[B], function: Callable[[A, B], C]
+) -> AsyncMaybe[C]:
+    """Combines the values of two AsyncMaybes with a two-argument function once both are awaited.
+
+    The first Nothing wins: if `first` fails, `second` is not awaited.
+
+    Examples
+    --------
+    >>> import asyncio
+    >>> asyncio.run(map2(AsyncMaybe.from_value(1), AsyncMaybe.from_value(2), lambda a, b: a + b))
+    Just(3)
+    >>> asyncio.run(map2(AsyncMaybe.from_value(1), AsyncMaybe.from_maybe(Nothing()), lambda a, b: a + b))
+    Nothing()
+    """
+    return first.bind(lambda a: second.map(lambda b: function(a, b)))
